@@ -75,7 +75,7 @@ data class UsuarioItem(
     val rol: String
 )
 
-// FUNCIÓN PRINCIPAL DE LA PANTALLA - CORREGIDA
+// FUNCIÓN PRINCIPAL DE LA PANTALLA - CORREGIDA PARA ABONOS PARCIALES
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistorialPagosScreen(navController: NavController, rol: String) {
@@ -160,13 +160,6 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
 
             val cumple = cumpleFiltroCliente && cumpleFiltroCobrador && cumpleFiltroFecha
 
-            // Debug logging
-            if (filtroCobradorId.isNotBlank() || fechaInicio != null || filtroCliente.isNotBlank()) {
-                Log.d("Filtros", "Pago: ${pago.cliente} - ${pago.cobrador} - ${pago.fecha}")
-                Log.d("Filtros", "Cliente: $cumpleFiltroCliente, Cobrador: $cumpleFiltroCobrador, Fecha: $cumpleFiltroFecha")
-                Log.d("Filtros", "Cumple todos: $cumple")
-            }
-
             cumple
         }
 
@@ -209,7 +202,7 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
         }
     }
 
-    // Función para cargar pagos
+    // Función para cargar pagos - ACTUALIZADA PARA ABONOS PARCIALES
     fun cargarPagos() {
         scope.launch {
             try {
@@ -231,11 +224,17 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                     val prestamos = prestamosDeferred.await()
                     val snapshot = pagosDeferred.await()
 
+                    Log.d("HistorialPagos", "Documentos encontrados en colección pagos: ${snapshot.documents.size}")
+
                     pagos = snapshot.documents.mapNotNull { doc ->
                         try {
-                            procesarDocumentoPago(doc, usuariosMap, prestamos, rol, formatter)
+                            val pago = procesarDocumentoPagoMejorado(doc, usuariosMap, prestamos, rol, formatter)
+                            if (pago != null) {
+                                Log.d("HistorialPagos", "Pago procesado: ${pago.cliente} - ${pago.tipoPago} - L. ${pago.monto}")
+                            }
+                            pago
                         } catch (e: Exception) {
-                            Log.e("HistorialPagos", "Error procesando documento: ${e.message}")
+                            Log.e("HistorialPagos", "Error procesando documento ${doc.id}: ${e.message}")
                             null
                         }
                     }.sortedByDescending {
@@ -245,6 +244,8 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                             0L
                         }
                     }
+
+                    Log.d("HistorialPagos", "Total pagos procesados: ${pagos.size}")
 
                     prefs.edit().putString("historial_pagos", gson.toJson(pagos)).apply()
                 } else {
@@ -286,6 +287,13 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                         Icon(
                             Icons.Default.FilterList,
                             contentDescription = "Filtros",
+                            tint = Color.White
+                        )
+                    }
+                    IconButton(onClick = { cargarPagos() }) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = "Actualizar",
                             tint = Color.White
                         )
                     }
@@ -538,6 +546,132 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                 onDismiss = { pagoAEliminar = null }
             )
         }
+    }
+}
+
+// ===== FUNCIÓN MEJORADA PARA PROCESAR DOCUMENTOS DE PAGO - INCLUYE ABONOS PARCIALES =====
+private fun procesarDocumentoPagoMejorado(
+    doc: com.google.firebase.firestore.DocumentSnapshot,
+    usuarios: Map<String, String>,
+    prestamos: Map<String, Map<String, Any>>,
+    rol: String,
+    formatter: SimpleDateFormat
+): PagoItem? {
+    try {
+        // Obtener datos básicos con múltiples campos posibles
+        val clienteNombre = doc.getString("clienteNombre")
+            ?: doc.getString("cliente")
+            ?: return null
+
+        val monto = doc.getDouble("monto")
+            ?: doc.getDouble("montoPagado")
+            ?: return null
+
+        val mora = doc.getDouble("mora") ?: 0.0
+        val interesTotal = doc.getDouble("interesTotal") ?: doc.getDouble("interes") ?: 0.0
+        val prestamoId = doc.getString("prestamoId") ?: return null
+        val cobradorId = doc.getString("registradoPor")
+            ?: doc.getString("cobrador")
+            ?: "Desconocido"
+
+        // ===== NUEVA LÓGICA PARA DETECTAR TIPO DE PAGO =====
+        val metodoPago = doc.getString("metodoPago") ?: doc.getString("tipoPago") ?: "Efectivo"
+        val esAbonoParcial = doc.getBoolean("esAbonoParcial") ?: false
+
+        // Para abonos parciales, modificar el método de pago para identificarlos
+        val tipoPagoFinal = when {
+            esAbonoParcial -> "Abono Parcial"
+            metodoPago == "Manual (Admin)" -> "Manual (Admin)"
+            else -> metodoPago
+        }
+
+        val cuota = when {
+            doc.contains("numeroCuota") -> doc.get("numeroCuota").toString()
+            doc.contains("cuota") -> doc.get("cuota").toString()
+            doc.contains("cuotaActual") -> doc.get("cuotaActual").toString()
+            else -> "1"
+        }
+
+        val lugar = doc.getString("lugar") ?: ""
+        val firma = doc.getString("firma") ?: ""
+
+        // ===== NUEVA LÓGICA PARA SALDO RESTANTE EN ABONOS PARCIALES =====
+        val saldoRestante = if (esAbonoParcial) {
+            // Para abonos parciales, obtener info específica
+            val montoRestanteAntes = doc.getDouble("montoRestanteAntes") ?: 0.0
+            val montoOriginalCuota = doc.getDouble("montoOriginalCuota") ?: 0.0
+
+            // Calcular el nuevo saldo restante después del abono
+            (montoRestanteAntes - monto).coerceAtLeast(0.0)
+        } else {
+            doc.getDouble("saldoRestante") ?: 0.0
+        }
+
+        // Manejo de fechas mejorado
+        val fecha = try {
+            when (val fechaRaw = doc.get("fechaPago") ?: doc.get("fecha") ?: doc.get("fechaCreacion")) {
+                is Timestamp -> formatter.format(fechaRaw.toDate())
+                is String -> {
+                    if (fechaRaw.matches(Regex("\\d{2}/\\d{2}/\\d{4}"))) {
+                        fechaRaw
+                    } else {
+                        try {
+                            val inputFormatter = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                            val date = inputFormatter.parse(fechaRaw)
+                            if (date != null) formatter.format(date) else fechaRaw
+                        } catch (e: Exception) {
+                            fechaRaw
+                        }
+                    }
+                }
+                else -> formatter.format(Date())
+            }
+        } catch (e: Exception) {
+            Log.w("ProcesarPago", "Error parseando fecha para documento ${doc.id}: ${e.message}")
+            formatter.format(Date())
+        }
+
+        val nombreCobrador = usuarios[cobradorId] ?: cobradorId
+
+        // Filtrar por rol (mantener lógica existente)
+        if (rol != "admin" && cobradorId != rol) return null
+
+        val datosPrestamoInt = prestamos[prestamoId]
+        val numeroPrestamo = (datosPrestamoInt?.get("numeroPrestamo") as? Long ?: 0L).toInt()
+
+        // ===== LOG PARA DEBUG DE ABONOS PARCIALES =====
+        if (esAbonoParcial) {
+            Log.d("HistorialPagos", """
+                ABONO PARCIAL DETECTADO:
+                - Cliente: $clienteNombre
+                - Cuota: $cuota
+                - Monto abono: L. ${String.format("%.2f", monto)}
+                - Saldo restante cuota: L. ${String.format("%.2f", saldoRestante)}
+                - Fecha: $fecha
+                - Cobrador: $nombreCobrador
+            """.trimIndent())
+        }
+
+        return PagoItem(
+            docId = doc.id,
+            cliente = clienteNombre,
+            prestamoId = prestamoId,
+            fecha = fecha,
+            monto = monto,
+            mora = mora,
+            interesTotal = interesTotal,
+            cuota = cuota,
+            cobrador = nombreCobrador,
+            lugar = lugar,
+            firma = firma,
+            tipoPago = tipoPagoFinal, // USAR EL TIPO MEJORADO
+            saldoRestante = saldoRestante,
+            numeroPrestamo = numeroPrestamo
+        )
+
+    } catch (e: Exception) {
+        Log.e("ProcesarPago", "Error procesando documento ${doc.id}: ${e.message}", e)
+        return null
     }
 }
 
@@ -995,6 +1129,7 @@ private suspend fun reimprimirRecibo(context: Context, pago: PagoItem) {
     }
 }
 
+// ===== TARJETA DE PAGO MEJORADA PARA MOSTRAR ABONOS PARCIALES =====
 @Composable
 fun PagoCard(
     pago: PagoItem,
@@ -1002,9 +1137,18 @@ fun PagoCard(
     onEliminar: () -> Unit,
     onReimprimir: () -> Unit
 ) {
+    val esAbonoParcial = pago.tipoPago == "Abono Parcial"
+    val esManual = pago.tipoPago == "Manual (Admin)"
+
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(
+            containerColor = when {
+                esAbonoParcial -> Color(0xFFFFF3E0) // Naranja claro para abonos parciales
+                esManual -> Color(0xFFE8EAF6) // Azul claro para manuales
+                else -> Color.White
+            }
+        ),
         elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
         shape = RoundedCornerShape(16.dp)
     ) {
@@ -1025,12 +1169,50 @@ fun PagoCard(
                         fontSize = 18.sp,
                         color = Color(0xFF1A1A1A)
                     )
-                    Text(
-                        "Cuota: ${pago.cuota}",
-                        fontSize = 14.sp,
-                        color = Color.Gray
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            "Cuota: ${pago.cuota}",
+                            fontSize = 14.sp,
+                            color = Color.Gray
+                        )
+
+                        // Indicador visual para abonos parciales
+                        if (esAbonoParcial) {
+                            Surface(
+                                color = Color(0xFFFF9800),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text(
+                                    "ABONO",
+                                    fontSize = 10.sp,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        // Indicador para pagos manuales
+                        if (esManual) {
+                            Surface(
+                                color = Color(0xFF673AB7),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text(
+                                    "MANUAL",
+                                    fontSize = 10.sp,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
                 }
+
                 if (pago.numeroPrestamo > 0) {
                     Surface(
                         color = Color(0xFF0061A7),
@@ -1056,7 +1238,7 @@ fun PagoCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Total pagado",
+                        if (esAbonoParcial) "Abono realizado" else "Total pagado",
                         fontSize = 12.sp,
                         color = Color.Gray
                     )
@@ -1064,7 +1246,11 @@ fun PagoCard(
                         "L. ${String.format("%.2f", pago.monto)}",
                         fontWeight = FontWeight.Bold,
                         fontSize = 20.sp,
-                        color = Color(0xFF2E7D32)
+                        color = when {
+                            esAbonoParcial -> Color(0xFFFF9800)
+                            esManual -> Color(0xFF673AB7)
+                            else -> Color(0xFF2E7D32)
+                        }
                     )
 
                     if (pago.mora > 0) {
@@ -1074,11 +1260,26 @@ fun PagoCard(
                             color = Color.Gray
                         )
                     }
+
+                    // Info específica para abonos parciales
+                    if (esAbonoParcial && pago.saldoRestante > 0) {
+                        Text(
+                            "Resta de cuota: L. ${String.format("%.2f", pago.saldoRestante)}",
+                            fontSize = 12.sp,
+                            color = Color(0xFFFF9800),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
 
                 Column(horizontalAlignment = Alignment.End) {
                     Surface(
-                        color = if (pago.tipoPago == "Efectivo") Color(0xFF4CAF50) else Color(0xFF2196F3),
+                        color = when (pago.tipoPago) {
+                            "Efectivo" -> Color(0xFF4CAF50)
+                            "Abono Parcial" -> Color(0xFFFF9800)
+                            "Manual (Admin)" -> Color(0xFF673AB7)
+                            else -> Color(0xFF2196F3)
+                        },
                         shape = RoundedCornerShape(20.dp)
                     ) {
                         Text(
@@ -1197,6 +1398,7 @@ private fun StatsCard(pagos: List<PagoItem>) {
     val totalPagos = pagos.size
     val totalMonto = pagos.sumOf { it.monto }
     val totalMora = pagos.sumOf { it.mora }
+    val abonosParciales = pagos.count { it.tipoPago == "Abono Parcial" }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1230,15 +1432,22 @@ private fun StatsCard(pagos: List<PagoItem>) {
                 )
             }
 
-            if (totalMora > 0) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                if (totalMora > 0) {
                     StatItem(
                         title = "Total mora",
                         value = "L. ${String.format("%.2f", totalMora)}",
                         icon = "🚨"
+                    )
+                }
+                if (abonosParciales > 0) {
+                    StatItem(
+                        title = "Abonos parciales",
+                        value = abonosParciales.toString(),
+                        icon = "🧩"
                     )
                 }
             }
@@ -1385,6 +1594,14 @@ private fun ConfirmDeleteDialog(
                             Text("Cliente: ${pago.cliente}", fontSize = 14.sp, fontWeight = FontWeight.Medium)
                             Text("Monto: L. ${String.format("%.2f", pago.monto)}", fontSize = 14.sp)
                             Text("Fecha: ${pago.fecha}", fontSize = 14.sp)
+                            if (pago.tipoPago == "Abono Parcial") {
+                                Text(
+                                    "Tipo: Abono Parcial",
+                                    fontSize = 14.sp,
+                                    color = Color(0xFFFF9800),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
 
@@ -1430,7 +1647,6 @@ private fun ConfirmDeleteDialog(
         shape = RoundedCornerShape(16.dp)
     )
 }
-
 // FUNCIÓN AUXILIAR PARA PROCESAR DOCUMENTOS
 private fun procesarDocumentoPago(
     doc: com.google.firebase.firestore.DocumentSnapshot,

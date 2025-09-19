@@ -77,6 +77,93 @@ data class PrestamoAdmin(
     val eliminadoPor: String = ""
 )
 
+// ✅ FUNCIONES CORREGIDAS PARA VERIFICAR ESTADO REAL
+
+// Función para calcular fechas de cuotas (igual que en NotificacionesScreen)
+private fun calcularFechaCuotaAdmin(fechaInicio: Date, plazo: String, numeroCuota: Int): String {
+    val calendar = Calendar.getInstance().apply { time = fechaInicio }
+    val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+
+    when (plazo.lowercase()) {
+        "diario" -> {
+            calendar.add(Calendar.DAY_OF_YEAR, numeroCuota)
+        }
+        "lunes a sábado" -> {
+            repeat(numeroCuota) {
+                do {
+                    calendar.add(Calendar.DAY_OF_YEAR, 1)
+                } while (calendar.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY)
+            }
+        }
+        "semanal" -> {
+            calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 7)
+        }
+        "quincenal" -> {
+            calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 15)
+        }
+        "mensual" -> {
+            calendar.add(Calendar.MONTH, numeroCuota)
+        }
+        "bimestral" -> {
+            calendar.add(Calendar.MONTH, numeroCuota * 2)
+        }
+        else -> {
+            calendar.add(Calendar.MONTH, numeroCuota)
+        }
+    }
+
+    return dateFormat.format(calendar.time)
+}
+
+// Función para verificar si un préstamo está realmente saldado
+private suspend fun verificarEstadoRealPrestamoAdmin(
+    db: FirebaseFirestore,
+    prestamoId: String,
+    cuotasTotales: Int
+): String {
+    return try {
+        if (cuotasTotales == 0) {
+            return "activo" // Si no tiene cuotas válidas, asumir activo
+        }
+
+        val pagosSnapshot = db.collection("pagos")
+            .whereEqualTo("prestamoId", prestamoId)
+            .get().await()
+
+        val cuotasPagadasSet = mutableSetOf<Int>()
+        for (pago in pagosSnapshot.documents) {
+            val numeroCuota = when {
+                pago.contains("numeroCuota") -> pago.getLong("numeroCuota")?.toInt() ?: 1
+                pago.contains("cuota") -> pago.getLong("cuota")?.toInt() ?: 1
+                else -> 1
+            }
+            val cuotasCubiertas = pago.getLong("cuotasCubiertas")?.toInt() ?: 1
+
+            for (i in 0 until cuotasCubiertas) {
+                cuotasPagadasSet.add(numeroCuota + i)
+            }
+        }
+
+        val cuotasPagadas = cuotasPagadasSet.size
+        val realmenteSaldado = cuotasPagadas >= cuotasTotales
+
+        Log.d("PrestamoAdminScreen", """
+            === VERIFICACIÓN ESTADO REAL ===
+            - Préstamo: $prestamoId
+            - Cuotas totales: $cuotasTotales
+            - Cuotas pagadas: $cuotasPagadas
+            - Cuotas pagadas set: ${cuotasPagadasSet.sorted()}
+            - Estado real: ${if (realmenteSaldado) "saldado" else "activo"}
+        """.trimIndent())
+
+        if (realmenteSaldado) "saldado" else "activo"
+
+    } catch (e: Exception) {
+        Log.e("PrestamoAdminScreen", "Error verificando estado real: ${e.message}")
+        "activo"
+    }
+}
+
 // Función para obtener nombres de cobradores
 suspend fun obtenerNombresCobradores(cobradores: List<String>): String {
     if (cobradores.isEmpty()) return "Sin asignar"
@@ -286,7 +373,7 @@ fun TarjetaPrestamo(
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text(
-                        "🗑️ ELIMINADO",
+                        "ELIMINADO",
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp,
@@ -336,9 +423,9 @@ fun TarjetaPrestamo(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                InfoCompacta("💰", "Cuota", "L. ${"%.0f".format(prestamo.cuota)}")
-                InfoCompacta("🔢", "Cuotas", "${prestamo.cuotas}")
-                InfoCompacta("📅", "Plazo", prestamo.plazo.take(10))
+                InfoCompacta("Cuota", "L. ${"%.0f".format(prestamo.cuota)}")
+                InfoCompacta("Cuotas", "${prestamo.cuotas}")
+                InfoCompacta("Plazo", prestamo.plazo.take(10))
             }
 
             if (prestamo.montoPagado > 0) {
@@ -347,9 +434,9 @@ fun TarjetaPrestamo(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    InfoCompacta("💸", "Pagado", "L. ${"%.0f".format(prestamo.montoPagado)}")
+                    InfoCompacta("Pagado", "L. ${"%.0f".format(prestamo.montoPagado)}")
                     if (prestamo.saldo > 0 && prestamo.estado.lowercase() != "saldado") {
-                        InfoCompacta("💳", "Saldo", "L. ${"%.0f".format(prestamo.saldo)}")
+                        InfoCompacta("Saldo", "L. ${"%.0f".format(prestamo.saldo)}")
                     }
                 }
             }
@@ -421,10 +508,10 @@ fun TarjetaPrestamo(
 }
 
 @Composable
-fun InfoCompacta(icono: String, label: String, valor: String) {
+fun InfoCompacta(label: String, valor: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
-            "$icono $valor",
+            valor,
             fontWeight = FontWeight.SemiBold,
             fontSize = 12.sp,
             color = Color(0xFF1A1A1A)
@@ -481,11 +568,11 @@ fun EstadisticasRapidas(prestamos: List<PrestamoAdmin>) {
                     .padding(12.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                EstadisticaItem("📊", "Total", total.toString(), Color(0xFF0061A7))
-                EstadisticaItem("✅", "Activos", activos.toString(), Color(0xFF4CAF50))
-                EstadisticaItem("💰", "Saldados", saldados.toString(), Color(0xFF9E9E9E))
+                EstadisticaItem("Total", total.toString(), Color(0xFF0061A7))
+                EstadisticaItem("Activos", activos.toString(), Color(0xFF4CAF50))
+                EstadisticaItem("Saldados", saldados.toString(), Color(0xFF9E9E9E))
                 if (atrasados > 0) {
-                    EstadisticaItem("⚠️", "Atrasados", atrasados.toString(), Color(0xFFFF5722))
+                    EstadisticaItem("Atrasados", atrasados.toString(), Color(0xFFFF5722))
                 }
             }
         }
@@ -493,10 +580,10 @@ fun EstadisticasRapidas(prestamos: List<PrestamoAdmin>) {
 }
 
 @Composable
-fun EstadisticaItem(icono: String, label: String, valor: String, color: Color) {
+fun EstadisticaItem(label: String, valor: String, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
-            "$icono $valor",
+            valor,
             fontWeight = FontWeight.Bold,
             fontSize = 14.sp,
             color = color
@@ -598,7 +685,7 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
         mostrarEliminados = false
     }
 
-    // Función para configurar listener Firebase (simplificada para el ejemplo)
+    // ✅ FUNCIÓN CORREGIDA PARA CONFIGURAR LISTENER FIREBASE
     fun configurarListenerFirebase() {
         cargando = true
         errorMessage = ""
@@ -632,70 +719,120 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                 }
 
                 if (snapshot != null && !snapshot.isEmpty) {
-                    val lista = snapshot.documents.mapNotNull { doc ->
-                        try {
-                            val cliente = doc.getString("cliente") ?: return@mapNotNull null
+                    scope.launch {
+                        val lista = mutableListOf<PrestamoAdmin>()
 
-                            PrestamoAdmin(
-                                cliente = cliente,
-                                monto = doc.getDouble("monto") ?: 0.0,
-                                interes = doc.getDouble("interes") ?: 0.0,
-                                interesMensual = doc.getDouble("interesMensual") ?: 0.0,
-                                interesTotal = doc.getDouble("interesTotal") ?: 0.0,
-                                totalPagar = doc.getDouble("totalPagar") ?: 0.0,
-                                cuota = doc.getDouble("cuota") ?: 0.0,
-                                cuotas = doc.getLong("cuotas")?.toInt() ?: 0,
-                                plazo = doc.getString("plazo") ?: "",
-                                lugar = doc.getString("lugar") ?: "",
-                                firma = doc.getString("firma") ?: "",
-                                cobrador = doc.getString("cobrador") ?: "",
-                                montoPagado = doc.getDouble("montoPagado") ?: 0.0,
-                                saldo = doc.getDouble("saldo") ?: 0.0,
-                                saldoAnterior = doc.getDouble("saldoAnterior") ?: 0.0,
-                                estado = doc.getString("estado") ?: "activo",
-                                observaciones = doc.getString("observaciones") ?: "",
-                                diasEfectivos = doc.getLong("diasEfectivos")?.toInt() ?: 0,
-                                numeroPrestamo = doc.getLong("numeroPrestamo")?.toInt() ?: 0,
-                                prestamoId = doc.getString("prestamoId") ?: "",
-                                fechaTimestamp = doc.getTimestampSafe("fecha"),
-                                fechaCreacionTimestamp = doc.getTimestampSafe("fechaCreacion"),
-                                proximoPagoTimestamp = doc.getTimestampSafe("proximoPago"),
-                                fecha = doc.getDateStringSafe("fecha", formatter),
-                                fechaCreacion = doc.getDateStringSafe("fechaCreacion", fullFormatter),
-                                proximoPago = doc.getDateStringSafe("proximoPago", formatter),
-                                fotos = when (val fotosData = doc.get("fotos")) {
-                                    is List<*> -> fotosData.filterIsInstance<String>()
-                                    else -> emptyList()
-                                },
-                                cobradores = when (val data = doc.get("cobradoresAsignados")) {
-                                    is List<*> -> data.filterIsInstance<String>().filter { it.isNotBlank() }
-                                    else -> {
-                                        val unico = doc.getString("cobradorAsignado")
-                                        if (!unico.isNullOrBlank()) listOf(unico) else emptyList()
+                        for (doc in snapshot.documents) {
+                            try {
+                                val cliente = doc.getString("cliente") ?: continue
+                                val cuotasTotales = doc.getLong("cuotas")?.toInt() ?: 0
+                                val estadoFirestore = doc.getString("estado") ?: "activo"
+                                val prestamoId = doc.id
+
+                                // ✅ VERIFICAR ESTADO REAL BASADO EN CUOTAS PAGADAS
+                                val estadoReal = if (estadoFirestore.equals("saldado", ignoreCase = true)) {
+                                    // Si dice que está saldado, verificar si realmente lo está
+                                    val estadoVerificado = verificarEstadoRealPrestamoAdmin(db, prestamoId, cuotasTotales)
+
+                                    if (estadoVerificado != "saldado" && estadoFirestore.equals("saldado", ignoreCase = true)) {
+                                        Log.w("PrestamoAdminScreen", """
+                                            ⚠️ INCONSISTENCIA DETECTADA EN PRESTAMO ADMIN:
+                                            - Cliente: $cliente
+                                            - Préstamo ID: $prestamoId
+                                            - Estado en Firestore: $estadoFirestore
+                                            - Estado real verificado: $estadoVerificado
+                                            - Cuotas totales: $cuotasTotales
+                                            - MOSTRANDO COMO: $estadoVerificado
+                                        """.trimIndent())
+
+                                        // Actualizar el estado en Firestore
+                                        try {
+                                            db.collection("prestamos").document(prestamoId)
+                                                .update("estado", estadoVerificado)
+                                                .await()
+                                        } catch (updateE: Exception) {
+                                            Log.e("PrestamoAdminScreen", "Error actualizando estado: ${updateE.message}")
+                                        }
                                     }
-                                },
-                                id = doc.id,
-                                eliminado = doc.getBoolean("eliminado") ?: false,
-                                fechaEliminacion = formatearFechaCompleta(doc.getTimestamp("fechaEliminacion")),
-                                fechaEliminacionTimestamp = doc.getTimestamp("fechaEliminacion"),
-                                eliminadoPor = doc.getString("eliminadoPor") ?: ""
-                            )
-                        } catch (e: Exception) {
-                            Log.e("PrestamoAdmin", "Error al parsear documento ${doc.id}: ${e.message}", e)
-                            null
-                        }
-                    }
 
-                    if (lista.isNotEmpty()) {
-                        prestamosOriginales = lista.sortedByDescending { it.fechaCreacionTimestamp?.toDate() }
-                        errorMessage = ""
-                    } else {
-                        errorMessage = if (esCobrador) {
-                            "No tienes préstamos asignados."
-                        } else {
-                            "No se pudieron procesar préstamos válidos de Firebase."
+                                    estadoVerificado
+                                } else {
+                                    estadoFirestore
+                                }
+
+                                val prestamoAdmin = PrestamoAdmin(
+                                    cliente = cliente,
+                                    monto = doc.getDouble("monto") ?: 0.0,
+                                    interes = doc.getDouble("interes") ?: 0.0,
+                                    interesMensual = doc.getDouble("interesMensual") ?: 0.0,
+                                    interesTotal = doc.getDouble("interesTotal") ?: 0.0,
+                                    totalPagar = doc.getDouble("totalPagar") ?: 0.0,
+                                    cuota = doc.getDouble("cuota") ?: 0.0,
+                                    cuotas = cuotasTotales,
+                                    plazo = doc.getString("plazo") ?: "",
+                                    lugar = doc.getString("lugar") ?: "",
+                                    firma = doc.getString("firma") ?: "",
+                                    cobrador = doc.getString("cobrador") ?: "",
+                                    montoPagado = doc.getDouble("montoPagado") ?: 0.0,
+                                    saldo = doc.getDouble("saldo") ?: 0.0,
+                                    saldoAnterior = doc.getDouble("saldoAnterior") ?: 0.0,
+                                    estado = estadoReal, // ✅ USAR ESTADO VERIFICADO
+                                    observaciones = doc.getString("observaciones") ?: "",
+                                    diasEfectivos = doc.getLong("diasEfectivos")?.toInt() ?: 0,
+                                    numeroPrestamo = doc.getLong("numeroPrestamo")?.toInt() ?: 0,
+                                    prestamoId = doc.getString("prestamoId") ?: "",
+                                    fechaTimestamp = doc.getTimestampSafe("fecha"),
+                                    fechaCreacionTimestamp = doc.getTimestampSafe("fechaCreacion"),
+                                    proximoPagoTimestamp = doc.getTimestampSafe("proximoPago"),
+                                    fecha = doc.getDateStringSafe("fecha", formatter),
+                                    fechaCreacion = doc.getDateStringSafe("fechaCreacion", fullFormatter),
+                                    proximoPago = doc.getDateStringSafe("proximoPago", formatter),
+                                    fotos = when (val fotosData = doc.get("fotos")) {
+                                        is List<*> -> fotosData.filterIsInstance<String>()
+                                        else -> emptyList()
+                                    },
+                                    cobradores = when (val data = doc.get("cobradoresAsignados")) {
+                                        is List<*> -> data.filterIsInstance<String>().filter { it.isNotBlank() }
+                                        else -> {
+                                            val unico = doc.getString("cobradorAsignado")
+                                            if (!unico.isNullOrBlank()) listOf(unico) else emptyList()
+                                        }
+                                    },
+                                    id = doc.id,
+                                    eliminado = doc.getBoolean("eliminado") ?: false,
+                                    fechaEliminacion = formatearFechaCompleta(doc.getTimestamp("fechaEliminacion")),
+                                    fechaEliminacionTimestamp = doc.getTimestamp("fechaEliminacion"),
+                                    eliminadoPor = doc.getString("eliminadoPor") ?: ""
+                                )
+
+                                lista.add(prestamoAdmin)
+
+                            } catch (e: Exception) {
+                                Log.e("PrestamoAdmin", "Error al parsear documento ${doc.id}: ${e.message}", e)
+                            }
                         }
-                        prestamosOriginales = emptyList()
+
+                        if (lista.isNotEmpty()) {
+                            prestamosOriginales = lista.sortedByDescending { it.fechaCreacionTimestamp?.toDate() }
+                            errorMessage = ""
+
+                            Log.d("PrestamoAdminScreen", """
+                                ✅ CARGA COMPLETADA EN PRESTAMO ADMIN:
+                                - Total préstamos cargados: ${lista.size}
+                                - Activos: ${lista.count { it.estado.lowercase() == "activo" }}
+                                - Saldados: ${lista.count { it.estado.lowercase() == "saldado" }}
+                                - Estados verificados correctamente
+                            """.trimIndent())
+                        } else {
+                            errorMessage = if (esCobrador) {
+                                "No tienes préstamos asignados."
+                            } else {
+                                "No se pudieron procesar préstamos válidos de Firebase."
+                            }
+                            prestamosOriginales = emptyList()
+                        }
+
+                        cargando = false
                     }
                 } else {
                     errorMessage = if (esCobrador) {
@@ -704,9 +841,8 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                         "No se encontraron préstamos en la base de datos."
                     }
                     prestamosOriginales = emptyList()
+                    cargando = false
                 }
-
-                cargando = false
             }
 
         } catch (e: Exception) {
@@ -859,7 +995,7 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                             contentColor = Color(0xFF0061A7)
                         )
                     ) {
-                        Text("🔄 Reintentar conexión")
+                        Text("Reintentar conexión")
                     }
                 }
             }
@@ -924,7 +1060,7 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                                             contentColor = Color(0xFF0061A7)
                                         )
                                     ) {
-                                        Text("🔄 Recargar")
+                                        Text("Recargar")
                                     }
 
                                     if (!mostrarEliminados && esAdmin) {
@@ -992,11 +1128,11 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                     Text("¿Deseas marcar como eliminado el préstamo de:")
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "👤 ${prestamo.cliente}",
+                        "Cliente: ${prestamo.cliente}",
                         fontWeight = FontWeight.Bold
                     )
-                    Text("💰 Monto: L. ${"%.2f".format(prestamo.monto)}")
-                    Text("🧾 Total: L. ${"%.2f".format(prestamo.totalPagar)}")
+                    Text("Monto: L. ${"%.2f".format(prestamo.monto)}")
+                    Text("Total: L. ${"%.2f".format(prestamo.totalPagar)}")
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         "Esta acción se puede revertir desde la vista de eliminados.",
