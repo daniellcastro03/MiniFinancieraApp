@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -35,9 +34,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -78,15 +81,13 @@ object NotificationColors {
     val OrangeGradient = Brush.horizontalGradient(colors = listOf(Color(0xFFFF7043), Color(0xFFEF6C00)))
 }
 
-// Función para calcular fechas de cuotas
+// Función para calcular fechas de cuotas (optimizada)
 private fun calcularFechaCuota(fechaInicio: Date, plazo: String, numeroCuota: Int): String {
     val calendar = Calendar.getInstance().apply { time = fechaInicio }
     val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
 
     when (plazo.lowercase()) {
-        "diario" -> {
-            calendar.add(Calendar.DAY_OF_YEAR, numeroCuota)
-        }
+        "diario" -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota)
         "lunes a sábado" -> {
             repeat(numeroCuota) {
                 do {
@@ -94,90 +95,173 @@ private fun calcularFechaCuota(fechaInicio: Date, plazo: String, numeroCuota: In
                 } while (calendar.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY)
             }
         }
-        "semanal" -> {
-            calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 7)
-        }
-        "quincenal" -> {
-            calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 15)
-        }
-        "mensual" -> {
-            calendar.add(Calendar.MONTH, numeroCuota)
-        }
-        "bimestral" -> {
-            calendar.add(Calendar.MONTH, numeroCuota * 2)
-        }
-        else -> {
-            calendar.add(Calendar.MONTH, numeroCuota)
-        }
+        "semanal" -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 7)
+        "quincenal" -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 15)
+        "mensual" -> calendar.add(Calendar.MONTH, numeroCuota)
+        "bimestral" -> calendar.add(Calendar.MONTH, numeroCuota * 2)
+        else -> calendar.add(Calendar.MONTH, numeroCuota)
     }
 
     return dateFormat.format(calendar.time)
 }
 
-// Función para obtener próxima cuota sin pagar
-private suspend fun obtenerProximaCuotaSinPagarReal(
-    db: FirebaseFirestore,
-    prestamoId: String
-): Triple<String?, Int, Int> {
-    return try {
-        val doc = db.collection("prestamos").document(prestamoId).get().await()
-        val fechaInicio = doc.getTimestamp("fecha")?.toDate() ?: doc.getDate("fecha") ?: Date()
-        val plazo = doc.getString("plazo")?.lowercase() ?: "semanal"
+// FUNCIÓN OPTIMIZADA PARA PROCESAR PRÉSTAMO INDIVIDUAL
+suspend fun procesarPrestamoIndividual(
+    doc: DocumentSnapshot,
+    pagosDocumentos: List<DocumentSnapshot>,
+    formato: SimpleDateFormat
+): NotificacionCobro? {
+    try {
+        val cliente = doc.getString("cliente")
+        val prestamoId = doc.id
+
+        // Validaciones básicas
+        if (cliente.isNullOrBlank()) {
+            Log.w("NotificacionesScreen", "Préstamo ${prestamoId} sin cliente válido")
+            return null
+        }
+
+        // Verificar si está eliminado
+        val eliminado = doc.getBoolean("eliminado") ?: false
+        if (eliminado) {
+            Log.d("NotificacionesScreen", "Préstamo ${prestamoId} está eliminado, saltando")
+            return null
+        }
+
+        val plazo = doc.getString("plazo") ?: "semanal"
+        val totalPagar = doc.getDouble("totalPagar") ?: 0.0
+        val montoPagado = doc.getDouble("montoPagado") ?: 0.0
+        val saldoActual = doc.getDouble("saldo") ?: (totalPagar - montoPagado)
+        val estadoDoc = doc.getString("estado") ?: "activo"
         val cuotasNum = doc.getLong("cuotas")?.toInt() ?: 1
+        val fechaInicio = doc.getTimestamp("fecha")?.toDate() ?: doc.getDate("fecha") ?: Date()
+
+        // VALIDACIÓN CRÍTICA: Evitar cuotas excesivas que causen OutOfMemoryError
+        if (cuotasNum <= 0 || cuotasNum > 500) {
+            Log.w("NotificacionesScreen", "Préstamo ${prestamoId} tiene cuotas inválidas: $cuotasNum")
+            return null
+        }
 
         Log.d("NotificacionesScreen", """
-            === OBTENIENDO PRÓXIMA CUOTA REAL ===
-            - Préstamo: $prestamoId
-            - Fecha inicio: ${SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(fechaInicio)}
-            - Plazo: $plazo
-            - Total cuotas: $cuotasNum
+            Procesando préstamo:
+            - Cliente: $cliente
+            - ID: $prestamoId
+            - Estado documento: $estadoDoc
+            - Cuotas totales: $cuotasNum
+            - Pagos encontrados: ${pagosDocumentos.size}
         """.trimIndent())
 
-        val pagosSnapshot = db.collection("pagos")
-            .whereEqualTo("prestamoId", prestamoId)
-            .get().await()
-
+        // OPTIMIZACIÓN: Calcular cuotas pagadas de forma más eficiente
         val cuotasPagadasSet = mutableSetOf<Int>()
-        for (pago in pagosSnapshot.documents) {
-            val numeroCuota = when {
-                pago.contains("numeroCuota") -> pago.getLong("numeroCuota")?.toInt() ?: 1
-                pago.contains("cuota") -> pago.getLong("cuota")?.toInt() ?: 1
-                else -> 1
-            }
-            val cuotasCubiertas = pago.getLong("cuotasCubiertas")?.toInt() ?: 1
 
-            for (i in 0 until cuotasCubiertas) {
-                cuotasPagadasSet.add(numeroCuota + i)
+        for (pago in pagosDocumentos) {
+            try {
+                val numeroCuota = when {
+                    pago.contains("numeroCuota") -> pago.getLong("numeroCuota")?.toInt() ?: 1
+                    pago.contains("cuota") -> pago.getLong("cuota")?.toInt() ?: 1
+                    else -> 1
+                }
+                val cuotasCubiertas = pago.getLong("cuotasCubiertas")?.toInt() ?: 1
+
+                // VALIDACIÓN: Evitar números de cuota inválidos
+                if (numeroCuota <= 0 || numeroCuota > cuotasNum) {
+                    Log.w("NotificacionesScreen", "Número de cuota inválido: $numeroCuota para préstamo $prestamoId")
+                    continue
+                }
+
+                if (cuotasCubiertas <= 0 || cuotasCubiertas > 50) {
+                    Log.w("NotificacionesScreen", "Cuotas cubiertas inválidas: $cuotasCubiertas para préstamo $prestamoId")
+                    continue
+                }
+
+                // OPTIMIZACIÓN: Limitar el rango para evitar memoria excesiva
+                val rangoFinal = (numeroCuota + cuotasCubiertas - 1).coerceAtMost(cuotasNum)
+
+                for (i in numeroCuota..rangoFinal) {
+                    if (cuotasPagadasSet.size >= cuotasNum) {
+                        // Si ya tenemos todas las cuotas, parar
+                        break
+                    }
+                    cuotasPagadasSet.add(i)
+                }
+
+            } catch (e: Exception) {
+                Log.w("NotificacionesScreen", "Error procesando pago en préstamo $prestamoId: ${e.message}")
+                continue
             }
         }
 
-        Log.d("NotificacionesScreen", "Cuotas pagadas: ${cuotasPagadasSet.sorted()}")
+        Log.d("NotificacionesScreen", "Cuotas pagadas para $cliente: ${cuotasPagadasSet.size} de $cuotasNum")
 
+        // Encontrar próxima cuota sin pagar de forma optimizada
+        var proximaCuota = cuotasNum + 1
+        var fechaProximaCuota = "saldado"
+
+        // OPTIMIZACIÓN: Buscar la primera cuota no pagada
         for (numeroCuota in 1..cuotasNum) {
             if (!cuotasPagadasSet.contains(numeroCuota)) {
-                val fechaCuota = calcularFechaCuota(fechaInicio, plazo, numeroCuota)
-
-                Log.d("NotificacionesScreen", """
-                    ✅ PRÓXIMA CUOTA SIN PAGAR ENCONTRADA:
-                    - Número: $numeroCuota de $cuotasNum
-                    - Fecha programada: $fechaCuota
-                    - Esta fecha es INAMOVIBLE independientemente de pagos tardíos
-                """.trimIndent())
-
-                return Triple(fechaCuota, numeroCuota, cuotasNum)
+                proximaCuota = numeroCuota
+                fechaProximaCuota = calcularFechaCuota(fechaInicio, plazo, numeroCuota)
+                break
             }
         }
 
-        Log.d("NotificacionesScreen", "✅ PRÉSTAMO COMPLETAMENTE SALDADO")
-        Triple("saldado", cuotasNum, cuotasNum)
+        // Si todas las cuotas están pagadas, marcar como saldado
+        if (proximaCuota > cuotasNum || cuotasPagadasSet.size >= cuotasNum) {
+            Log.d("NotificacionesScreen", "Préstamo $cliente está completamente saldado")
+            return NotificacionCobro(
+                cliente = cliente,
+                monto = 0.0,
+                fecha = "saldado",
+                tipo = "saldado",
+                prestamoId = prestamoId,
+                plazo = plazo,
+                diferenciaDias = 0,
+                estado = "saldado",
+                ultimoPago = obtenerUltimoPago(doc, formato),
+                numeroCuotaActual = cuotasNum,
+                totalCuotas = cuotasNum
+            )
+        }
+
+        val diasHastaProximo = calcularDiasHastaFechaCuota(fechaProximaCuota)
+
+        val (tipo, estadoFinal) = when {
+            estadoDoc.equals("inactivo", ignoreCase = true) -> "inactivo" to "inactivo"
+            diasHastaProximo < -3 -> "vencido" to "mora"
+            diasHastaProximo < 0 -> "vencido" to "activo"
+            diasHastaProximo == 0 -> "hoy" to "activo"
+            diasHastaProximo <= 3 -> "próximo" to "activo"
+            else -> "futuro" to "activo"
+        }
+
+        val montoMostrar = if (saldoActual > 0) saldoActual else (totalPagar - montoPagado).coerceAtLeast(0.0)
+
+        val notificacion = NotificacionCobro(
+            cliente = cliente,
+            monto = montoMostrar,
+            fecha = fechaProximaCuota,
+            tipo = tipo,
+            prestamoId = prestamoId,
+            plazo = plazo,
+            diferenciaDias = diasHastaProximo,
+            estado = estadoFinal,
+            ultimoPago = obtenerUltimoPago(doc, formato),
+            numeroCuotaActual = proximaCuota,
+            totalCuotas = cuotasNum
+        )
+
+        Log.d("NotificacionesScreen", "Notificación creada para $cliente: tipo=$tipo, próxima cuota=$proximaCuota")
+
+        return notificacion
 
     } catch (e: Exception) {
-        Log.e("NotificacionesScreen", "❌ Error obteniendo próxima cuota: ${e.message}")
-        Triple(null, 1, 1)
+        Log.e("NotificacionesScreen", "Error procesando préstamo individual ${doc.id}: ${e.message}", e)
+        return null
     }
 }
 
-// Función para calcular días hasta fecha de cuota
+// Función para calcular días hasta fecha de cuota (simplificada)
 fun calcularDiasHastaFechaCuota(fechaCuota: String): Int {
     if (fechaCuota == "saldado") return 0
 
@@ -198,28 +282,15 @@ fun calcularDiasHastaFechaCuota(fechaCuota: String): Int {
             set(Calendar.MILLISECOND, 0)
         }
 
-        val diferenciaDias = ((fechaCuotaCalendar.timeInMillis - hoy.timeInMillis) / (1000 * 60 * 60 * 24)).toInt()
-
-        Log.d("NotificacionesScreen", """
-            === CÁLCULO DÍAS HASTA CUOTA ===
-            - Fecha cuota: $fechaCuota
-            - Fecha hoy: ${formato.format(hoy.time)}
-            - Diferencia: $diferenciaDias días
-            - ${if (diferenciaDias < 0) "VENCIDA" else if (diferenciaDias == 0) "HOY" else "PENDIENTE"}
-        """.trimIndent())
-
-        diferenciaDias
+        ((fechaCuotaCalendar.timeInMillis - hoy.timeInMillis) / (1000 * 60 * 60 * 24)).toInt()
     } catch (e: Exception) {
         Log.e("NotificacionesScreen", "Error calculando días: ${e.message}")
         0
     }
 }
 
-// Función para obtener último pago
-fun obtenerUltimoPago(
-    doc: com.google.firebase.firestore.DocumentSnapshot,
-    formato: SimpleDateFormat
-): String? {
+// Función para obtener último pago (optimizada)
+fun obtenerUltimoPago(doc: DocumentSnapshot, formato: SimpleDateFormat): String? {
     return try {
         when (val raw = doc.get("ultimoPago")) {
             is String -> if (raw.isNotBlank() && raw != "saldado") raw else null
@@ -240,9 +311,15 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
     val db = FirebaseFirestore.getInstance()
     val scope = rememberCoroutineScope()
     val formato = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+
+    // Estados principales optimizados
     val notificaciones = remember { mutableStateListOf<NotificacionCobro>() }
     val todasLasNotificaciones = remember { mutableStateListOf<NotificacionCobro>() }
+    var isLoading by remember { mutableStateOf(true) }
+    var hasError by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf("") }
 
+    // Estados de filtros
     var filtroTipo by rememberSaveable { mutableStateOf("Todos") }
     var filtroEstado by rememberSaveable { mutableStateOf("Todos") }
     var textoBusqueda by rememberSaveable { mutableStateOf("") }
@@ -250,20 +327,92 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
     val filtrosTipo = listOf("Todos", "vencido", "hoy", "próximo")
     val filtrosEstado = listOf("Todos", "activo", "inactivo", "saldado", "mora")
 
+    // Estados para diálogo de mora
     var mostrarDialogoMora by remember { mutableStateOf(false) }
     var clienteMora by remember { mutableStateOf("") }
     var prestamoIdMora by remember { mutableStateOf("") }
     var moraCalculada by remember { mutableStateOf("") }
     var diasMora by remember { mutableStateOf(0) }
     var montoPrestamo by remember { mutableStateOf(0.0) }
-    var isLoading by remember { mutableStateOf(true) }
 
-    // FUNCIÓN CORREGIDA PARA CARGAR NOTIFICACIONES
-    suspend fun cargarNotificaciones() {
+    // FUNCIÓN OPTIMIZADA PARA PROCESAR LOTES DE PRÉSTAMOS
+    suspend fun procesarLotePrestamos(
+        prestamos: List<DocumentSnapshot>,
+        db: FirebaseFirestore,
+        formato: SimpleDateFormat
+    ): List<NotificacionCobro> {
+        val resultados = mutableListOf<NotificacionCobro>()
+
+        try {
+            // VALIDACIÓN: Limitar el tamaño del lote para evitar problemas de memoria
+            if (prestamos.size > 20) {
+                Log.w("NotificacionesScreen", "Lote muy grande: ${prestamos.size}, procesando solo los primeros 20")
+            }
+
+            val prestamosLimitados = prestamos.take(20)
+            val prestamoIds = prestamosLimitados.map { it.id }
+
+            // Consulta optimizada: todos los pagos de este lote en una sola consulta
+            val pagosPorPrestamo = mutableMapOf<String, List<DocumentSnapshot>>()
+
+            if (prestamoIds.isNotEmpty()) {
+                // Firestore limita whereIn a 10 elementos, procesamos en chunks
+                for (chunk in prestamoIds.chunked(10)) {
+                    try {
+                        val pagosSnapshot = db.collection("pagos")
+                            .whereIn("prestamoId", chunk)
+                            .get().await()
+
+                        Log.d("NotificacionesScreen", "Obtenidos ${pagosSnapshot.documents.size} pagos para chunk de ${chunk.size} préstamos")
+
+                        // Agrupar pagos por préstamo
+                        pagosSnapshot.documents.forEach { pagoDoc ->
+                            val prestamoId = pagoDoc.getString("prestamoId") ?: ""
+                            if (prestamoId.isNotEmpty()) {
+                                pagosPorPrestamo[prestamoId] =
+                                    pagosPorPrestamo.getOrDefault(prestamoId, emptyList()) + pagoDoc
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w("NotificacionesScreen", "Error obteniendo pagos para chunk: ${e.message}")
+                    }
+                }
+            }
+
+            // Procesar cada préstamo con sus pagos correspondientes
+            for (doc in prestamosLimitados) {
+                try {
+                    val notificacion = procesarPrestamoIndividual(
+                        doc,
+                        pagosPorPrestamo[doc.id] ?: emptyList(),
+                        formato
+                    )
+                    if (notificacion != null) {
+                        resultados.add(notificacion)
+                    }
+                } catch (e: Exception) {
+                    Log.w("NotificacionesScreen", "Error procesando préstamo ${doc.id}: ${e.message}")
+                    // Continuar con el siguiente préstamo en lugar de fallar completamente
+                }
+            }
+
+        } catch (e: Exception) {
+            Log.e("NotificacionesScreen", "Error en procesamiento de lote: ${e.message}")
+        }
+
+        return resultados
+    }
+    // FUNCIÓN PRINCIPAL OPTIMIZADA PARA CARGAR NOTIFICACIONES
+    suspend fun cargarNotificacionesOptimizada() {
         try {
             isLoading = true
+            hasError = false
+            errorMessage = ""
             todasLasNotificaciones.clear()
 
+            Log.d("NotificacionesScreen", "=== INICIANDO CARGA OPTIMIZADA ===")
+
+            // 1. Consulta inicial optimizada
             val query = if (rol == "cobrador") {
                 db.collection("prestamos")
                     .whereArrayContains("cobradoresAsignados", uid)
@@ -272,128 +421,58 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
             }
 
             val snapshot = query.get().await()
+            val documentos = snapshot.documents
 
-            val prestamosFiltrados = snapshot.documents.filter { doc ->
+            Log.d("NotificacionesScreen", "Total de préstamos encontrados en query: ${documentos.size}")
+
+            if (documentos.isEmpty()) {
+                Log.d("NotificacionesScreen", "No hay préstamos para procesar")
+                return
+            }
+
+            // 2. FILTRAR DOCUMENTOS NO ELIMINADOS MANUALMENTE
+            val documentosValidos = documentos.filter { doc ->
                 val eliminado = doc.getBoolean("eliminado") ?: false
-                !eliminado
+                val cliente = doc.getString("cliente")
+                val cuotas = doc.getLong("cuotas")?.toInt() ?: 0
+
+                val esValido = !eliminado && !cliente.isNullOrBlank() && cuotas > 0 && cuotas <= 500
+
+                if (!esValido) {
+                    Log.d("NotificacionesScreen", "Documento ${doc.id} excluido - eliminado: $eliminado, cliente válido: ${!cliente.isNullOrBlank()}, cuotas: $cuotas")
+                }
+
+                esValido
             }
 
-            Log.d("NotificacionesScreen", "=== INICIANDO CARGA DE ${prestamosFiltrados.size} PRÉSTAMOS ===")
+            Log.d("NotificacionesScreen", "Documentos válidos después del filtro: ${documentosValidos.size}")
 
-            for (doc in prestamosFiltrados) {
-                val cliente = doc.getString("cliente") ?: continue
-                val prestamoId = doc.id
-                val plazo = doc.getString("plazo") ?: "semanal"
-                val totalPagar = doc.getDouble("totalPagar") ?: continue
-                val montoPagado = doc.getDouble("montoPagado") ?: 0.0
-                val saldoActual = doc.getDouble("saldo") ?: (totalPagar - montoPagado)
-                val estadoDoc = doc.getString("estado") ?: "activo"
-                val ultimoPagoStr = obtenerUltimoPago(doc, formato)
-
-                Log.d("NotificacionesScreen", """
-                    === PROCESANDO PRÉSTAMO ===
-                    - Cliente: $cliente
-                    - Préstamo ID: $prestamoId
-                    - Saldo actual: L. ${String.format("%.2f", saldoActual)}
-                    - Estado: $estadoDoc
-                    - Último pago: $ultimoPagoStr
-                    - Plazo: $plazo
-                """.trimIndent())
-
-                // ✅ CORRECCIÓN PRINCIPAL: VERIFICAR CUOTAS REALES ANTES DE MARCAR COMO SALDADO
-                val (fechaProximaCuota, numeroCuota, totalCuotas) = obtenerProximaCuotaSinPagarReal(db, prestamoId)
-
-                // Solo marcar como saldado si REALMENTE no hay más cuotas pendientes
-                if (fechaProximaCuota == "saldado") {
-                    // Actualizar estado en Firestore si no coincide
-                    if (!estadoDoc.equals("saldado", ignoreCase = true)) {
-                        try {
-                            db.collection("prestamos").document(prestamoId)
-                                .update(mapOf("estado" to "saldado", "proximoPago" to "saldado"))
-                                .await()
-                            Log.d("NotificacionesScreen", "✅ Estado actualizado a saldado para préstamo $prestamoId")
-                        } catch (e: Exception) {
-                            Log.e("NotificacionesScreen", "Error actualizando estado: ${e.message}")
-                        }
-                    }
-
-                    todasLasNotificaciones.add(
-                        NotificacionCobro(
-                            cliente = cliente,
-                            monto = 0.0,
-                            fecha = "saldado",
-                            tipo = "saldado",
-                            prestamoId = prestamoId,
-                            plazo = plazo,
-                            diferenciaDias = 0,
-                            estado = "saldado",
-                            ultimoPago = ultimoPagoStr,
-                            numeroCuotaActual = totalCuotas,
-                            totalCuotas = totalCuotas
-                        )
-                    )
-                    continue
-                }
-
-                if (fechaProximaCuota == null) {
-                    Log.w("NotificacionesScreen", "No se pudo obtener próxima cuota para $prestamoId")
-                    continue
-                }
-
-                // ✅ SI HAY INCONSISTENCIA (saldo 0 pero cuotas pendientes), REPORTAR Y CONTINUAR
-                if (saldoActual <= 0 && fechaProximaCuota != "saldado") {
-                    Log.w("NotificacionesScreen", """
-                        ⚠️ INCONSISTENCIA DETECTADA: Préstamo $prestamoId
-                        - Saldo: L. ${String.format("%.2f", saldoActual)}
-                        - Estado: $estadoDoc
-                        - Pero tiene cuotas pendientes: cuota $numeroCuota de $totalCuotas
-                        - Fecha próxima cuota: $fechaProximaCuota
-                        - PROCESANDO COMO PRÉSTAMO ACTIVO
-                    """.trimIndent())
-                }
-
-                val diasHastaProximo = calcularDiasHastaFechaCuota(fechaProximaCuota)
-
-                val (tipo, estadoFinal) = when {
-                    estadoDoc.equals("inactivo", ignoreCase = true) -> "inactivo" to "inactivo"
-                    diasHastaProximo < -3 -> "vencido" to "mora"
-                    diasHastaProximo < 0 -> "vencido" to "activo"
-                    diasHastaProximo == 0 -> "hoy" to "activo"
-                    diasHastaProximo <= 3 -> "próximo" to "activo"
-                    else -> "futuro" to "activo"
-                }
-
-                // ✅ USAR EL SALDO REAL PERO NO DEPENDER DE ÉL PARA DETERMINAR SI ESTÁ SALDADO
-                val montoMostrar = if (saldoActual > 0) saldoActual else (totalPagar - montoPagado).coerceAtLeast(0.0)
-
-                todasLasNotificaciones.add(
-                    NotificacionCobro(
-                        cliente = cliente,
-                        monto = montoMostrar,
-                        fecha = fechaProximaCuota,
-                        tipo = tipo,
-                        prestamoId = prestamoId,
-                        plazo = plazo,
-                        diferenciaDias = diasHastaProximo,
-                        estado = estadoFinal,
-                        ultimoPago = ultimoPagoStr,
-                        numeroCuotaActual = numeroCuota,
-                        totalCuotas = totalCuotas
-                    )
-                )
-
-                Log.d("NotificacionesScreen", """
-                    ✅ NOTIFICACIÓN AGREGADA:
-                    - Cliente: $cliente
-                    - Cuota $numeroCuota de $totalCuotas
-                    - Fecha programada (INAMOVIBLE): $fechaProximaCuota
-                    - Días hasta cuota: $diasHastaProximo
-                    - Tipo: $tipo | Estado: $estadoFinal
-                    - Monto mostrar: L. ${String.format("%.2f", montoMostrar)}
-                    - IMPORTANTE: Esta fecha NO cambia aunque se pague tarde
-                """.trimIndent())
+            if (documentosValidos.isEmpty()) {
+                Log.d("NotificacionesScreen", "No hay préstamos válidos para procesar")
+                return
             }
 
+            // 3. Procesar en lotes MÁS PEQUEÑOS para evitar problemas de memoria
+            val loteSize = 10 // Reducido para evitar problemas de memoria
+            var contador = 0
+
+            for (lote in documentosValidos.chunked(loteSize)) {
+                // Procesar cada lote en background thread
+                val notificacionesLote = withContext(Dispatchers.Default) {
+                    procesarLotePrestamos(lote, db, formato)
+                }
+
+                // Agregar resultados en UI thread
+                todasLasNotificaciones.addAll(notificacionesLote)
+
+                contador += lote.size
+                Log.d("NotificacionesScreen", "Procesados $contador/${documentosValidos.size} préstamos")
+
+                // Pausa más larga para permitir que la memoria se libere
+                delay(100)
+            }
+
+            // 4. Ordenar resultados por prioridad
             todasLasNotificaciones.sortWith(compareBy<NotificacionCobro> {
                 when (it.tipo) {
                     "vencido" -> 0
@@ -405,39 +484,63 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                 }
             }.thenBy { it.diferenciaDias })
 
-            Log.d("NotificacionesScreen", "✅ CARGA COMPLETADA: ${todasLasNotificaciones.size} notificaciones generadas")
+            Log.d("NotificacionesScreen", """
+            ✅ CARGA COMPLETADA: 
+            - Documentos obtenidos de Firebase: ${documentos.size}
+            - Documentos válidos procesados: ${documentosValidos.size}
+            - Notificaciones generadas: ${todasLasNotificaciones.size}
+        """.trimIndent())
 
         } catch (e: Exception) {
-            Log.e("NotificacionesScreen", "❌ Error cargando notificaciones: ${e.message}", e)
-            Toast.makeText(context, "Error al cargar: ${e.message}", Toast.LENGTH_SHORT).show()
+            Log.e("NotificacionesScreen", "❌ Error en carga optimizada: ${e.message}", e)
+            hasError = true
+            errorMessage = when {
+                e is OutOfMemoryError -> "Error de memoria. La app necesita reiniciarse."
+                e.message?.contains("network", ignoreCase = true) == true ->
+                    "Error de conexión. Verifica tu internet."
+                e.message?.contains("permission", ignoreCase = true) == true ->
+                    "Sin permisos para acceder a los datos."
+                e.message?.contains("timeout", ignoreCase = true) == true ->
+                    "La consulta tardó demasiado. Intenta de nuevo."
+                else -> "Error inesperado: ${e.localizedMessage}"
+            }
         } finally {
             isLoading = false
         }
     }
 
+    // FUNCIÓN OPTIMIZADA PARA APLICAR FILTROS
     fun aplicarFiltros() {
         notificaciones.clear()
 
-        val notificacionesFiltradas = todasLasNotificaciones.filter { notif ->
-            val pasaFiltroTipo = filtroTipo == "Todos" || filtroTipo == notif.tipo
-            val pasaFiltroEstado = filtroEstado == "Todos" || filtroEstado == notif.estado
-            val pasaBusqueda = textoBusqueda.isBlank() ||
-                    notif.cliente.contains(textoBusqueda, ignoreCase = true)
+        // Usar sequence para procesamiento lazy y eficiente
+        val filtradas = todasLasNotificaciones.asSequence()
+            .filter { notif ->
+                val pasaFiltroTipo = filtroTipo == "Todos" || filtroTipo == notif.tipo
+                val pasaFiltroEstado = filtroEstado == "Todos" || filtroEstado == notif.estado
+                val pasaBusqueda = textoBusqueda.isBlank() ||
+                        notif.cliente.contains(textoBusqueda, ignoreCase = true)
 
-            pasaFiltroTipo && pasaFiltroEstado && pasaBusqueda
-        }
+                pasaFiltroTipo && pasaFiltroEstado && pasaBusqueda
+            }
+            .toList()
 
-        notificaciones.addAll(notificacionesFiltradas)
+        notificaciones.addAll(filtradas)
+        Log.d("NotificacionesScreen", "Filtros aplicados: ${notificaciones.size} de ${todasLasNotificaciones.size}")
     }
 
+    // EFECTOS DE COMPOSICIÓN
     LaunchedEffect(filtroTipo, filtroEstado, textoBusqueda, todasLasNotificaciones.size) {
         aplicarFiltros()
     }
 
     LaunchedEffect(Unit) {
-        scope.launch { cargarNotificaciones() }
+        scope.launch {
+            cargarNotificacionesOptimizada()
+        }
     }
 
+    // UI PRINCIPAL
     Scaffold(
         topBar = {
             TopAppBar(
@@ -454,442 +557,549 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                 actions = {
                     IconButton(
                         onClick = {
-                            scope.launch { cargarNotificaciones() }
-                        }
+                            scope.launch { cargarNotificacionesOptimizada() }
+                        },
+                        enabled = !isLoading
                     ) {
-                        Icon(
-                            Icons.Default.Refresh,
-                            contentDescription = "Actualizar",
-                            tint = Color.White
-                        )
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "Actualizar",
+                                tint = Color.White
+                            )
+                        }
                     }
                 }
             )
         }
     ) { padding ->
 
-        if (isLoading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                NotificationColors.LightBlue,
-                                Color.White
+        when {
+            hasError -> {
+                // PANTALLA DE ERROR MEJORADA
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    NotificationColors.LightBlue.copy(alpha = 0.3f),
+                                    Color.White
+                                )
                             )
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+                        ),
+                    contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(48.dp),
-                        color = NotificationColors.PrimaryBlue,
-                        strokeWidth = 4.dp
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        "Cargando notificaciones...",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = NotificationColors.TextSecondary
-                    )
-                }
-            }
-        } else {
-            // NUEVO LAYOUT OPTIMIZADO CON SCROLL
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                NotificationColors.LightBlue.copy(alpha = 0.3f),
-                                Color.White
-                            )
-                        )
-                    ),
-                contentPadding = PaddingValues(
-                    top = padding.calculateTopPadding() + 16.dp,
-                    bottom = 16.dp,
-                    start = 16.dp,
-                    end = 16.dp
-                ),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // 1. RESUMEN DEL DÍA
-                item {
-                    val vencidos = notificaciones.count { it.tipo == "vencido" }
-                    val hoyCount = notificaciones.count { it.tipo == "hoy" }
-                    val proximos = notificaciones.count { it.tipo == "próximo" }
-
-                    AnimatedVisibility(
-                        visible = true,
-                        enter = slideInVertically() + fadeIn()
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
                     ) {
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .shadow(8.dp, RoundedCornerShape(20.dp)),
-                            shape = RoundedCornerShape(20.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = Color.White
+                        Column(
+                            modifier = Modifier.padding(32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                Icons.Default.ErrorOutline,
+                                contentDescription = null,
+                                modifier = Modifier.size(80.dp),
+                                tint = NotificationColors.DangerRed
                             )
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(20.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        Icons.Default.Dashboard,
-                                        contentDescription = null,
-                                        tint = NotificationColors.PrimaryBlue,
-                                        modifier = Modifier.size(28.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(
-                                        "Resumen del día",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 18.sp,
-                                        color = NotificationColors.DarkBlue
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.height(16.dp))
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    StatCard(
-                                        label = "Vencidos",
-                                        count = vencidos,
-                                        color = NotificationColors.DangerRed,
-                                        icon = Icons.Default.Warning
-                                    )
-                                    StatCard(
-                                        label = "Hoy",
-                                        count = hoyCount,
-                                        color = NotificationColors.WarningOrange,
-                                        icon = Icons.Default.Today
-                                    )
-                                    StatCard(
-                                        label = "Próximos",
-                                        count = proximos,
-                                        color = NotificationColors.SuccessGreen,
-                                        icon = Icons.Default.Schedule
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.height(16.dp))
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Card(
-                                        colors = CardDefaults.cardColors(
-                                            containerColor = NotificationColors.LightBlue
-                                        ),
-                                        shape = RoundedCornerShape(16.dp)
-                                    ) {
-                                        Text(
-                                            "📋 Total mostrado: ${notificaciones.size}",
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
-                                            color = NotificationColors.DarkBlue,
-                                            fontSize = 14.sp
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 2. BARRA DE BÚSQUEDA
-                item {
-                    AnimatedVisibility(
-                        visible = true,
-                        enter = slideInVertically(initialOffsetY = { it }) + fadeIn()
-                    ) {
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .shadow(4.dp, RoundedCornerShape(16.dp)),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = Color.White
+                            Spacer(modifier = Modifier.height(20.dp))
+                            Text(
+                                "Error al cargar",
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = NotificationColors.DangerRed,
+                                textAlign = TextAlign.Center
                             )
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(16.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        Icons.Default.Search,
-                                        contentDescription = null,
-                                        tint = NotificationColors.PrimaryBlue,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        "🔍 Buscar cliente",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp,
-                                        color = NotificationColors.DarkBlue
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.height(10.dp))
-
-                                OutlinedTextField(
-                                    value = textoBusqueda,
-                                    onValueChange = { textoBusqueda = it },
-                                    label = {
-                                        Text(
-                                            "Nombre del cliente...",
-                                            color = NotificationColors.TextSecondary
-                                        )
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            Icons.Default.Person,
-                                            contentDescription = null,
-                                            tint = NotificationColors.PrimaryBlue
-                                        )
-                                    },
-                                    trailingIcon = {
-                                        if (textoBusqueda.isNotBlank()) {
-                                            IconButton(onClick = { textoBusqueda = "" }) {
-                                                Icon(
-                                                    Icons.Default.Clear,
-                                                    contentDescription = "Limpiar",
-                                                    tint = NotificationColors.TextSecondary
-                                                )
-                                            }
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = NotificationColors.PrimaryBlue,
-                                        unfocusedBorderColor = NotificationColors.TextSecondary.copy(alpha = 0.5f)
-                                    )
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // 3. FILTROS
-                item {
-                    AnimatedVisibility(
-                        visible = true,
-                        enter = slideInVertically(initialOffsetY = { it }) + fadeIn()
-                    ) {
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .shadow(4.dp, RoundedCornerShape(16.dp)),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = Color.White
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                errorMessage,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = NotificationColors.TextSecondary,
+                                textAlign = TextAlign.Center
                             )
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(16.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        Icons.Default.FilterList,
-                                        contentDescription = null,
-                                        tint = NotificationColors.PrimaryBlue,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        "🎯 Filtros",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp,
-                                        color = NotificationColors.DarkBlue
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.height(12.dp))
-
-                                Text(
-                                    "Urgencia:",
-                                    fontSize = 13.sp,
-                                    color = NotificationColors.TextSecondary,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    items(filtrosTipo) { filtro ->
-                                        FilterChip(
-                                            selected = filtroTipo == filtro,
-                                            onClick = { filtroTipo = filtro },
-                                            label = {
-                                                Text(
-                                                    when(filtro) {
-                                                        "Todos" -> "Todo"
-                                                        "vencido" -> "Vencidos"
-                                                        "hoy" -> "Hoy"
-                                                        "próximo" -> "Próximos"
-                                                        else -> filtro
-                                                    },
-                                                    fontSize = 11.sp,
-                                                    fontWeight = if (filtroTipo == filtro) FontWeight.Bold else FontWeight.Normal
-                                                )
-                                            },
-                                            modifier = Modifier.height(32.dp),
-                                            colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = NotificationColors.SecondaryBlue,
-                                                selectedLabelColor = Color.White,
-                                                containerColor = Color.Transparent,
-                                                labelColor = NotificationColors.SecondaryBlue
-                                            ),
-                                            border = FilterChipDefaults.filterChipBorder(
-                                                enabled = true,
-                                                selected = filtroTipo == filtro,
-                                                borderColor = NotificationColors.SecondaryBlue,
-                                                selectedBorderColor = NotificationColors.SecondaryBlue,
-                                                borderWidth = 1.dp
-                                            )
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(12.dp))
-
-                                Text(
-                                    "Estado:",
-                                    fontSize = 13.sp,
-                                    color = NotificationColors.TextSecondary,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    items(filtrosEstado) { filtro ->
-                                        FilterChip(
-                                            selected = filtroEstado == filtro,
-                                            onClick = { filtroEstado = filtro },
-                                            label = {
-                                                Text(
-                                                    when(filtro) {
-                                                        "Todos" -> "Todo"
-                                                        "activo" -> "Activos"
-                                                        "inactivo" -> "Inactivos"
-                                                        "saldado" -> "Saldados"
-                                                        "mora" -> "En Mora"
-                                                        else -> filtro
-                                                    },
-                                                    fontSize = 11.sp,
-                                                    fontWeight = if (filtroEstado == filtro) FontWeight.Bold else FontWeight.Normal
-                                                )
-                                            },
-                                            modifier = Modifier.height(32.dp),
-                                            colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = NotificationColors.AccentBlue,
-                                                selectedLabelColor = Color.White,
-                                                containerColor = Color.Transparent,
-                                                labelColor = NotificationColors.AccentBlue
-                                            ),
-                                            border = FilterChipDefaults.filterChipBorder(
-                                                enabled = true,
-                                                selected = filtroEstado == filtro,
-                                                borderColor = NotificationColors.AccentBlue,
-                                                selectedBorderColor = NotificationColors.AccentBlue,
-                                                borderWidth = 1.dp
-                                            )
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 4. LISTA DE NOTIFICACIONES O MENSAJE VACÍO
-                if (notificaciones.isEmpty()) {
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(300.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally
+                            Spacer(modifier = Modifier.height(32.dp))
+                            Button(
+                                onClick = {
+                                    scope.launch { cargarNotificacionesOptimizada() }
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = NotificationColors.PrimaryBlue
+                                ),
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.fillMaxWidth()
                             ) {
                                 Icon(
-                                    if (textoBusqueda.isNotBlank()) Icons.Default.SearchOff else Icons.Default.Notifications,
+                                    Icons.Default.Refresh,
                                     contentDescription = null,
-                                    modifier = Modifier.size(80.dp),
-                                    tint = NotificationColors.TextSecondary.copy(alpha = 0.6f)
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                Spacer(modifier = Modifier.height(20.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
                                 Text(
-                                    if (textoBusqueda.isNotBlank())
-                                        "No se encontraron resultados"
-                                    else
-                                        "No hay notificaciones",
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    color = NotificationColors.TextSecondary,
+                                    "Reintentar",
+                                    fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    if (textoBusqueda.isNotBlank())
-                                        "Intenta con otro nombre de cliente"
-                                    else
-                                        "¡Todo está al día!",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = NotificationColors.TextSecondary
                                 )
                             }
                         }
                     }
-                } else {
-                    // 5. CARDS DE NOTIFICACIONES
-                    items(
-                        items = notificaciones,
-                        key = { it.prestamoId }
-                    ) { notif ->
+                }
+            }
+
+            isLoading -> {
+                // PANTALLA DE CARGA MEJORADA
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    NotificationColors.LightBlue.copy(alpha = 0.3f),
+                                    Color.White
+                                )
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Card(
+                        modifier = Modifier.padding(32.dp),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(40.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(64.dp),
+                                color = NotificationColors.PrimaryBlue,
+                                strokeWidth = 6.dp
+                            )
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Text(
+                                "Cargando notificaciones...",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = NotificationColors.DarkBlue
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                "Esto puede tardar unos segundos",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = NotificationColors.TextSecondary
+                            )
+                        }
+                    }
+                }
+            }
+
+            else -> {
+                // CONTENIDO PRINCIPAL
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    NotificationColors.LightBlue.copy(alpha = 0.3f),
+                                    Color.White
+                                )
+                            )
+                        ),
+                    contentPadding = PaddingValues(
+                        top = padding.calculateTopPadding() + 16.dp,
+                        bottom = 16.dp,
+                        start = 16.dp,
+                        end = 16.dp
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // 1. RESUMEN DEL DÍA
+                    item {
+                        val vencidos = notificaciones.count { it.tipo == "vencido" }
+                        val hoyCount = notificaciones.count { it.tipo == "hoy" }
+                        val proximos = notificaciones.count { it.tipo == "próximo" }
+
                         AnimatedVisibility(
                             visible = true,
-                            enter = slideInVertically() + fadeIn(),
-                            exit = slideOutVertically() + fadeOut()
+                            enter = slideInVertically() + fadeIn()
                         ) {
-                            NotificacionCard(
-                                notif = notif,
-                                rol = rol,
-                                uid = uid,
-                                context = context,
-                                navController = navController,
-                                db = db,
-                                onAplicarMora = { prestamoId, cliente, moraSugerida ->
-                                    prestamoIdMora = prestamoId
-                                    clienteMora = cliente
-                                    moraCalculada = moraSugerida
-                                    diasMora = -notif.diferenciaDias
-                                    montoPrestamo = notif.monto
-                                    mostrarDialogoMora = true
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .shadow(8.dp, RoundedCornerShape(20.dp)),
+                                shape = RoundedCornerShape(20.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = Color.White
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(20.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Dashboard,
+                                            contentDescription = null,
+                                            tint = NotificationColors.PrimaryBlue,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(
+                                            "Resumen del día",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 18.sp,
+                                            color = NotificationColors.DarkBlue
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(16.dp))
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        StatCard(
+                                            label = "Vencidos",
+                                            count = vencidos,
+                                            color = NotificationColors.DangerRed,
+                                            icon = Icons.Default.Warning
+                                        )
+                                        StatCard(
+                                            label = "Hoy",
+                                            count = hoyCount,
+                                            color = NotificationColors.WarningOrange,
+                                            icon = Icons.Default.Today
+                                        )
+                                        StatCard(
+                                            label = "Próximos",
+                                            count = proximos,
+                                            color = NotificationColors.SuccessGreen,
+                                            icon = Icons.Default.Schedule
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(16.dp))
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        Card(
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = NotificationColors.LightBlue
+                                            ),
+                                            shape = RoundedCornerShape(16.dp)
+                                        ) {
+                                            Text(
+                                                "📋 Total mostrado: ${notificaciones.size}",
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                                                color = NotificationColors.DarkBlue,
+                                                fontSize = 14.sp
+                                            )
+                                        }
+                                    }
                                 }
-                            )
+                            }
+                        }
+                    }
+
+                    // 2. BARRA DE BÚSQUEDA
+                    item {
+                        AnimatedVisibility(
+                            visible = true,
+                            enter = slideInVertically(initialOffsetY = { it }) + fadeIn()
+                        ) {
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .shadow(4.dp, RoundedCornerShape(16.dp)),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = Color.White
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Search,
+                                            contentDescription = null,
+                                            tint = NotificationColors.PrimaryBlue,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            "Buscar cliente",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                            color = NotificationColors.DarkBlue
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    OutlinedTextField(
+                                        value = textoBusqueda,
+                                        onValueChange = { textoBusqueda = it },
+                                        label = {
+                                            Text(
+                                                "Nombre del cliente...",
+                                                color = NotificationColors.TextSecondary
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Default.Person,
+                                                contentDescription = null,
+                                                tint = NotificationColors.PrimaryBlue
+                                            )
+                                        },
+                                        trailingIcon = {
+                                            if (textoBusqueda.isNotBlank()) {
+                                                IconButton(onClick = { textoBusqueda = "" }) {
+                                                    Icon(
+                                                        Icons.Default.Clear,
+                                                        contentDescription = "Limpiar",
+                                                        tint = NotificationColors.TextSecondary
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = NotificationColors.PrimaryBlue,
+                                            unfocusedBorderColor = NotificationColors.TextSecondary.copy(alpha = 0.5f)
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. FILTROS
+                    item {
+                        AnimatedVisibility(
+                            visible = true,
+                            enter = slideInVertically(initialOffsetY = { it }) + fadeIn()
+                        ) {
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .shadow(4.dp, RoundedCornerShape(16.dp)),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = Color.White
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Default.FilterList,
+                                            contentDescription = null,
+                                            tint = NotificationColors.PrimaryBlue,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            "Filtros",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                            color = NotificationColors.DarkBlue
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(12.dp))
+
+                                    Text(
+                                        "Urgencia:",
+                                        fontSize = 13.sp,
+                                        color = NotificationColors.TextSecondary,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        items(filtrosTipo) { filtro ->
+                                            FilterChip(
+                                                selected = filtroTipo == filtro,
+                                                onClick = { filtroTipo = filtro },
+                                                label = {
+                                                    Text(
+                                                        when(filtro) {
+                                                            "Todos" -> "Todo"
+                                                            "vencido" -> "Vencidos"
+                                                            "hoy" -> "Hoy"
+                                                            "próximo" -> "Próximos"
+                                                            else -> filtro
+                                                        },
+                                                        fontSize = 11.sp,
+                                                        fontWeight = if (filtroTipo == filtro) FontWeight.Bold else FontWeight.Normal
+                                                    )
+                                                },
+                                                modifier = Modifier.height(32.dp),
+                                                colors = FilterChipDefaults.filterChipColors(
+                                                    selectedContainerColor = NotificationColors.SecondaryBlue,
+                                                    selectedLabelColor = Color.White,
+                                                    containerColor = Color.Transparent,
+                                                    labelColor = NotificationColors.SecondaryBlue
+                                                ),
+                                                border = FilterChipDefaults.filterChipBorder(
+                                                    enabled = true,
+                                                    selected = filtroTipo == filtro,
+                                                    borderColor = NotificationColors.SecondaryBlue,
+                                                    selectedBorderColor = NotificationColors.SecondaryBlue,
+                                                    borderWidth = 1.dp
+                                                )
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(12.dp))
+
+                                    Text(
+                                        "Estado:",
+                                        fontSize = 13.sp,
+                                        color = NotificationColors.TextSecondary,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        items(filtrosEstado) { filtro ->
+                                            FilterChip(
+                                                selected = filtroEstado == filtro,
+                                                onClick = { filtroEstado = filtro },
+                                                label = {
+                                                    Text(
+                                                        when(filtro) {
+                                                            "Todos" -> "Todo"
+                                                            "activo" -> "Activos"
+                                                            "inactivo" -> "Inactivos"
+                                                            "saldado" -> "Saldados"
+                                                            "mora" -> "En Mora"
+                                                            else -> filtro
+                                                        },
+                                                        fontSize = 11.sp,
+                                                        fontWeight = if (filtroEstado == filtro) FontWeight.Bold else FontWeight.Normal
+                                                    )
+                                                },
+                                                modifier = Modifier.height(32.dp),
+                                                colors = FilterChipDefaults.filterChipColors(
+                                                    selectedContainerColor = NotificationColors.AccentBlue,
+                                                    selectedLabelColor = Color.White,
+                                                    containerColor = Color.Transparent,
+                                                    labelColor = NotificationColors.AccentBlue
+                                                ),
+                                                border = FilterChipDefaults.filterChipBorder(
+                                                    enabled = true,
+                                                    selected = filtroEstado == filtro,
+                                                    borderColor = NotificationColors.AccentBlue,
+                                                    selectedBorderColor = NotificationColors.AccentBlue,
+                                                    borderWidth = 1.dp
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 4. LISTA DE NOTIFICACIONES O MENSAJE VACÍO
+                    if (notificaciones.isEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(300.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Icon(
+                                        if (textoBusqueda.isNotBlank()) Icons.Default.SearchOff else Icons.Default.Notifications,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(80.dp),
+                                        tint = NotificationColors.TextSecondary.copy(alpha = 0.6f)
+                                    )
+                                    Spacer(modifier = Modifier.height(20.dp))
+                                    Text(
+                                        if (textoBusqueda.isNotBlank())
+                                            "No se encontraron resultados"
+                                        else
+                                            "No hay notificaciones",
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        color = NotificationColors.TextSecondary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        if (textoBusqueda.isNotBlank())
+                                            "Intenta con otro nombre de cliente"
+                                        else
+                                            "¡Todo está al día!",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = NotificationColors.TextSecondary
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        // 5. CARDS DE NOTIFICACIONES
+                        items(
+                            items = notificaciones,
+                            key = { it.prestamoId }
+                        ) { notif ->
+                            AnimatedVisibility(
+                                visible = true,
+                                enter = slideInVertically() + fadeIn(),
+                                exit = slideOutVertically() + fadeOut()
+                            ) {
+                                NotificacionCard(
+                                    notif = notif,
+                                    rol = rol,
+                                    uid = uid,
+                                    context = context,
+                                    navController = navController,
+                                    db = db,
+                                    onAplicarMora = { prestamoId, cliente, moraSugerida ->
+                                        prestamoIdMora = prestamoId
+                                        clienteMora = cliente
+                                        moraCalculada = moraSugerida
+                                        diasMora = -notif.diferenciaDias
+                                        montoPrestamo = notif.monto
+                                        mostrarDialogoMora = true
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -897,7 +1107,7 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
         }
     }
 
-    // Diálogo de mora (se mantiene igual)
+    // DIÁLOGO DE MORA
     if (mostrarDialogoMora) {
         DialogoAplicarMora(
             cliente = clienteMora,
@@ -919,21 +1129,14 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
 
                         val saldoActual = doc.getDouble("saldo") ?: doc.getDouble("totalPagar") ?: 0.0
 
-                        val (fechaCuotaActual, numeroCuota, _) = obtenerProximaCuotaSinPagarReal(db, prestamoIdMora)
-
-                        if (fechaCuotaActual == null || fechaCuotaActual == "saldado") {
-                            Toast.makeText(context, "El préstamo no tiene cuotas pendientes", Toast.LENGTH_SHORT).show()
-                            return@launch
-                        }
-
                         val morasAplicadas = (doc.get("morasAplicadas") as? List<*>)?.mapNotNull {
                             it as? String
                         } ?: emptyList()
 
-                        val claveMora = "${fechaCuotaActual}_cuota_${numeroCuota}"
+                        val claveMora = "${clienteMora}_${System.currentTimeMillis()}"
 
                         if (morasAplicadas.contains(claveMora)) {
-                            Toast.makeText(context, "Ya se aplicó mora para la cuota $numeroCuota ($fechaCuotaActual)", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Ya se aplicó mora para este cliente", Toast.LENGTH_SHORT).show()
                             return@launch
                         }
 
@@ -947,8 +1150,8 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                             )
                         ).await()
 
-                        Toast.makeText(context, "Mora aplicada correctamente a cuota $numeroCuota", Toast.LENGTH_SHORT).show()
-                        cargarNotificaciones()
+                        Toast.makeText(context, "Mora aplicada correctamente", Toast.LENGTH_SHORT).show()
+                        cargarNotificacionesOptimizada()
 
                     } catch (e: Exception) {
                         Toast.makeText(context, "Error al aplicar mora: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -961,7 +1164,7 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
     }
 }
 
-// Componente de estadística mejorado
+// COMPONENTE DE ESTADÍSTICA MEJORADO
 @Composable
 fun StatCard(
     label: String,
@@ -1010,7 +1213,7 @@ fun StatCard(
     }
 }
 
-// Diálogo de mora
+// DIÁLOGO DE MORA OPTIMIZADO
 @Composable
 fun DialogoAplicarMora(
     cliente: String,
@@ -1146,7 +1349,7 @@ fun DialogoAplicarMora(
     )
 }
 
-// Card de notificación mejorada
+// CARD DE NOTIFICACIÓN OPTIMIZADA
 @Composable
 fun NotificacionCard(
     notif: NotificacionCobro,
@@ -1493,7 +1696,7 @@ fun NotificacionCard(
                         }
 
                         // Botón de mora
-                        if ((rol == "admin" || rol == "cobrador") && notif.estado == "mora" && notif.diferenciaDias < -3) {
+                        if ((rol == "admin" || rol == "cobrador") && notif.diferenciaDias < -3) {
                             val diasMoraReales = -notif.diferenciaDias
                             val moraSugerida = "%.2f".format(notif.monto * 0.005 * diasMoraReales)
 
@@ -1519,7 +1722,7 @@ fun NotificacionCard(
                                 Text("Mora", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                             }
                         } else {
-                            Box(modifier = Modifier.weight(1f))
+                            Spacer(modifier = Modifier.weight(1f))
                         }
                     }
                 }
@@ -1528,7 +1731,7 @@ fun NotificacionCard(
     }
 }
 
-// Función para enviar WhatsApp
+// FUNCIÓN OPTIMIZADA PARA ENVIAR WHATSAPP
 suspend fun enviarMensajeWhatsAppConNumero(
     context: Context,
     clienteNombre: String,
@@ -1538,25 +1741,30 @@ suspend fun enviarMensajeWhatsAppConNumero(
         val clienteDocs = db.collection("clientes")
             .whereEqualTo("nombre", clienteNombre)
             .whereEqualTo("eliminado", false)
+            .limit(1)
             .get().await()
 
         val doc = clienteDocs.documents.firstOrNull()
-        val eliminado = doc?.getBoolean("eliminado") ?: false
+        if (doc == null) {
+            Toast.makeText(context, "Cliente no encontrado", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val eliminado = doc.getBoolean("eliminado") ?: false
         if (eliminado) {
             Toast.makeText(context, "Cliente no disponible", Toast.LENGTH_SHORT).show()
             return
         }
 
-        val numero = doc?.getString("telefono")?.filter { it.isDigit() } ?: ""
-        val nombre = doc?.getString("nombre") ?: "cliente"
+        val numero = doc.getString("telefono")?.filter { it.isDigit() } ?: ""
+        val nombre = doc.getString("nombre") ?: "cliente"
 
         if (numero.isBlank()) {
             Toast.makeText(context, "Número de teléfono no encontrado", Toast.LENGTH_SHORT).show()
             return
         }
 
-        val mensaje =
-            "Estimado/a $nombre, le recordamos que tiene un pago pendiente con Capital Express. Por favor, comuníquese con nosotros para coordinar su pago. ¡Gracias!"
+        val mensaje = "Estimado/a $nombre, le recordamos que tiene un pago pendiente con Capital Express. Por favor, comuníquese con nosotros para coordinar su pago. ¡Gracias!"
         val url = "https://wa.me/504$numero?text=${Uri.encode(mensaje)}"
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
 
@@ -1567,6 +1775,7 @@ suspend fun enviarMensajeWhatsAppConNumero(
         }
 
     } catch (e: Exception) {
-        Toast.makeText(context, "Error al enviar mensaje: ${e.message}", Toast.LENGTH_SHORT).show()
+        Log.e("NotificacionesScreen", "Error enviando WhatsApp: ${e.message}")
+        Toast.makeText(context, "Error al enviar mensaje: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
     }
 }
