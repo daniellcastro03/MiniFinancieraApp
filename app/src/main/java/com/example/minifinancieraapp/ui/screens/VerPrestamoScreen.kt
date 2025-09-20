@@ -1,5 +1,6 @@
 package com.example.capitalexpressapp.ui.screens
 
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -22,6 +23,8 @@ import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -179,26 +182,24 @@ fun VerPrestamoScreen(
             try {
                 val docRef = db.collection("prestamos").document(prestamoId)
 
-                // ✅ Actualiza directamente el documento, no solo en transacción
                 val snapshot = docRef.get().await()
                 if (snapshot.exists()) {
                     val estadoActual = snapshot.getString("estado") ?: "activo"
 
                     val updates = mapOf(
                         "estadoAnterior" to estadoActual,
-                        "estado" to "eliminado",           // ✅ CAMBIAMOS EL ESTADO AQUÍ
+                        "estado" to "eliminado",
                         "eliminado" to true,
                         "eliminadoPor" to uid,
                         "fechaEliminacion" to Timestamp.now(),
                         "ultimaActualizacion" to Timestamp.now()
                     )
 
-                    docRef.update(updates).await()  // ✅ Asegura que Firestore lo guarda bien
+                    docRef.update(updates).await()
                 }
 
                 Toast.makeText(context, "Préstamo movido a eliminados", Toast.LENGTH_SHORT).show()
 
-                // ✅ Refrescar UI
                 prestamo = prestamo?.copy(estado = "eliminado")
                 cargarPrestamo()
                 navController.previousBackStackEntry?.savedStateHandle?.set("refreshHistorial", true)
@@ -210,7 +211,6 @@ fun VerPrestamoScreen(
             }
         }
     }
-
 
     fun restaurarPrestamo() {
         scope.launch {
@@ -713,8 +713,34 @@ fun VerPrestamoScreen(
                         Spacer(modifier = Modifier.height(16.dp))
                     }
 
+                    // ✅ NAVEGACIÓN SIMPLE - IGUAL QUE NOTIFICACIONES
                     Button(
-                        onClick = { navController.navigate("CuotasPrestamoScreen/${p.id}/$uid/$rol") },
+                        onClick = {
+                            try {
+                                Log.d("VerPrestamoScreen", "=== NAVEGACIÓN A CUOTAS ===")
+                                Log.d("VerPrestamoScreen", "Préstamo ID: '${p.id}'")
+                                Log.d("VerPrestamoScreen", "UID: '$uid'")
+                                Log.d("VerPrestamoScreen", "ROL: '$rol'")
+
+                                // Verificar que tenemos todos los datos
+                                if (p.id.isBlank() || uid.isBlank() || rol.isBlank()) {
+                                    Toast.makeText(context, "Error: Faltan datos para navegar", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+
+                                // ✅ NAVEGACIÓN SIMPLE - IGUAL QUE NotificacionesScreen
+                                val ruta = "CuotasPrestamoScreen/${p.id}/$uid/$rol"
+                                Log.d("VerPrestamoScreen", "Navegando con ruta: '$ruta'")
+
+                                navController.navigate(ruta)
+
+                                Log.d("VerPrestamoScreen", "✅ Navegación ejecutada")
+
+                            } catch (e: Exception) {
+                                Log.e("VerPrestamoScreen", "❌ Error en navegación: ${e.message}", e)
+                                Toast.makeText(context, "Error al navegar: ${e.message}", Toast.LENGTH_LONG).show()
+                            }
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp),

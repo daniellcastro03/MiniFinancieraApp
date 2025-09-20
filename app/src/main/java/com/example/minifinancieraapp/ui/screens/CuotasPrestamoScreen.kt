@@ -182,11 +182,40 @@ suspend fun calcularEstadoCuotasConParciales(
 
         // Mapa para acumular pagos por cuota
         val pagosPorCuota = mutableMapOf<Int, Double>()
-        val cuotasMarcadasManualmente = mutableSetOf<Int>() // NUEVO: Para trackear cuotas marcadas manualmente
+        val cuotasMarcadasManualmente = mutableSetOf<Int>() // Para trackear cuotas marcadas manualmente
         val fechasPagoPorCuota = mutableMapOf<Int, String>()
         val fmtPago = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
 
-        // Procesar todos los pagos y acumular por cuota
+        // ✅ VERIFICAR PAGOS CORRUPTOS ANTES DE PROCESARLOS
+        Log.d("CuotasScreen", "=== VERIFICANDO PAGOS CORRUPTOS ===")
+        var pagosCorruptos = 0
+        pagosSnapshot.documents.forEach { pago ->
+            val cuotasCubiertas = pago.getLong("cuotasCubiertas")?.toInt() ?: 1
+            val numeroCuota = when {
+                pago.contains("numeroCuota") -> pago.getLong("numeroCuota")?.toInt() ?: 1
+                pago.contains("cuota") -> pago.getLong("cuota")?.toInt() ?: 1
+                else -> 1
+            }
+
+            if (cuotasCubiertas > 1000 || cuotasCubiertas < 0) {
+                pagosCorruptos++
+                Log.e("CuotasScreen", "🚨 PAGO CORRUPTO ENCONTRADO:")
+                Log.e("CuotasScreen", "  - ID del pago: ${pago.id}")
+                Log.e("CuotasScreen", "  - cuotasCubiertas: $cuotasCubiertas")
+                Log.e("CuotasScreen", "  - numeroCuota: $numeroCuota")
+                Log.e("CuotasScreen", "  - monto: ${pago.getDouble("monto")}")
+                Log.e("CuotasScreen", "  - fecha: ${pago.get("fechaPago")}")
+                Log.e("CuotasScreen", "  - Este pago será ignorado para evitar el crash")
+            }
+        }
+
+        if (pagosCorruptos > 0) {
+            Log.w("CuotasScreen", "⚠️ TOTAL DE PAGOS CORRUPTOS DETECTADOS: $pagosCorruptos")
+        } else {
+            Log.d("CuotasScreen", "✅ No se encontraron pagos corruptos")
+        }
+
+        // Procesar todos los pagos y acumular por cuota (CON VALIDACIONES)
         for (pago in pagosSnapshot.documents) {
             val numeroCuotaInicial = when {
                 pago.contains("numeroCuota") -> pago.getLong("numeroCuota")?.toInt() ?: 1
@@ -194,7 +223,27 @@ suspend fun calcularEstadoCuotasConParciales(
                 else -> 1
             }
 
-            val cuotasCubiertas = pago.getLong("cuotasCubiertas")?.toInt() ?: 1
+            val cuotasCubiertasOriginal = pago.getLong("cuotasCubiertas")?.toInt() ?: 1
+
+            // ✅ VALIDACIÓN CRÍTICA 1: Detectar y saltar pagos corruptos
+            if (cuotasCubiertasOriginal <= 0 || cuotasCubiertasOriginal > 1000) {
+                Log.w("CuotasScreen", "⚠️ SALTANDO PAGO CORRUPTO: cuotasCubiertas=$cuotasCubiertasOriginal en pago ${pago.id}")
+                continue // Saltar este pago corrupto
+            }
+
+            // ✅ VALIDACIÓN CRÍTICA 2: Verificar que numeroCuota esté en rango válido
+            if (numeroCuotaInicial <= 0 || numeroCuotaInicial > cuotasBase.size) {
+                Log.w("CuotasScreen", "⚠️ SALTANDO PAGO CON CUOTA INVÁLIDA: numeroCuota=$numeroCuotaInicial en pago ${pago.id}")
+                continue // Saltar este pago corrupto
+            }
+
+            // ✅ VALIDACIÓN CRÍTICA 3: Limitar cuotas cubiertas al tamaño máximo posible
+            val cuotasCubiertas = cuotasCubiertasOriginal.coerceAtMost(cuotasBase.size)
+
+            // ✅ VALIDACIÓN CRÍTICA 4: Asegurar que no se salga del rango
+            val rangoFinal = (numeroCuotaInicial + cuotasCubiertas - 1).coerceAtMost(cuotasBase.size)
+            val cuotasCubiertasSeguras = (rangoFinal - numeroCuotaInicial + 1).coerceAtLeast(1)
+
             val montoPago = pago.getDouble("monto") ?: 0.0
             val moraPago = pago.getDouble("mora") ?: 0.0
             val montoTotal = montoPago + moraPago
@@ -212,9 +261,11 @@ suspend fun calcularEstadoCuotasConParciales(
             }
 
             Log.d("CuotasScreen", """
-                Procesando pago:
+                Procesando pago SEGURO:
                 - Cuota inicial: $numeroCuotaInicial
-                - Cuotas cubiertas: $cuotasCubiertas
+                - Cuotas cubiertas ORIGINAL: $cuotasCubiertasOriginal
+                - Cuotas cubiertas SEGURAS: $cuotasCubiertasSeguras
+                - Rango final: $rangoFinal
                 - Monto: L. ${String.format("%.2f", montoPago)}
                 - Mora: L. ${String.format("%.2f", moraPago)}
                 - Total: L. ${String.format("%.2f", montoTotal)}
@@ -222,7 +273,7 @@ suspend fun calcularEstadoCuotasConParciales(
             """.trimIndent())
 
             // LÓGICA MEJORADA: Distribuir el pago entre las cuotas
-            if (cuotasCubiertas == 1) {
+            if (cuotasCubiertasSeguras == 1) {
                 // Pago a una sola cuota específica
                 if (esManual && montoTotal == 0.0) {
                     // CORRECCIÓN: Para pagos manuales con monto 0, marcar la cuota como completamente pagada
@@ -233,33 +284,38 @@ suspend fun calcularEstadoCuotasConParciales(
                 }
                 fechaPagoStr?.let { fechasPagoPorCuota[numeroCuotaInicial] = it }
 
-            } else if (cuotasCubiertas > 1) {
+            } else if (cuotasCubiertasSeguras > 1) {
                 // Pago que cubre múltiples cuotas - distribuir inteligentemente
                 var montoRestante = montoTotal
 
-                // Primero completar cuotas parciales existentes
-                for (i in 0 until cuotasCubiertas) {
+                // ✅ USAR RANGO SEGURO PARA EVITAR BUCLES INFINITOS
+                for (i in 0 until cuotasCubiertasSeguras) {
                     val numCuota = numeroCuotaInicial + i
-                    if (numCuota <= cuotasBase.size && montoRestante > 0) {
-                        val cuotaBase = cuotasBase.find { it.numero == numCuota }
-                        if (cuotaBase != null) {
-                            val yaAbonado = pagosPorCuota[numCuota] ?: 0.0
-                            val faltante = (cuotaBase.total - yaAbonado).coerceAtLeast(0.0)
-                            val abonoACuota = minOf(montoRestante, faltante)
 
-                            pagosPorCuota[numCuota] = yaAbonado + abonoACuota
-                            montoRestante -= abonoACuota
+                    // ✅ DOBLE VERIFICACIÓN: Asegurar que no salgamos del rango
+                    if (numCuota > cuotasBase.size || montoRestante <= 0) {
+                        Log.d("CuotasScreen", "Rompiendo bucle: numCuota=$numCuota, tamaño=${cuotasBase.size}, montoRestante=$montoRestante")
+                        break
+                    }
 
-                            fechaPagoStr?.let { fechasPagoPorCuota[numCuota] = it }
+                    val cuotaBase = cuotasBase.find { it.numero == numCuota }
+                    if (cuotaBase != null) {
+                        val yaAbonado = pagosPorCuota[numCuota] ?: 0.0
+                        val faltante = (cuotaBase.total - yaAbonado).coerceAtLeast(0.0)
+                        val abonoACuota = minOf(montoRestante, faltante)
 
-                            Log.d("CuotasScreen", "Cuota $numCuota: abonado L. ${String.format("%.2f", abonoACuota)}, acumulado L. ${String.format("%.2f", pagosPorCuota[numCuota])}")
-                        }
+                        pagosPorCuota[numCuota] = yaAbonado + abonoACuota
+                        montoRestante -= abonoACuota
+
+                        fechaPagoStr?.let { fechasPagoPorCuota[numCuota] = it }
+
+                        Log.d("CuotasScreen", "Cuota $numCuota: abonado L. ${String.format("%.2f", abonoACuota)}, acumulado L. ${String.format("%.2f", pagosPorCuota[numCuota])}")
                     }
                 }
 
                 // Si sobra dinero, aplicar exceso a la última cuota del rango
                 if (montoRestante > 0.01) { // Tolerancia para decimales
-                    val ultimaCuota = numeroCuotaInicial + cuotasCubiertas - 1
+                    val ultimaCuota = (numeroCuotaInicial + cuotasCubiertasSeguras - 1).coerceAtMost(cuotasBase.size)
                     pagosPorCuota[ultimaCuota] = (pagosPorCuota[ultimaCuota] ?: 0.0) + montoRestante
                     Log.d("CuotasScreen", "Exceso de L. ${String.format("%.2f", montoRestante)} aplicado a cuota $ultimaCuota")
                 }
@@ -269,7 +325,7 @@ suspend fun calcularEstadoCuotasConParciales(
         // Actualizar cuotas con el estado calculado
         cuotasBase.map { cuotaBase ->
             val montoPagado = pagosPorCuota[cuotaBase.numero] ?: 0.0
-            val fueMarcadaManualmente = cuotasMarcadasManualmente.contains(cuotaBase.numero) // NUEVO
+            val fueMarcadaManualmente = cuotasMarcadasManualmente.contains(cuotaBase.numero)
 
             // CORRECCIÓN: Si fue marcada manualmente, considerar como completamente pagada
             val completamentePagada = fueMarcadaManualmente || (montoPagado >= cuotaBase.total - 0.01) // Tolerancia de 1 centavo
