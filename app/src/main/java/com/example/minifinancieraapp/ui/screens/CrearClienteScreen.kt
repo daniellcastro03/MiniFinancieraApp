@@ -60,6 +60,7 @@ fun CrearClienteScreen(navController: NavController) {
     var nombreError by remember { mutableStateOf(false) }
     var identidadError by remember { mutableStateOf(false) }
     var telefonoError by remember { mutableStateOf(false) }
+    var identidadDuplicadaError by remember { mutableStateOf(false) }
 
     // Estado civil y cónyuge
     var estadoCivil by remember { mutableStateOf("Soltero") }
@@ -108,6 +109,20 @@ fun CrearClienteScreen(navController: NavController) {
         identidadError = identidad.isBlank()
         telefonoError = telefono.isBlank()
         return !nombreError && !identidadError && !telefonoError
+    }
+
+    // 🆕 Función para verificar si la identidad ya existe
+    suspend fun verificarIdentidadDuplicada(): Boolean {
+        return try {
+            val query = db.collection("clientes")
+                .whereEqualTo("identidad", identidad.trim())
+                .get()
+                .await()
+
+            !query.isEmpty
+        } catch (e: Exception) {
+            false
+        }
     }
 
     // Función para crear archivo temporal
@@ -243,11 +258,14 @@ fun CrearClienteScreen(navController: NavController) {
                         onValueChange = {
                             identidad = it
                             if (identidadError) identidadError = false
+                            if (identidadDuplicadaError) identidadDuplicadaError = false
                         },
                         label = { Text("Identidad *") },
-                        isError = identidadError,
+                        isError = identidadError || identidadDuplicadaError,
                         supportingText = if (identidadError) {
                             { Text("La identidad es obligatoria", color = MaterialTheme.colorScheme.error) }
+                        } else if (identidadDuplicadaError) {
+                            { Text("Ya existe un cliente con esta identidad", color = MaterialTheme.colorScheme.error) }
                         } else null,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -473,6 +491,15 @@ fun CrearClienteScreen(navController: NavController) {
                         isLoading = true
                         scope.launch {
                             try {
+                                // 🆕 Verificar si la identidad ya existe
+                                val identidadExiste = verificarIdentidadDuplicada()
+                                if (identidadExiste) {
+                                    identidadDuplicadaError = true
+                                    isLoading = false
+                                    snackbar.showSnackbar("⚠️ Ya existe un cliente con este número de identidad")
+                                    return@launch
+                                }
+
                                 // 👇 AUTENTICAR SOLO PARA STORAGE
                                 val auth = FirebaseAuth.getInstance()
                                 if (auth.currentUser == null) {
@@ -499,7 +526,7 @@ fun CrearClienteScreen(navController: NavController) {
                                 // Preparar datos del cliente
                                 val data = mutableMapOf<String, Any>(
                                     "nombre" to nombre,
-                                    "identidad" to identidad,
+                                    "identidad" to identidad.trim(),
                                     "telefono" to telefono,
                                     "nombreEmpresa" to nombreEmpresa,
                                     "direccionCasa" to direccionCasa,

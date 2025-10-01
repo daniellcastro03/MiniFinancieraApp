@@ -47,6 +47,26 @@ import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.roundToInt
 
+// Función para verificar préstamos activos de un cliente
+suspend fun verificarPrestamosActivos(db: FirebaseFirestore, clienteId: String): Pair<Int, List<String>> {
+    return try {
+        val snapshot = db.collection("prestamos")
+            .whereEqualTo("clienteId", clienteId)
+            .whereEqualTo("estado", "activo")
+            .get()
+            .await()
+
+        val prestamosActivos = snapshot.documents
+        val numerosPrestamo = prestamosActivos.mapNotNull { doc ->
+            doc.id
+        }
+
+        Pair(prestamosActivos.size, numerosPrestamo)
+    } catch (e: Exception) {
+        Pair(0, emptyList())
+    }
+}
+
 // Función para contar días excluyendo domingos
 fun contarDiasSinDomingos(diasNecesarios: Int, fechaInicio: Calendar = Calendar.getInstance()): Int {
     var diasEfectivos = 0
@@ -110,9 +130,11 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
     var interesMensual by remember { mutableStateOf("") }
     var cuotas by remember { mutableStateOf("") }
 
-    // 🔧 FIX 1: Corregir el manejo del interés total manual
+    // Estado para préstamos activos del cliente seleccionado
+    var prestamosActivosCliente by remember { mutableStateOf(0) }
+
     var interesTotal by remember { mutableStateOf("") }
-    var usarInteresMensual by remember { mutableStateOf(true) } // Toggle para elegir tipo de cálculo
+    var usarInteresMensual by remember { mutableStateOf(true) }
 
     var mora by remember { mutableStateOf("") }
     var selectedPlazo by remember { mutableStateOf("Semanal") }
@@ -129,7 +151,7 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
     var fotosSeleccionadas by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var fotoUriCamara by remember { mutableStateOf<Uri?>(null) }
 
-    // 🔧 Obtener datos del cobrador actual
+    // Obtener datos del cobrador actual
     LaunchedEffect(Unit) {
         try {
             val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
@@ -144,7 +166,6 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
                 nombreCobrador = userDoc.getString("nombre") ?: "Administrador"
                 numeroCobrador = userDoc.getString("telefono") ?: "N/D"
             } else {
-                // Fallback para admin
                 nombreCobrador = "Administrador"
                 numeroCobrador = "N/D"
             }
@@ -152,6 +173,18 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
             Toast.makeText(context, "Error al cargar datos del usuario: ${e.message}", Toast.LENGTH_SHORT).show()
         } finally {
             isLoadingAuth = false
+        }
+    }
+
+    // Verificar préstamos activos cuando cambie el cliente
+    LaunchedEffect(selectedCliente) {
+        if (selectedCliente != null) {
+            scope.launch {
+                val (activos, _) = verificarPrestamosActivos(db, selectedCliente!!.id)
+                prestamosActivosCliente = activos
+            }
+        } else {
+            prestamosActivosCliente = 0
         }
     }
 
@@ -266,10 +299,50 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
         )
 
-        // 🔧 FIX 2: Mejorar el dropdown de búsqueda de cliente
+        // Dropdown de búsqueda de cliente
         BuscarClienteDropdownMejorado(clientes, selectedCliente) { selectedCliente = it }
 
         Spacer(modifier = Modifier.height(8.dp))
+
+        // Card informativo sobre préstamos activos del cliente
+        if (selectedCliente != null && prestamosActivosCliente > 0) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = when (prestamosActivosCliente) {
+                        1 -> Color(0xFFFFF3E0) // Naranja claro para advertencia
+                        else -> Color(0xFFFFEBEE) // Rojo claro para máximo
+                    }
+                )
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            if (prestamosActivosCliente == 1) Icons.Default.Warning else Icons.Default.Block,
+                            contentDescription = null,
+                            tint = if (prestamosActivosCliente == 1) Color(0xFFE65100) else Color(0xFFD32F2F),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "Préstamos activos del cliente",
+                            fontWeight = FontWeight.Bold,
+                            color = if (prestamosActivosCliente == 1) Color(0xFFE65100) else Color(0xFFD32F2F)
+                        )
+                    }
+
+                    Text(
+                        when (prestamosActivosCliente) {
+                            1 -> "AVISO: ${selectedCliente!!.nombre} tiene 1 préstamo activo. Después de este tendrá 2 (máximo permitido)."
+                            else -> "BLOQUEADO: ${selectedCliente!!.nombre} ya tiene $prestamosActivosCliente préstamos activos. No se puede crear más."
+                        },
+                        color = if (prestamosActivosCliente == 1) Color(0xFFE65100) else Color(0xFFD32F2F),
+                        fontSize = 14.sp
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
 
         OutlinedTextField(
             value = monto,
@@ -281,7 +354,7 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // 🔧 FIX 1: Mejorar el manejo del interés
+        // Configuración de Interés
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
@@ -294,7 +367,7 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
                         selected = usarInteresMensual,
                         onClick = {
                             usarInteresMensual = true
-                            interesTotal = "" // Limpiar interés total
+                            interesTotal = ""
                         }
                     )
                     Text("Interés mensual %")
@@ -305,7 +378,7 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
                         selected = !usarInteresMensual,
                         onClick = {
                             usarInteresMensual = false
-                            interesMensual = "" // Limpiar interés mensual
+                            interesMensual = ""
                         }
                     )
                     Text("Interés total fijo")
@@ -503,7 +576,7 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
 
         Text("Plazo", fontWeight = FontWeight.Bold)
 
-        // RADIO BUTTONS CON LA NUEVA OPCIÓN "Lunes a Sábado"
+        // RADIO BUTTONS PARA PLAZOS
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 listOf("Diario", "Lunes a Sábado", "Semanal").forEach { plazo ->
@@ -535,7 +608,7 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // 🔧 FIX 1 & 3: CÁLCULOS CORREGIDOS CON PRÓXIMO PAGO PRECISO
+        // CÁLCULOS
         val montoDouble = monto.toDoubleOrNull() ?: 0.0
         val interesPct = interesMensual.toDoubleOrNull() ?: 0.0
         val cuotasInt = cuotas.toIntOrNull() ?: 1
@@ -546,14 +619,13 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
         val diasEfectivos = calcularDiasEfectivos(selectedPlazo, cuotasInt, fechaInicio)
         val mesesAproximados = diasEfectivos / 30.0
 
-        // 🔧 FIX 3: Calcular CORRECTAMENTE el próximo pago
+        // Calcular próximo pago
         val proximoCal = fechaSeleccionada.clone() as Calendar
         when (selectedPlazo) {
             "Diario" -> {
                 proximoCal.add(Calendar.DAY_OF_YEAR, 1)
             }
             "Lunes a Sábado" -> {
-                // Buscar el próximo día laborable
                 do {
                     proximoCal.add(Calendar.DAY_OF_YEAR, 1)
                 } while (proximoCal.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY)
@@ -574,14 +646,12 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
         val proximoPagoString = formatter.format(proximoCal.time)
         val proximoPagoTimestamp = Timestamp(proximoCal.time)
 
-        // 🔧 FIX 1: LÓGICA CORREGIDA PARA CÁLCULO DE INTERESES
+        // Cálculo de intereses
         val (interesCalculado, totalAPagar, cuotaEstimada) = if (!usarInteresMensual && interesTotalDouble > 0) {
-            // Usar interés total fijo
             val total = montoDouble + interesTotalDouble
             val cuota = if (cuotasInt > 0) (total / cuotasInt).roundToInt().toDouble() else 0.0
             Triple(interesTotalDouble, total, cuota)
         } else if (usarInteresMensual && interesPct > 0) {
-            // Calcular interés basado en porcentaje mensual
             val interesMensualMonto = montoDouble * (interesPct / 100)
 
             val interesCalculadoTotal = when (selectedPlazo) {
@@ -668,11 +738,32 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
 
                 scope.launch {
                     try {
+                        // VALIDACIÓN: Verificar préstamos activos
+                        val (prestamosActivos, numerosPrestamo) = verificarPrestamosActivos(db, selectedCliente!!.id)
+
+                        if (prestamosActivos >= 2) {
+                            isLoading = false
+                            Toast.makeText(
+                                context,
+                                "BLOQUEADO: El cliente ${selectedCliente!!.nombre} ya tiene $prestamosActivos préstamos activos. No se pueden crear más de 2 préstamos activos por cliente.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            return@launch
+                        }
+
+                        // Mostrar información de préstamos activos existentes
+                        if (prestamosActivos == 1) {
+                            Toast.makeText(
+                                context,
+                                "AVISO: Este cliente ya tiene 1 préstamo activo. Después de este tendrá 2 préstamos (máximo permitido).",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+
                         val docRef = db.collection("prestamos").document()
                         val prestamoId = docRef.id
                         val fecha = formatter.format(fechaSeleccionada.time)
 
-                        // 🔧 FIX 1: Guardar correctamente el tipo de interés y valor
                         val prestamo = hashMapOf(
                             "id" to prestamoId,
                             "cliente" to selectedCliente!!.nombre,
@@ -681,7 +772,7 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
                             "interes" to interesCalculado,
                             "interesMensual" to if (usarInteresMensual) interesPct else 0.0,
                             "interesTotal" to if (!usarInteresMensual) interesTotalDouble else interesCalculado,
-                            "usarInteresMensual" to usarInteresMensual, // Campo para saber qué tipo de interés usar
+                            "usarInteresMensual" to usarInteresMensual,
                             "interesTotalFijo" to if (!usarInteresMensual) interesTotalDouble else 0.0,
                             "mora" to moraDouble,
                             "totalPagar" to totalAPagar,
@@ -696,7 +787,7 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
                             "numeroCobrador" to numeroCobrador,
                             "cobradorUid" to currentUid,
                             "prestamoId" to prestamoId,
-                            "proximoPago" to proximoPagoTimestamp, // 🔧 FIX 3: Usar timestamp calculado correctamente
+                            "proximoPago" to proximoPagoTimestamp,
                             "montoPagado" to 0.0,
                             "saldoAnterior" to montoDouble,
                             "estado" to "activo",
@@ -707,6 +798,14 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
                         )
 
                         docRef.set(prestamo).await()
+
+                        // Mostrar confirmación con información de préstamos totales
+                        val nuevoTotal = prestamosActivos + 1
+                        Toast.makeText(
+                            context,
+                            "Préstamo creado exitosamente. Cliente ahora tiene $nuevoTotal préstamo(s) activo(s).",
+                            Toast.LENGTH_SHORT
+                        ).show()
 
                         try {
                             val reciboFile = ReciboHelper.generarReciboPrestamoPDF(
@@ -785,7 +884,7 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
                 }
             },
             modifier = Modifier.fillMaxWidth(),
-            enabled = !isLoading
+            enabled = !isLoading && (selectedCliente == null || prestamosActivosCliente < 2)
         ) {
             if (isLoading) {
                 CircularProgressIndicator(
@@ -797,7 +896,12 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Print, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Guardar e Imprimir")
+                    Text(
+                        if (selectedCliente != null && prestamosActivosCliente >= 2)
+                            "Bloqueado (2+ préstamos activos)"
+                        else
+                            "Guardar e Imprimir"
+                    )
                 }
             }
         }
@@ -852,7 +956,6 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
     }
 }
 
-// 🔧 FIX 2: Componente mejorado para búsqueda de cliente con debounce
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BuscarClienteDropdownMejorado(
@@ -862,12 +965,11 @@ fun BuscarClienteDropdownMejorado(
 ) {
     var expanded by remember { mutableStateOf(false) }
     var textoBusqueda by remember { mutableStateOf(selectedCliente?.nombre ?: "") }
-    var textoBusquedaInterna by remember { mutableStateOf("") } // Para debounce
+    var textoBusquedaInterna by remember { mutableStateOf("") }
     val focusManager = LocalFocusManager.current
 
-    // 🔧 FIX 2: Implementar debounce para evitar que se "corte" la búsqueda
     LaunchedEffect(textoBusquedaInterna) {
-        kotlinx.coroutines.delay(300) // Esperar 300ms antes de filtrar
+        kotlinx.coroutines.delay(300)
         textoBusqueda = textoBusquedaInterna
     }
 
@@ -877,10 +979,9 @@ fun BuscarClienteDropdownMejorado(
         clientes.filter {
             it.nombre.contains(textoBusqueda, ignoreCase = true) ||
                     it.identidad.contains(textoBusqueda, ignoreCase = true)
-        }.take(10) // Limitar a 10 resultados para mejor performance
+        }.take(10)
     }
 
-    // Actualizar cuando cambie el cliente seleccionado externamente
     LaunchedEffect(selectedCliente) {
         if (selectedCliente != null && selectedCliente.nombre.isNotEmpty()) {
             textoBusquedaInterna = selectedCliente.nombre
@@ -893,7 +994,7 @@ fun BuscarClienteDropdownMejorado(
             value = textoBusquedaInterna,
             onValueChange = { newText ->
                 textoBusquedaInterna = newText
-                if (newText.isNotEmpty() && newText.length >= 2) { // Mostrar dropdown desde 2 caracteres
+                if (newText.isNotEmpty() && newText.length >= 2) {
                     expanded = true
                 } else {
                     expanded = false
@@ -952,7 +1053,6 @@ fun BuscarClienteDropdownMejorado(
             }
         )
 
-        // Dropdown con resultados
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },

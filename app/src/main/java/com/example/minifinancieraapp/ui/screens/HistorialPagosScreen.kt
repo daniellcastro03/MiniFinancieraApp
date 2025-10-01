@@ -1102,29 +1102,29 @@ private suspend fun eliminarPagoCorregido(
 private suspend fun reimprimirRecibo(context: Context, pago: PagoItem) {
     try {
         val saldoAnterior = pago.saldoRestante + pago.monto
-        val file = ReciboHelper.generarReciboPDF(
+        val nuevoSaldo = pago.saldoRestante
+
+        // Usar la función correcta de generarReciboAbonoPDF
+        val file = ReciboHelper.generarReciboAbonoPDF(
             context = context,
             cliente = pago.cliente,
             prestamoId = if (pago.numeroPrestamo > 0) "Préstamo Nº ${pago.numeroPrestamo}" else pago.prestamoId,
-            fecha = pago.fecha,
-            montoPagado = pago.monto.toString(),
             saldoAnterior = saldoAnterior,
-            proximoPago = "Consultar sistema",
-            cuota = pago.cuota,
-            cobrador = pago.cobrador,
-            lugar = pago.lugar,
-            firma = pago.firma.ifBlank { pago.cobrador },
-            tipoPago = pago.tipoPago,
-            mora = pago.mora
+            montoAbonado = pago.monto,
+            nuevoSaldo = nuevoSaldo,
+            fecha = pago.fecha,
+            cuota = pago.cuota, // Ya viene con el formato correcto desde la BD
+            cobrador = pago.cobrador
         )
 
-        if (file != null) {
+        if (file != null && file.exists()) {
             ReciboHelper.imprimirPDF(context, file)
-            Toast.makeText(context, "Recibo reimpreso", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Recibo reimpreso correctamente", Toast.LENGTH_SHORT).show()
         } else {
             Toast.makeText(context, "Error al generar PDF", Toast.LENGTH_SHORT).show()
         }
     } catch (e: Exception) {
+        Log.e("ReimprimirRecibo", "Error: ${e.message}", e)
         Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
     }
 }

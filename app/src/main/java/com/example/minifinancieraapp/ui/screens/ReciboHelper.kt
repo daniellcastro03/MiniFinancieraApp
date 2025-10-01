@@ -37,7 +37,6 @@ import android.graphics.RectF
 import android.util.Log
 import com.example.minifinancieraapp.ui.models.ClienteModel
 import com.example.minifinancieraapp.ui.models.PagoItem
-import com.example.minifinancieraapp.ui.screens.CuotaAmortizacion
 import com.google.firebase.firestore.Query
 import com.itextpdf.text.Phrase
 import com.itextpdf.text.pdf.PdfPCell
@@ -46,6 +45,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.DecimalFormat
 
+data class CuotaAmortizacion(
+    val numero: Int,
+    val fecha: String,
+    val capital: Double,
+    val interes: Double,
+    val total: Double,
+    val pagado: Boolean = false,
+    val montoPagado: Double = 0.0,
+    val fechaPago: String? = null
+)
 
 object ReciboHelper {
 
@@ -329,7 +338,9 @@ object ReciboHelper {
         nuevoSaldo: Double,
         fecha: String,
         cuota: String,
-        cobrador: String
+        cobrador: String,
+        proximoPago: String = "",
+        metodoPago: String = "Efectivo"
     ): File? {
         return try {
             val document = Document(Rectangle(226.77f, 700f)) // ancho 80mm
@@ -352,6 +363,7 @@ object ReciboHelper {
             val titleFont = Font(Font.FontFamily.HELVETICA, 16f, Font.BOLD)
             val labelFont = Font(Font.FontFamily.HELVETICA, 10f, Font.BOLD)
             val textFont = Font(Font.FontFamily.HELVETICA, 10f)
+            val smallFont = Font(Font.FontFamily.HELVETICA, 9f)
 
             document.add(Paragraph("CAPITAL EXPRESS", titleFont).apply {
                 alignment = Element.ALIGN_CENTER
@@ -361,28 +373,94 @@ object ReciboHelper {
             })
             document.add(Paragraph(" "))
 
+            // Información del cliente
             document.add(Paragraph("Fecha: $fecha", labelFont))
             document.add(Paragraph("Cliente: $cliente", textFont))
             document.add(Paragraph("Préstamo ID: $prestamoId", textFont))
-            document.add(Paragraph("Cuota Nº: $cuota", textFont))
             document.add(Paragraph("Registrado por: $cobrador", textFont))
             document.add(Paragraph(" "))
 
-            // Saldos
-            document.add(Paragraph("Saldo anterior: L. %.2f".format(saldoAnterior), textFont))
-            document.add(Paragraph("Saldo abonado: L. %.2f".format(montoAbonado), textFont))
-            document.add(Paragraph("Nuevo saldo: L. %.2f".format(nuevoSaldo), labelFont))
+            // Línea separadora
+            document.add(Paragraph("─────────────────────────────", smallFont).apply {
+                alignment = Element.ALIGN_CENTER
+            })
+            document.add(Paragraph(" "))
+
+            // Cuotas pagadas (con mejor formato y saltos de línea)
+            document.add(Paragraph("CUOTAS PAGADAS:", labelFont))
+            document.add(Paragraph(" "))
+
+            // Separar las cuotas por comas y mostrarlas en líneas individuales
+            val cuotas = cuota.split(",")
+            cuotas.forEach { cuotaItem ->
+                val cuotaLimpia = cuotaItem.trim()
+                val cuotaParagraph = Paragraph("  • $cuotaLimpia", textFont)
+                cuotaParagraph.indentationLeft = 10f
+                cuotaParagraph.setLeading(0f, 1.5f)
+                document.add(cuotaParagraph)
+            }
+
+            document.add(Paragraph(" "))
+
+            // Línea separadora
+            document.add(Paragraph("─────────────────────────────", smallFont).apply {
+                alignment = Element.ALIGN_CENTER
+            })
+            document.add(Paragraph(" "))
+
+            // Saldos con mejor formato
+            document.add(Paragraph("DETALLE DE PAGO:", labelFont))
+            document.add(Paragraph(" "))
+
+            document.add(Paragraph("Saldo anterior:    L. %.2f".format(saldoAnterior), textFont))
+            document.add(Paragraph("Monto abonado:     L. %.2f".format(montoAbonado), textFont))
+
+            document.add(Paragraph(" "))
+            document.add(Paragraph("─────────────────────────────", smallFont).apply {
+                alignment = Element.ALIGN_CENTER
+            })
+            document.add(Paragraph(" "))
+
+            document.add(Paragraph("Nuevo saldo:       L. %.2f".format(nuevoSaldo), labelFont).apply {
+                setLeading(0f, 1.2f)
+            })
+            document.add(Paragraph(" "))
+            document.add(Paragraph(" "))
+
+            // CAMPOS CORREGIDOS - CON SALTOS DE LÍNEA
+            if (proximoPago.isNotBlank()) {
+                document.add(Paragraph("Próximo pago:", labelFont))
+                document.add(Paragraph(proximoPago, textFont))
+                document.add(Paragraph(" "))
+            }
+
+            document.add(Paragraph("Método de pago:", labelFont))
+            document.add(Paragraph(metodoPago, textFont))
+            document.add(Paragraph(" "))
+
+            // Línea separadora
+            document.add(Paragraph("─────────────────────────────", smallFont).apply {
+                alignment = Element.ALIGN_CENTER
+            })
             document.add(Paragraph(" "))
 
             // Firma
             document.add(Paragraph("Firma del cobrador:", textFont))
-            document.add(Paragraph("__________________________", textFont))
+            document.add(Paragraph(" "))
+            document.add(Paragraph("_____________________________", textFont))
+            document.add(Paragraph(" "))
             document.add(Paragraph(" "))
 
             // Footer
-            document.add(Paragraph("Gracias por su pago.", textFont))
-            document.add(Paragraph("Capital Express - Danlí, El Paraíso", textFont))
-            document.add(Paragraph("Tu socio financiero de confianza", textFont))
+            document.add(Paragraph("Gracias por su pago.", textFont).apply {
+                alignment = Element.ALIGN_CENTER
+            })
+            document.add(Paragraph("Capital Express - Danlí, El Paraíso", smallFont).apply {
+                alignment = Element.ALIGN_CENTER
+            })
+            document.add(Paragraph("Tu socio financiero de confianza", smallFont).apply {
+                alignment = Element.ALIGN_CENTER
+            })
 
             document.close()
             file
@@ -1502,7 +1580,7 @@ object ReciboHelper {
         context: Context,
         cliente: String,
         prestamoId: String,
-        cuotas: List<CuotaAmortizacion>,
+        cuotas: List<Map<String, Any>>, // Mantiene el formato que usas actualmente
         totalCapital: Double,
         totalInteres: Double,
         mora: Double,
@@ -1559,12 +1637,6 @@ object ReciboHelper {
                 textAlign = Paint.Align.CENTER
             }
 
-            val paintTextRight = Paint().apply {
-                color = colorTexto
-                textSize = 10f
-                textAlign = Paint.Align.RIGHT
-            }
-
             val paintPagado = Paint().apply {
                 color = colorExito
                 textSize = 10f
@@ -1579,9 +1651,11 @@ object ReciboHelper {
                 textAlign = Paint.Align.CENTER
             }
 
-            val paintLine = Paint().apply {
-                color = colorLinea
-                strokeWidth = 1f
+            val paintParcial = Paint().apply {
+                color = Color.parseColor("#FF9800") // Naranja
+                textSize = 10f
+                isFakeBoldText = true
+                textAlign = Paint.Align.CENTER
             }
 
             val paintHeaderBg = Paint().apply {
@@ -1592,7 +1666,7 @@ object ReciboHelper {
                 color = colorFondo
             }
 
-            val ancho = 420 // Aumentado para mejor espacio
+            val ancho = 420
             val alto = 600
             val margen = 25f
             val espacioLinea = 16f
@@ -1623,7 +1697,6 @@ object ReciboHelper {
                     val inputStream = context.assets.open("logo_capital.png")
                     BitmapFactory.decodeStream(inputStream)
                 } catch (e: Exception) {
-                    // Si no se encuentra el logo, crear un placeholder
                     null
                 }
             }
@@ -1631,7 +1704,6 @@ object ReciboHelper {
             // === ENCABEZADO CON LOGO ===
             val logo = cargarLogo()
             if (logo != null) {
-                // Dibujar logo centrado
                 val logoWidth = 60f
                 val logoHeight = 40f
                 val logoX = (ancho - logoWidth) / 2f
@@ -1639,7 +1711,6 @@ object ReciboHelper {
                 canvas.drawBitmap(logo, null, destRect, null)
                 y += logoHeight + 15f
             } else {
-                // Placeholder para logo
                 canvas.drawText("CAPITAL EXPRESS", ancho / 2f, y, paintLogo)
                 y += 25f
             }
@@ -1657,7 +1728,6 @@ object ReciboHelper {
             y += 25f
 
             // === INFORMACIÓN DEL PRÉSTAMO ===
-            // Caja de información con fondo
             val infoRect = RectF(margen, y - 5f, ancho - margen, y + 45f)
             canvas.drawRoundRect(infoRect, 8f, 8f, paintTotalBg)
             canvas.drawRoundRect(infoRect, 8f, 8f, Paint().apply {
@@ -1671,6 +1741,8 @@ object ReciboHelper {
             y += espacioLinea
             canvas.drawText("CLIENTE: $cliente", margen + 10f, y, paintSubtitle)
             y += espacioLinea
+            canvas.drawText("ID PRÉSTAMO: $prestamoId", margen + 10f, y, paintText)
+            y += espacioLinea
             canvas.drawText("FECHA DE EXPORTACIÓN: $fechaExportacion", margen + 10f, y, paintText)
             y += 25f
 
@@ -1679,27 +1751,26 @@ object ReciboHelper {
             val headerRect = RectF(margen, y, ancho - margen, y + headerHeight)
             canvas.drawRoundRect(headerRect, 5f, 5f, paintHeaderBg)
 
-            // Posiciones de columnas optimizadas y mejor espaciadas
+            // Posiciones de columnas optimizadas
             val colPago = margen + 25f
-            val colFecha = margen + 70f
-            val colMonto = margen + 150f
-            val colEstado = margen + 230f
-            val colResta = margen + 310f
+            val colFecha = margen + 80f
+            val colMonto = margen + 160f
+            val colPagado = margen + 230f
+            val colEstado = margen + 310f
 
             y += 18f
-            canvas.drawText("PAGO", colPago, y, paintHeader)
+            canvas.drawText("CUOTA", colPago, y, paintHeader)
             canvas.drawText("FECHA", colFecha, y, paintHeader)
             canvas.drawText("MONTO", colMonto, y, paintHeader)
+            canvas.drawText("PAGADO", colPagado, y, paintHeader)
             canvas.drawText("ESTADO", colEstado, y, paintHeader)
-            canvas.drawText("SALDO", colResta, y, paintHeader)
             y += 15f
 
             val dec = DecimalFormat("#,##0.00")
-            var saldoRestante = totalCapital + totalInteres + mora
 
             // === FILAS DE CUOTAS ===
             var filaImpar = true
-            for (cuota in cuotas) {
+            for (cuotaMap in cuotas) {
                 if (y > alto - 80) nuevaPagina()
 
                 // Fondo alternado
@@ -1708,23 +1779,78 @@ object ReciboHelper {
                     canvas.drawRect(filaRect, Paint().apply { color = Color.parseColor("#F9FAFB") })
                 }
 
-                val estado = if (cuota.pagado) "PAGADO" else "PENDIENTE"
-                val paintEstado = if (cuota.pagado) paintPagado else paintPendiente
-                saldoRestante -= cuota.total
+                // Extraer datos del Map
+                val numero = (cuotaMap["numero"] as? Number)?.toInt() ?: 0
+                val fecha = cuotaMap["fecha"] as? String ?: ""
+                val total = (cuotaMap["total"] as? Number)?.toDouble() ?: 0.0
+                val montoPagado = (cuotaMap["montoPagado"] as? Number)?.toDouble() ?: 0.0
+                val pagado = cuotaMap["pagado"] as? Boolean ?: false
 
-                // Datos de la fila con mejor alineación
-                canvas.drawText("${cuota.numero}", colPago, y, paintTextCenter)
-                canvas.drawText(cuota.fecha, colFecha, y, paintText)
-                canvas.drawText("L. ${dec.format(cuota.total)}", colMonto, y, paintText)
+                // Determinar estado basado en montoPagado y total
+                val estado = when {
+                    montoPagado >= total - 0.01 -> "COMPLETA"
+                    montoPagado > 0 -> "PARCIAL"
+                    else -> "PENDIENTE"
+                }
+
+                val paintEstado = when (estado) {
+                    "COMPLETA" -> paintPagado
+                    "PARCIAL" -> paintParcial
+                    else -> paintPendiente
+                }
+
+                // Datos de la fila
+                canvas.drawText("$numero", colPago, y, paintTextCenter)
+                canvas.drawText(fecha, colFecha, y, paintText)
+                canvas.drawText("L. ${dec.format(total)}", colMonto, y, paintText)
+                canvas.drawText("L. ${dec.format(montoPagado)}", colPagado, y, paintText)
                 canvas.drawText(estado, colEstado, y, paintEstado)
-                canvas.drawText("L. ${dec.format(saldoRestante.coerceAtLeast(0.0))}", colResta, y, paintText)
 
                 y += espacioLinea
                 filaImpar = !filaImpar
             }
 
+            // === RESUMEN FINAL ===
+            if (y > alto - 120) nuevaPagina()
+
+            y += 20f
+            val resumenRect = RectF(margen, y - 5f, ancho - margen, y + 80f)
+            canvas.drawRoundRect(resumenRect, 8f, 8f, paintTotalBg)
+            canvas.drawRoundRect(resumenRect, 8f, 8f, Paint().apply {
+                color = colorLinea
+                style = Paint.Style.STROKE
+                strokeWidth = 1f
+            })
+
+            y += 15f
+            canvas.drawText("RESUMEN DEL PRÉSTAMO", margen + 10f, y, paintSubtitle)
+            y += espacioLinea
+            canvas.drawText("Total Capital: L. ${dec.format(totalCapital)}", margen + 10f, y, paintText)
+            y += espacioLinea
+            canvas.drawText("Total Intereses: L. ${dec.format(totalInteres)}", margen + 10f, y, paintText)
+            if (mora > 0) {
+                y += espacioLinea
+                canvas.drawText("Mora: L. ${dec.format(mora)}", margen + 10f, y, paintText)
+            }
+            y += espacioLinea
+
+            val totalGeneral = totalCapital + totalInteres + mora
+            val totalPagado = cuotas.sumOf { (it["montoPagado"] as? Number)?.toDouble() ?: 0.0 }
+            val saldoPendiente = (totalGeneral - totalPagado).coerceAtLeast(0.0)
+
+            canvas.drawText("TOTAL PRÉSTAMO: L. ${dec.format(totalGeneral)}", margen + 10f, y, paintSubtitle)
+            y += espacioLinea
+            canvas.drawText("TOTAL PAGADO: L. ${dec.format(totalPagado)}", margen + 10f, y, paintText)
+            y += espacioLinea
+            canvas.drawText("SALDO PENDIENTE: L. ${dec.format(saldoPendiente)}", margen + 10f, y,
+                Paint().apply {
+                    color = if (saldoPendiente > 0) Color.RED else colorExito
+                    textSize = 12f
+                    isFakeBoldText = true
+                })
+
             // Pie de página final
-            val piePagina = "Página $pageNum - Generado el $fechaExportacion"
+            val piePagina = "Página $pageNum - Generado el $fechaExportacion - Sistema de Cascada"
             canvas.drawText(piePagina, ancho / 2f, alto - 15f, Paint().apply {
                 color = Color.GRAY
                 textSize = 8f

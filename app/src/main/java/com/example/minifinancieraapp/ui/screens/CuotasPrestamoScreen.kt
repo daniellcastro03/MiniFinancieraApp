@@ -2,14 +2,17 @@ package com.example.minifinancieraapp.ui.screens
 
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.HourglassBottom
-import androidx.compose.material.icons.filled.WbCloudy
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -17,7 +20,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
@@ -32,56 +34,169 @@ import java.text.DecimalFormat
 import java.text.SimpleDateFormat
 import java.util.*
 
-// ===================== MODELO ACTUALIZADO =====================
-data class CuotaAmortizacion(
+// ===================== MODELOS SIMPLIFICADOS PARA NUEVA LÓGICA =====================
+
+data class CuotaInfo(
     val numero: Int,
     val fecha: String,
     val capital: Double,
     val interes: Double,
     val total: Double,
     val descripcion: String = "",
-    var pagado: Boolean = false,
-    var montoParcialPagado: Double = 0.0, // NUEVO: Para cuotas parciales
-    var esParcial: Boolean = false // NUEVO: Indica si es pago parcial
+    val pagada: Boolean = false,
+    val montoPagado: Double = 0.0,
+    val fechaPago: String? = null,
+    val historialPagos: List<String> = emptyList()
 ) {
-    val montoRestante: Double get() = (total - montoParcialPagado).coerceAtLeast(0.0)
-    val porcentajePagado: Double get() = if (total > 0) (montoParcialPagado / total) * 100 else 0.0
+    val porcentajePagado: Double get() = if (total > 0) (montoPagado / total) * 100 else 0.0
+    val estaCompleta: Boolean get() = montoPagado >= total - 0.01
 }
 
-suspend fun recalcularCuotasCompleto(
+// ===================== FUNCIONES PARA NUEVA LÓGICA DE CASCADA =====================
+
+// Función para calcular fechas (mantenida igual)
+private fun calcularFechaCuota(fechaInicio: Date, plazo: String, numeroCuota: Int): String {
+    val calendar = Calendar.getInstance().apply { time = fechaInicio }
+    val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+
+    when (plazo.lowercase()) {
+        "diario" -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota)
+        "lunes a sábado" -> {
+            repeat(numeroCuota) {
+                do {
+                    calendar.add(Calendar.DAY_OF_YEAR, 1)
+                } while (calendar.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY)
+            }
+        }
+        "semanal" -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 7)
+        "quincenal" -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 15)
+        "mensual" -> calendar.add(Calendar.MONTH, numeroCuota)
+        "bimestral" -> calendar.add(Calendar.MONTH, numeroCuota * 2)
+        else -> calendar.add(Calendar.MONTH, numeroCuota)
+    }
+
+    return dateFormat.format(calendar.time)
+}
+
+// Nueva función adaptada para leer la estructura de pagos en cascada
+private suspend fun obtenerEstadoCuotasConCascada(
     db: FirebaseFirestore,
     prestamoId: String
-): List<CuotaAmortizacion> {
+): Map<Int, CuotaInfo> {
     return try {
-        // 1. Obtener datos frescos del préstamo
-        val prestamoDoc = db.collection("prestamos").document(prestamoId).get().await()
-        val monto = prestamoDoc.getDouble("monto") ?: 0.0
-        val cuotasNum = prestamoDoc.getLong("cuotas")?.toInt() ?: 1
-        val plazo = prestamoDoc.getString("plazo") ?: "Mensual"
-        val fechaTimestamp = prestamoDoc.getTimestamp("fecha")
-        val fechaInicio = fechaTimestamp?.toDate() ?: Date()
-        val interesTotal = prestamoDoc.getDouble("interes") ?: prestamoDoc.getDouble("interesTotal") ?: 0.0
+        val pagosSnapshot = db.collection("pagos")
+            .whereEqualTo("prestamoId", prestamoId)
+            .get().await()
 
-        // Normalizar plazo
-        val plazoNormalizado = plazo.lowercase()
+        val informacionCuotas = mutableMapOf<Int, MutableList<Pair<Double, String>>>()
+        val fmtPago = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
 
-        // 2. Reconstruir plan de cuotas base
-        val capitalPorCuota = if (cuotasNum > 0) monto / cuotasNum else 0.0
-        val interesPorCuota = if (cuotasNum > 0) interesTotal / cuotasNum else 0.0
+        Log.d("EstadoCuotasCascada", "Procesando ${pagosSnapshot.documents.size} pagos")
+
+        for (pago in pagosSnapshot.documents) {
+            val fechaPagoStr: String? = when (val fp = pago.get("fechaPago")) {
+                is Timestamp -> fmtPago.format(fp.toDate())
+                is Date -> fmtPago.format(fp)
+                is String -> fp
+                else -> null
+            }
+
+            // Nueva estructura con pagos en cascada
+            val cuotasCubiertas = pago.get("cuotasCubiertas") as? List<*>
+
+            if (cuotasCubiertas != null && cuotasCubiertas.isNotEmpty()) {
+                // Estructura nueva: lista de cuotas cubiertas
+                cuotasCubiertas.forEach { cuotaData ->
+                    if (cuotaData is Map<*, *>) {
+                        val numeroCuota = (cuotaData["numeroCuota"] as? Number)?.toInt() ?: 0
+                        val montoAplicado = (cuotaData["montoAplicado"] as? Number)?.toDouble() ?: 0.0
+
+                        if (numeroCuota > 0 && montoAplicado > 0) {
+                            informacionCuotas.getOrPut(numeroCuota) { mutableListOf() }
+                                .add(Pair(montoAplicado, fechaPagoStr ?: "Sin fecha"))
+
+                            Log.d("EstadoCuotasCascada", "Cuota $numeroCuota: +L. ${String.format("%.2f", montoAplicado)}")
+                        }
+                    }
+                }
+            } else {
+                // Compatibilidad con estructura anterior
+                val numeroCuota = when {
+                    pago.contains("numeroCuota") -> pago.getLong("numeroCuota")?.toInt() ?: 1
+                    pago.contains("cuota") -> pago.getLong("cuota")?.toInt() ?: 1
+                    else -> 1
+                }
+
+                val montoPago = pago.getDouble("monto") ?: 0.0
+                val moraPago = pago.getDouble("mora") ?: 0.0
+                val montoTotal = montoPago + moraPago
+
+                if (montoTotal > 0) {
+                    informacionCuotas.getOrPut(numeroCuota) { mutableListOf() }
+                        .add(Pair(montoTotal, fechaPagoStr ?: "Sin fecha"))
+
+                    Log.d("EstadoCuotasCascada", "Cuota $numeroCuota (legacy): +L. ${String.format("%.2f", montoTotal)}")
+                }
+            }
+        }
+
+        // Consolidar información por cuota
+        val resultadoFinal = mutableMapOf<Int, CuotaInfo>()
+        informacionCuotas.forEach { (numeroCuota, pagos) ->
+            val montoTotalPagado = pagos.sumOf { it.first }
+            val fechasHistorial = pagos.map { it.second }.distinct()
+            val ultimaFechaPago = fechasHistorial.lastOrNull()
+
+            // Crear CuotaInfo temporal (se completará con datos del préstamo después)
+            resultadoFinal[numeroCuota] = CuotaInfo(
+                numero = numeroCuota,
+                fecha = "", // Se llenará después
+                capital = 0.0, // Se llenará después
+                interes = 0.0, // Se llenará después
+                total = 0.0, // Se llenará después
+                montoPagado = montoTotalPagado,
+                fechaPago = ultimaFechaPago,
+                historialPagos = fechasHistorial
+            )
+        }
+
+        Log.d("EstadoCuotasCascada", "Procesadas ${resultadoFinal.size} cuotas con pagos")
+        resultadoFinal
+
+    } catch (e: Exception) {
+        Log.e("EstadoCuotasCascada", "Error obteniendo estado de cuotas: ${e.message}", e)
+        emptyMap()
+    }
+}
+
+// Función para generar plan de cuotas base y aplicar estado de pagos
+private suspend fun generarPlanCuotasConEstado(
+    db: FirebaseFirestore,
+    prestamoId: String,
+    montoPrestamo: Double,
+    interesTotal: Double,
+    cuotasTotales: Int,
+    fechaInicio: Date,
+    plazo: String
+): List<CuotaInfo> {
+    return try {
+        // Generar plan base de cuotas
+        val capitalPorCuota = if (cuotasTotales > 0) montoPrestamo / cuotasTotales else 0.0
+        val interesPorCuota = if (cuotasTotales > 0) interesTotal / cuotasTotales else 0.0
 
         val capitalEntero = capitalPorCuota.toInt()
-        val capitalResiduo = monto - (capitalEntero * cuotasNum)
+        val capitalResiduo = montoPrestamo - (capitalEntero * cuotasTotales)
         val interesEntero = interesPorCuota.toInt()
-        val interesResiduo = interesTotal - (interesEntero * cuotasNum)
+        val interesResiduo = interesTotal - (interesEntero * cuotasTotales)
 
-        val planCuotasBase = mutableListOf<CuotaAmortizacion>()
-        for (i in 0 until cuotasNum) {
-            val capitalCuota = if (i == cuotasNum - 1) capitalEntero + capitalResiduo else capitalEntero.toDouble()
-            val interesCuota = if (i == cuotasNum - 1) interesEntero + interesResiduo else interesEntero.toDouble()
-            val fechaCuota = calcularFechaCuota(fechaInicio, plazoNormalizado, i + 1)
+        val planBase = mutableListOf<CuotaInfo>()
+        for (i in 0 until cuotasTotales) {
+            val capitalCuota = if (i == cuotasTotales - 1) capitalEntero + capitalResiduo else capitalEntero.toDouble()
+            val interesCuota = if (i == cuotasTotales - 1) interesEntero + interesResiduo else interesEntero.toDouble()
+            val fechaCuota = calcularFechaCuota(fechaInicio, plazo, i + 1)
 
-            planCuotasBase.add(
-                CuotaAmortizacion(
+            planBase.add(
+                CuotaInfo(
                     numero = i + 1,
                     fecha = fechaCuota,
                     capital = capitalCuota,
@@ -91,555 +206,30 @@ suspend fun recalcularCuotasCompleto(
             )
         }
 
-        // 3. Aplicar estado de pagos
-        calcularEstadoCuotasConParciales(db, prestamoId, planCuotasBase)
+        // Obtener estado de pagos y aplicarlo
+        val estadoPagos = obtenerEstadoCuotasConCascada(db, prestamoId)
+
+        // Combinar plan base con estado de pagos
+        planBase.map { cuotaBase ->
+            val estadoPago = estadoPagos[cuotaBase.numero]
+            if (estadoPago != null) {
+                cuotaBase.copy(
+                    montoPagado = estadoPago.montoPagado,
+                    pagada = estadoPago.montoPagado >= cuotaBase.total - 0.01,
+                    fechaPago = estadoPago.fechaPago,
+                    historialPagos = estadoPago.historialPagos
+                )
+            } else {
+                cuotaBase
+            }
+        }
 
     } catch (e: Exception) {
-        Log.e("RecalcularCuotas", "Error recalculando cuotas: ${e.message}", e)
+        Log.e("GenerarPlanCuotas", "Error generando plan de cuotas: ${e.message}", e)
         emptyList()
     }
 }
-// ===================== FUNCIONES UNIFICADAS (IGUALES A RegistrarPago) =====================
 
-/** Función unificada para calcular fechas de cuotas con el mismo algoritmo de RegistrarPago */
-private fun calcularFechaCuota(fechaInicio: Date, plazo: String, numeroCuota: Int): String {
-    val calendar = Calendar.getInstance().apply { time = fechaInicio }
-    val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-
-    // Para la primera cuota, calcular desde la fecha de inicio
-    when (plazo.lowercase()) {
-        "diario" -> {
-            calendar.add(Calendar.DAY_OF_YEAR, numeroCuota)
-        }
-        "lunes a sábado" -> {
-            repeat(numeroCuota) {
-                do {
-                    calendar.add(Calendar.DAY_OF_YEAR, 1)
-                } while (calendar.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY)
-            }
-        }
-        "semanal" -> {
-            calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 7)
-        }
-        "quincenal" -> {
-            calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 15)
-        }
-        "mensual" -> {
-            calendar.add(Calendar.MONTH, numeroCuota)
-        }
-        "bimestral" -> {
-            calendar.add(Calendar.MONTH, numeroCuota * 2)
-        }
-        else -> {
-            calendar.add(Calendar.MONTH, numeroCuota) // Default mensual
-        }
-    }
-
-    return dateFormat.format(calendar.time)
-}
-
-/** Función corregida: Lee proximoPago de manera más robusta */
-private fun leerProximoPagoProgramado(
-    doc: com.google.firebase.firestore.DocumentSnapshot
-): String? {
-    val fmt = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-
-    return try {
-        // Intentar leer como Timestamp primero (más común en Firestore)
-        doc.getTimestamp("proximoPago")?.toDate()?.let {
-            return fmt.format(it)
-        }
-
-        // Luego como Date
-        doc.getDate("proximoPago")?.let {
-            return fmt.format(it)
-        }
-
-        // Finalmente como String
-        doc.getString("proximoPago")?.let {
-            return it
-        }
-
-        null
-    } catch (e: Exception) {
-        Log.w("CuotasScreen", "Error leyendo proximoPago: ${e.message}")
-        null
-    }
-}
-
-// ===================== NUEVOS HELPERS PARA CUOTAS PARCIALES =====================
-
-/** NUEVA FUNCIÓN: Calcula el estado de pagos por cuota considerando pagos parciales */
-suspend fun calcularEstadoCuotasConParciales(
-    db: FirebaseFirestore,
-    prestamoId: String,
-    cuotasBase: List<CuotaAmortizacion>
-): List<CuotaAmortizacion> {
-    return try {
-        val pagosSnapshot = db.collection("pagos")
-            .whereEqualTo("prestamoId", prestamoId)
-            .get().await()
-
-        // Mapa para acumular pagos por cuota
-        val pagosPorCuota = mutableMapOf<Int, Double>()
-        val cuotasMarcadasManualmente = mutableSetOf<Int>() // Para trackear cuotas marcadas manualmente
-        val fechasPagoPorCuota = mutableMapOf<Int, String>()
-        val fmtPago = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-
-        // ✅ VERIFICAR PAGOS CORRUPTOS ANTES DE PROCESARLOS
-        Log.d("CuotasScreen", "=== VERIFICANDO PAGOS CORRUPTOS ===")
-        var pagosCorruptos = 0
-        pagosSnapshot.documents.forEach { pago ->
-            val cuotasCubiertas = pago.getLong("cuotasCubiertas")?.toInt() ?: 1
-            val numeroCuota = when {
-                pago.contains("numeroCuota") -> pago.getLong("numeroCuota")?.toInt() ?: 1
-                pago.contains("cuota") -> pago.getLong("cuota")?.toInt() ?: 1
-                else -> 1
-            }
-
-            if (cuotasCubiertas > 1000 || cuotasCubiertas < 0) {
-                pagosCorruptos++
-                Log.e("CuotasScreen", "🚨 PAGO CORRUPTO ENCONTRADO:")
-                Log.e("CuotasScreen", "  - ID del pago: ${pago.id}")
-                Log.e("CuotasScreen", "  - cuotasCubiertas: $cuotasCubiertas")
-                Log.e("CuotasScreen", "  - numeroCuota: $numeroCuota")
-                Log.e("CuotasScreen", "  - monto: ${pago.getDouble("monto")}")
-                Log.e("CuotasScreen", "  - fecha: ${pago.get("fechaPago")}")
-                Log.e("CuotasScreen", "  - Este pago será ignorado para evitar el crash")
-            }
-        }
-
-        if (pagosCorruptos > 0) {
-            Log.w("CuotasScreen", "⚠️ TOTAL DE PAGOS CORRUPTOS DETECTADOS: $pagosCorruptos")
-        } else {
-            Log.d("CuotasScreen", "✅ No se encontraron pagos corruptos")
-        }
-
-        // Procesar todos los pagos y acumular por cuota (CON VALIDACIONES)
-        for (pago in pagosSnapshot.documents) {
-            val numeroCuotaInicial = when {
-                pago.contains("numeroCuota") -> pago.getLong("numeroCuota")?.toInt() ?: 1
-                pago.contains("cuota") -> pago.getLong("cuota")?.toInt() ?: 1
-                else -> 1
-            }
-
-            val cuotasCubiertasOriginal = pago.getLong("cuotasCubiertas")?.toInt() ?: 1
-
-            // ✅ VALIDACIÓN CRÍTICA 1: Detectar y saltar pagos corruptos
-            if (cuotasCubiertasOriginal <= 0 || cuotasCubiertasOriginal > 1000) {
-                Log.w("CuotasScreen", "⚠️ SALTANDO PAGO CORRUPTO: cuotasCubiertas=$cuotasCubiertasOriginal en pago ${pago.id}")
-                continue // Saltar este pago corrupto
-            }
-
-            // ✅ VALIDACIÓN CRÍTICA 2: Verificar que numeroCuota esté en rango válido
-            if (numeroCuotaInicial <= 0 || numeroCuotaInicial > cuotasBase.size) {
-                Log.w("CuotasScreen", "⚠️ SALTANDO PAGO CON CUOTA INVÁLIDA: numeroCuota=$numeroCuotaInicial en pago ${pago.id}")
-                continue // Saltar este pago corrupto
-            }
-
-            // ✅ VALIDACIÓN CRÍTICA 3: Limitar cuotas cubiertas al tamaño máximo posible
-            val cuotasCubiertas = cuotasCubiertasOriginal.coerceAtMost(cuotasBase.size)
-
-            // ✅ VALIDACIÓN CRÍTICA 4: Asegurar que no se salga del rango
-            val rangoFinal = (numeroCuotaInicial + cuotasCubiertas - 1).coerceAtMost(cuotasBase.size)
-            val cuotasCubiertasSeguras = (rangoFinal - numeroCuotaInicial + 1).coerceAtLeast(1)
-
-            val montoPago = pago.getDouble("monto") ?: 0.0
-            val moraPago = pago.getDouble("mora") ?: 0.0
-            val montoTotal = montoPago + moraPago
-
-            // CORRECCIÓN: Detectar si es un pago manual del admin (monto 0.0 pero debería marcar como pagada)
-            val esManual = pago.getString("metodoPago") == "Manual (Admin)" ||
-                    pago.getString("observaciones")?.contains("manualmente") == true
-
-            // Extraer fecha de pago
-            val fechaPagoStr: String? = when (val fp = pago.get("fechaPago")) {
-                is Timestamp -> fmtPago.format(fp.toDate())
-                is Date -> fmtPago.format(fp)
-                is String -> fp
-                else -> null
-            }
-
-            Log.d("CuotasScreen", """
-                Procesando pago SEGURO:
-                - Cuota inicial: $numeroCuotaInicial
-                - Cuotas cubiertas ORIGINAL: $cuotasCubiertasOriginal
-                - Cuotas cubiertas SEGURAS: $cuotasCubiertasSeguras
-                - Rango final: $rangoFinal
-                - Monto: L. ${String.format("%.2f", montoPago)}
-                - Mora: L. ${String.format("%.2f", moraPago)}
-                - Total: L. ${String.format("%.2f", montoTotal)}
-                - Es manual: $esManual
-            """.trimIndent())
-
-            // LÓGICA MEJORADA: Distribuir el pago entre las cuotas
-            if (cuotasCubiertasSeguras == 1) {
-                // Pago a una sola cuota específica
-                if (esManual && montoTotal == 0.0) {
-                    // CORRECCIÓN: Para pagos manuales con monto 0, marcar la cuota como completamente pagada
-                    cuotasMarcadasManualmente.add(numeroCuotaInicial)
-                    Log.d("CuotasScreen", "Cuota $numeroCuotaInicial marcada manualmente como pagada")
-                } else {
-                    pagosPorCuota[numeroCuotaInicial] = (pagosPorCuota[numeroCuotaInicial] ?: 0.0) + montoTotal
-                }
-                fechaPagoStr?.let { fechasPagoPorCuota[numeroCuotaInicial] = it }
-
-            } else if (cuotasCubiertasSeguras > 1) {
-                // Pago que cubre múltiples cuotas - distribuir inteligentemente
-                var montoRestante = montoTotal
-
-                // ✅ USAR RANGO SEGURO PARA EVITAR BUCLES INFINITOS
-                for (i in 0 until cuotasCubiertasSeguras) {
-                    val numCuota = numeroCuotaInicial + i
-
-                    // ✅ DOBLE VERIFICACIÓN: Asegurar que no salgamos del rango
-                    if (numCuota > cuotasBase.size || montoRestante <= 0) {
-                        Log.d("CuotasScreen", "Rompiendo bucle: numCuota=$numCuota, tamaño=${cuotasBase.size}, montoRestante=$montoRestante")
-                        break
-                    }
-
-                    val cuotaBase = cuotasBase.find { it.numero == numCuota }
-                    if (cuotaBase != null) {
-                        val yaAbonado = pagosPorCuota[numCuota] ?: 0.0
-                        val faltante = (cuotaBase.total - yaAbonado).coerceAtLeast(0.0)
-                        val abonoACuota = minOf(montoRestante, faltante)
-
-                        pagosPorCuota[numCuota] = yaAbonado + abonoACuota
-                        montoRestante -= abonoACuota
-
-                        fechaPagoStr?.let { fechasPagoPorCuota[numCuota] = it }
-
-                        Log.d("CuotasScreen", "Cuota $numCuota: abonado L. ${String.format("%.2f", abonoACuota)}, acumulado L. ${String.format("%.2f", pagosPorCuota[numCuota])}")
-                    }
-                }
-
-                // Si sobra dinero, aplicar exceso a la última cuota del rango
-                if (montoRestante > 0.01) { // Tolerancia para decimales
-                    val ultimaCuota = (numeroCuotaInicial + cuotasCubiertasSeguras - 1).coerceAtMost(cuotasBase.size)
-                    pagosPorCuota[ultimaCuota] = (pagosPorCuota[ultimaCuota] ?: 0.0) + montoRestante
-                    Log.d("CuotasScreen", "Exceso de L. ${String.format("%.2f", montoRestante)} aplicado a cuota $ultimaCuota")
-                }
-            }
-        }
-
-        // Actualizar cuotas con el estado calculado
-        cuotasBase.map { cuotaBase ->
-            val montoPagado = pagosPorCuota[cuotaBase.numero] ?: 0.0
-            val fueMarcadaManualmente = cuotasMarcadasManualmente.contains(cuotaBase.numero)
-
-            // CORRECCIÓN: Si fue marcada manualmente, considerar como completamente pagada
-            val completamentePagada = fueMarcadaManualmente || (montoPagado >= cuotaBase.total - 0.01) // Tolerancia de 1 centavo
-            val esParcial = !fueMarcadaManualmente && montoPagado > 0.01 && !completamentePagada
-
-            cuotaBase.copy(
-                // CORRECCIÓN: Si fue marcada manualmente, usar el total de la cuota como monto pagado para efectos de visualización
-                montoParcialPagado = if (fueMarcadaManualmente) cuotaBase.total else montoPagado,
-                pagado = completamentePagada,
-                esParcial = esParcial
-            )
-        }.also { cuotasActualizadas ->
-            Log.d("CuotasScreen", "=== RESUMEN DE CUOTAS ===")
-            cuotasActualizadas.forEach { cuota ->
-                when {
-                    cuota.pagado -> Log.d("CuotasScreen", "Cuota ${cuota.numero}: COMPLETA (L. ${String.format("%.2f", cuota.montoParcialPagado)})")
-                    cuota.esParcial -> Log.d("CuotasScreen", "Cuota ${cuota.numero}: PARCIAL (L. ${String.format("%.2f", cuota.montoParcialPagado)} de L. ${String.format("%.2f", cuota.total)})")
-                    else -> Log.d("CuotasScreen", "Cuota ${cuota.numero}: PENDIENTE")
-                }
-            }
-        }
-
-    } catch (e: Exception) {
-        Log.e("CuotasScreen", "Error calculando estado de cuotas: ${e.message}", e)
-        cuotasBase
-    }
-}
-
-// Función corregida: Lee la fecha programada "proximoPago" de manera más robusta
-suspend fun obtenerFechaProgramadaActual(
-    db: FirebaseFirestore,
-    prestamoId: String
-): String? {
-    return try {
-        val doc = db.collection("prestamos").document(prestamoId).get().await()
-        leerProximoPagoProgramado(doc)
-    } catch (e: Exception) {
-        Log.e("CuotasScreen", "Error obteniendo fecha programada: ${e.message}")
-        null
-    }
-}
-
-// Función para encontrar la próxima cuota sin pagar (actualizada para parciales)
-suspend fun encontrarProximaCuotaSinPagar(
-    db: FirebaseFirestore,
-    prestamoId: String,
-    todasLasCuotas: List<CuotaAmortizacion>
-): String? {
-    return try {
-        val cuotasSinPagar = todasLasCuotas.filter {
-            !it.pagado && it.descripcion != "Mora"
-        }
-        if (cuotasSinPagar.isNotEmpty()) {
-            // Priorizar cuotas parciales, luego por número
-            val proximaCuota = cuotasSinPagar
-                .sortedWith(compareBy<CuotaAmortizacion> { !it.esParcial }.thenBy { it.numero })
-                .first()
-            proximaCuota.fecha
-        } else {
-            "saldado"
-        }
-    } catch (e: Exception) {
-        Log.e("CuotasScreen", "Error encontrando próxima cuota sin pagar: ${e.message}")
-        null
-    }
-}
-
-// ✅ FUNCIÓN CORREGIDA: Registrar abono parcial con actualización completa del préstamo
-suspend fun registrarAbonoParcialCorregido(
-    db: FirebaseFirestore,
-    context: android.content.Context,
-    prestamoId: String,
-    cuota: CuotaAmortizacion,
-    montoAbono: Double,
-    nombreCobrador: String,
-    nombreCliente: String,
-    numeroPrestamo: Int,
-    lugar: String = "El Paraíso, Danlí",
-    metodoPago: String = "Efectivo"
-): Boolean {
-    return try {
-        val fechaActual = Timestamp.now()
-        val fechaFormateada = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(fechaActual.toDate())
-
-        // Validar que el abono no exceda el monto restante
-        val montoRestante = cuota.montoRestante
-        if (montoAbono > montoRestante) {
-            Toast.makeText(context, "El abono no puede exceder el monto restante: L. ${String.format("%.2f", montoRestante)}", Toast.LENGTH_LONG).show()
-            return false
-        }
-
-        // Calcular nuevo estado de la cuota
-        val nuevoMontoPagado = cuota.montoParcialPagado + montoAbono
-        val quedaCompleta = nuevoMontoPagado >= cuota.total - 0.01 // Tolerancia de 1 centavo
-
-        // Obtener datos actuales del préstamo
-        val prestamoDoc = db.collection("prestamos").document(prestamoId).get().await()
-        val saldoActual = prestamoDoc.getDouble("saldo") ?: 0.0
-        val montoPagadoTotal = (prestamoDoc.getDouble("montoPagado") ?: 0.0) + montoAbono
-        val nuevoSaldo = (saldoActual - montoAbono).coerceAtLeast(0.0)
-        val cuotasTotales = prestamoDoc.getLong("cuotas")?.toInt() ?: 1
-        val plazo = prestamoDoc.getString("plazo") ?: "semanal"
-        val fechaInicio = prestamoDoc.getTimestamp("fecha")?.toDate() ?: Date()
-
-        // ✅ CALCULAR PRÓXIMA FECHA CORRECTAMENTE PARA CUOTAS PARCIALES
-        val proximoPago = if (quedaCompleta) {
-            // Si completa la cuota, buscar la siguiente cuota pendiente
-            val estadoCuotasActualizado = obtenerEstadoCuotasDetallado(db, prestamoId)
-            val cuotaEstimada = prestamoDoc.getDouble("cuota") ?: 0.0
-
-            // Simular que esta cuota queda pagada
-            val estadoSimulado = estadoCuotasActualizado.toMutableMap()
-            estadoSimulado[cuota.numero] = cuota.total
-
-            // Encontrar la siguiente cuota sin pagar
-            var proximaCuotaSinPagar: Int? = null
-            for (i in 1..cuotasTotales) {
-                val montoPagadoEnCuota = estadoSimulado[i] ?: 0.0
-                if (montoPagadoEnCuota < cuotaEstimada - 0.01) {
-                    proximaCuotaSinPagar = i
-                    break
-                }
-            }
-
-            if (proximaCuotaSinPagar != null) {
-                calcularFechaCuota(fechaInicio, plazo, proximaCuotaSinPagar)
-            } else {
-                "saldado"
-            }
-        } else {
-            // Si sigue siendo parcial, mantener la fecha de esta cuota
-            cuota.fecha
-        }
-
-        // ✅ GENERAR RECIBO PARA ABONO PARCIAL
-        val pdfFile = ReciboHelper.generarReciboPDF(
-            context = context,
-            cliente = nombreCliente,
-            prestamoId = "Préstamo Nº $numeroPrestamo",
-            fecha = fechaFormateada,
-            montoPagado = montoAbono.toString(),
-            saldoAnterior = saldoActual,
-            proximoPago = proximoPago,
-            cuota = "${cuota.numero} (${if (quedaCompleta) "Completa Parcial" else "Abono Parcial"})",
-            cobrador = nombreCobrador,
-            lugar = lugar,
-            firma = nombreCobrador,
-            tipoPago = metodoPago,
-            mora = 0.0
-        )
-
-        val pdfGenerado = pdfFile != null && pdfFile.exists()
-
-        // ✅ INTENTAR IMPRIMIR AUTOMÁTICAMENTE
-        var pdfImpreso = false
-        if (pdfGenerado) {
-            try {
-                ReciboHelper.imprimirPDF(context, pdfFile!!)
-                pdfImpreso = true
-                Toast.makeText(context, "✅ Recibo impreso correctamente", Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                pdfImpreso = false
-                Toast.makeText(context, "⚠️ Error al imprimir. Compartiendo...", Toast.LENGTH_SHORT).show()
-            }
-            ReciboHelper.compartirReciboPDF(context, pdfFile!!)
-        }
-
-        // ✅ REGISTRAR EL PAGO PARCIAL CON INFORMACIÓN COMPLETA
-        val pagoData = mapOf<String, Any>(
-            "clienteId" to (prestamoDoc.getString("clienteId") ?: ""),
-            "clienteNombre" to nombreCliente,
-            "prestamoId" to prestamoId,
-            "numeroPrestamo" to numeroPrestamo,
-            "monto" to montoAbono,
-            "mora" to 0.0,
-            "fechaPago" to fechaActual,
-            "registradoPor" to nombreCobrador,
-            "nombreCobrador" to nombreCobrador,
-            "numeroCuota" to cuota.numero,
-            "cuota" to cuota.numero,
-            "cuotasCubiertas" to if (quedaCompleta) 1 else 0, // 1 si completa, 0 si es parcial
-            "saldoRestante" to nuevoSaldo,
-            "lugar" to lugar,
-            "firma" to nombreCobrador,
-            "metodoPago" to metodoPago,
-            "plazo" to plazo,
-            "pdfGenerado" to pdfGenerado,
-            "pdfImpreso" to pdfImpreso,
-            "fechaProgramadaOriginal" to (obtenerFechaProgramadaActual(db, prestamoId) ?: ""),
-            "proximaFechaProgramada" to proximoPago,
-            "pagoTardio" to false, // Los abonos parciales desde cuotas no son tardíos
-            // ✅ CAMPOS ESPECÍFICOS PARA ABONOS PARCIALES
-            "esAbonoParcial" to !quedaCompleta,
-            "completaCuotaParcial" to quedaCompleta,
-            "teniaAbonoParcialPrevio" to (cuota.esParcial),
-            "montoAnteriorEnCuota" to cuota.montoParcialPagado,
-            "montoNuevoEnCuota" to nuevoMontoPagado,
-            "montoRestanteCuota" to (cuota.total - nuevoMontoPagado).coerceAtLeast(0.0),
-            "etiquetaCuota" to "${cuota.numero} (${if (quedaCompleta) "Completa Parcial" else "Abono Parcial"})",
-            "observaciones" to when {
-                quedaCompleta -> "Cuota ${cuota.numero} completada con abono parcial desde tabla de cuotas"
-                cuota.esParcial -> "Abono adicional a cuota ${cuota.numero} desde tabla de cuotas"
-                else -> "Primer abono parcial a cuota ${cuota.numero} desde tabla de cuotas"
-            }
-        )
-
-        // ✅ TRANSACCIÓN COMPLETA
-        val batch = db.batch()
-
-        // Guardar en pagos
-        val pagoRef = db.collection("pagos").document()
-        batch.set(pagoRef, pagoData)
-
-        // Guardar en historial
-        val historialRef = db.collection("historial").document()
-        batch.set(historialRef, pagoData)
-
-        // Guardar en historialGlobal
-        val historialGlobalRef = db.collection("historialGlobal").document()
-        batch.set(historialGlobalRef, pagoData)
-
-        // ✅ ACTUALIZAR PRÉSTAMO COMPLETAMENTE
-        val actualizacionPrestamo = mutableMapOf<String, Any>(
-            "saldo" to nuevoSaldo,
-            "montoPagado" to montoPagadoTotal,
-            "fechaUltimaActualizacion" to fechaActual,
-            "ultimoPago" to fechaFormateada,
-            "proximoPago" to proximoPago
-        )
-
-        // Si el préstamo queda saldado, marcarlo
-        if (nuevoSaldo <= 0.01) {
-            actualizacionPrestamo["estado"] = "saldado"
-            actualizacionPrestamo["proximoPago"] = "saldado"
-        } else {
-            actualizacionPrestamo["estado"] = "activo"
-        }
-
-        batch.update(db.collection("prestamos").document(prestamoId), actualizacionPrestamo)
-
-        // ✅ ACTUALIZAR CLIENTE
-        val clienteId = prestamoDoc.getString("clienteId") ?: ""
-        if (clienteId.isNotEmpty()) {
-            val actualizacionCliente = mapOf<String, Any>(
-                "ultimaActividad" to fechaActual,
-                "fechaUltimaActualizacion" to fechaActual
-            )
-            batch.update(db.collection("clientes").document(clienteId), actualizacionCliente)
-        }
-
-        batch.commit().await()
-
-        // ✅ LOG DETALLADO
-        Log.d("AbonoParcialCorregido", """
-            ✅ ABONO PARCIAL REGISTRADO CORRECTAMENTE:
-            - Cuota: ${cuota.numero}
-            - Abono: L. ${String.format("%.2f", montoAbono)}
-            - Monto anterior en cuota: L. ${String.format("%.2f", cuota.montoParcialPagado)}
-            - Monto nuevo en cuota: L. ${String.format("%.2f", nuevoMontoPagado)}
-            - Resta en cuota: L. ${String.format("%.2f", (cuota.total - nuevoMontoPagado).coerceAtLeast(0.0))}
-            - Cuota completa: $quedaCompleta
-            - Nuevo saldo préstamo: L. ${String.format("%.2f", nuevoSaldo)}
-            - Próxima fecha: $proximoPago
-            - PDF generado: $pdfGenerado
-            - PDF impreso: $pdfImpreso
-        """.trimIndent())
-
-        true
-    } catch (e: Exception) {
-        Log.e("AbonoParcialCorregido", "Error registrando abono parcial: ${e.message}", e)
-        Toast.makeText(context, "❌ Error al registrar abono parcial: ${e.message}", Toast.LENGTH_LONG).show()
-        false
-    }
-}
-
-// ✅ FUNCIÓN AUXILIAR: Obtener estado detallado de cuotas (igual que en RegistrarPago)
-private suspend fun obtenerEstadoCuotasDetallado(
-    db: FirebaseFirestore,
-    prestamoId: String
-): Map<Int, Double> {
-    return try {
-        val pagosSnapshot = db.collection("pagos")
-            .whereEqualTo("prestamoId", prestamoId)
-            .get().await()
-
-        val pagosPorCuota = mutableMapOf<Int, Double>()
-
-        for (pago in pagosSnapshot.documents) {
-            val numeroCuotaInicial = when {
-                pago.contains("numeroCuota") -> pago.getLong("numeroCuota")?.toInt() ?: 1
-                pago.contains("cuota") -> pago.getLong("cuota")?.toInt() ?: 1
-                else -> 1
-            }
-
-            val cuotasCubiertas = pago.getLong("cuotasCubiertas")?.toInt() ?: 1
-            val montoPago = pago.getDouble("monto") ?: 0.0
-            val moraPago = pago.getDouble("mora") ?: 0.0
-            val montoTotal = montoPago + moraPago
-
-            // Distribuir el pago entre las cuotas afectadas
-            for (i in 0 until cuotasCubiertas) {
-                val numCuota = numeroCuotaInicial + i
-                pagosPorCuota[numCuota] = (pagosPorCuota[numCuota] ?: 0.0) + montoTotal
-            }
-        }
-
-        pagosPorCuota
-    } catch (e: Exception) {
-        Log.e("EstadoCuotas", "Error obteniendo estado de cuotas: ${e.message}")
-        emptyMap()
-    }
-}
-
-// ===================== UI =====================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: String, rol: String) {
@@ -649,34 +239,117 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
     val formatter = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
     val dec = DecimalFormat("#,##0.00")
 
-    var cuotas by remember { mutableStateOf(listOf<CuotaAmortizacion>()) }
+    // Estados principales
+    var cuotas by remember { mutableStateOf(listOf<CuotaInfo>()) }
     var cargando by remember { mutableStateOf(true) }
     var esActivo by remember { mutableStateOf(true) }
     var estaSaldado by remember { mutableStateOf(false) }
     var errorCarga by remember { mutableStateOf<String?>(null) }
 
+    // Estados del préstamo
     var totalCapital by remember { mutableStateOf(0.0) }
     var totalInteres by remember { mutableStateOf(0.0) }
     var moraAplicada by remember { mutableStateOf(0.0) }
-    var moraPagada by remember { mutableStateOf(false) }
     var nombreCobrador by remember { mutableStateOf("") }
     var nombreCliente by remember { mutableStateOf("") }
     var descripcionPlazo by remember { mutableStateOf("") }
     var proximoPagoProgramado by remember { mutableStateOf<String?>(null) }
     var numeroPrestamo by remember { mutableStateOf(0) }
 
-    // ✅ FUNCIÓN DE CARGA MEJORADA - Sin restricciones de rol
+    // Función de recarga simplificada para nueva lógica
+    suspend fun recargarDatosCompletos() {
+        try {
+            Log.d("CuotasScreenCascada", "=== RECARGANDO CON NUEVA LÓGICA DE CASCADA ===")
+
+            val prestamoDoc = db.collection("prestamos").document(prestamoId).get().await()
+
+            val monto = prestamoDoc.getDouble("monto") ?: 0.0
+            val cuotasNum = prestamoDoc.getLong("cuotas")?.toInt() ?: 1
+            val plazo = prestamoDoc.getString("plazo") ?: "Mensual"
+            val fechaTimestamp = prestamoDoc.getTimestamp("fecha")
+            val fechaInicio = fechaTimestamp?.toDate() ?: Date()
+            val interesTotal = prestamoDoc.getDouble("interes") ?: prestamoDoc.getDouble("interesTotal") ?: 0.0
+
+            totalCapital = monto
+            totalInteres = interesTotal
+
+            // Normalizar descripción del plazo
+            descripcionPlazo = when (plazo.lowercase()) {
+                "diario" -> "Diario (incluye domingos)"
+                "lunes a sábado" -> "Lunes a Sábado (sin domingos)"
+                "semanal" -> "Semanal (cada 7 días)"
+                "quincenal" -> "Quincenal (cada 15 días)"
+                "mensual" -> "Mensual (cada mes calendario)"
+                "bimestral" -> "Bimestral (cada 2 meses calendario)"
+                else -> plazo
+            }
+
+            // Generar plan de cuotas con nueva lógica
+            cuotas = generarPlanCuotasConEstado(
+                db = db,
+                prestamoId = prestamoId,
+                montoPrestamo = monto,
+                interesTotal = interesTotal,
+                cuotasTotales = cuotasNum,
+                fechaInicio = fechaInicio,
+                plazo = plazo.lowercase()
+            )
+
+            // Obtener fecha programada actual (manejar diferentes tipos)
+            proximoPagoProgramado = when (val proximoPago = prestamoDoc.get("proximoPago")) {
+                is Timestamp -> formatter.format(proximoPago.toDate())
+                is Date -> formatter.format(proximoPago)
+                is String -> proximoPago
+                else -> null
+            }
+
+            // Manejar mora (simplificado)
+            val moraValor = prestamoDoc.getDouble("mora") ?: 0.0
+            val moraActiva = moraValor > 0.0
+            moraAplicada = if (moraActiva) moraValor else 0.0
+
+            if (moraActiva) {
+                cuotas = cuotas + CuotaInfo(
+                    numero = cuotas.size + 1,
+                    fecha = "Aplicada (mora)",
+                    capital = 0.0,
+                    interes = 0.0,
+                    total = moraValor,
+                    descripcion = "Mora",
+                    pagada = false // La mora siempre aparece como pendiente hasta que se pague
+                )
+            }
+
+            // Verificar si está saldado (simplificado)
+            val cuotasNormales = cuotas.filter { it.descripcion != "Mora" }
+            val todasPagadas = cuotasNormales.all { it.estaCompleta }
+            val moraCobrada = moraAplicada == 0.0 || cuotas.find { it.descripcion == "Mora" }?.estaCompleta == true
+            estaSaldado = todasPagadas && moraCobrada
+
+            Log.d("CuotasScreenCascada", """
+                ✅ DATOS RECARGADOS CON LÓGICA DE CASCADA:
+                - Cuotas totales: ${cuotasNormales.size}
+                - Completamente pagadas: ${cuotasNormales.count { it.estaCompleta }}
+                - Próxima fecha programada: $proximoPagoProgramado
+                - Estado saldado: $estaSaldado
+                - Sistema: Pagos en cascada sin abonos parciales
+            """.trimIndent())
+
+        } catch (e: Exception) {
+            Log.e("CuotasScreenCascada", "Error recargando datos: ${e.message}", e)
+            throw e
+        }
+    }
+
+    // Carga inicial
     LaunchedEffect(prestamoId) {
         cargando = true
         errorCarga = null
 
         try {
-            Log.d("CuotasScreen", "=== INICIANDO CARGA ===")
-            Log.d("CuotasScreen", "- Usuario: $uid")
-            Log.d("CuotasScreen", "- Rol: $rol")
-            Log.d("CuotasScreen", "- Préstamo ID: $prestamoId")
+            Log.d("CuotasScreenCascada", "=== INICIANDO CARGA CON LÓGICA DE CASCADA ===")
 
-            // ✅ CARGAR DATOS DEL PRÉSTAMO (accesible para todos los roles)
+            // Verificar que el préstamo existe
             val prestamoDoc = db.collection("prestamos").document(prestamoId).get().await()
 
             if (!prestamoDoc.exists()) {
@@ -688,7 +361,7 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                 throw Exception("Este préstamo ha sido eliminado")
             }
 
-            // ✅ VERIFICAR PERMISOS BÁSICOS (cobradores solo pueden ver sus préstamos asignados)
+            // Verificar permisos según rol
             if (rol == "cobrador") {
                 val cobradoresAsignados = prestamoDoc.get("cobradoresAsignados") as? List<*> ?: emptyList<String>()
                 val cobradoresString = cobradoresAsignados.mapNotNull { it as? String }
@@ -696,8 +369,6 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                 if (!cobradoresString.contains(uid)) {
                     throw Exception("No tienes permisos para ver este préstamo")
                 }
-
-                Log.d("CuotasScreen", "✅ Cobrador autorizado para ver préstamo")
             }
 
             val estado = prestamoDoc.getString("estado") ?: "activo"
@@ -705,130 +376,17 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
 
             nombreCliente = prestamoDoc.getString("cliente") ?: "Cliente"
             numeroPrestamo = prestamoDoc.getLong("numeroPrestamo")?.toInt() ?: 0
-            val monto = prestamoDoc.getDouble("monto") ?: 0.0
-            val cuotasNum = prestamoDoc.getLong("cuotas")?.toInt() ?: 1
-            val plazo = prestamoDoc.getString("plazo") ?: "Mensual"
-            val fechaTimestamp = prestamoDoc.getTimestamp("fecha")
-            val fechaInicio = fechaTimestamp?.toDate() ?: Date()
 
-            // Puede venir en distintos campos; normalizamos
-            val interesTotal = prestamoDoc.getDouble("interes") ?: prestamoDoc.getDouble("interesTotal") ?: 0.0
-            totalCapital = monto
-            totalInteres = interesTotal
-
-            // Normalizar texto de plazo para helpers (igual que RegistrarPago)
-            val plazoNormalizado = plazo.lowercase()
-
-            // Descripción coherente con el cálculo
-            descripcionPlazo = when (plazoNormalizado) {
-                "diario" -> "Diario (incluye domingos)"
-                "lunes a sábado" -> "Lunes a Sábado (sin domingos)"
-                "semanal" -> "Semanal (cada 7 días)"
-                "quincenal" -> "Quincenal (cada 15 días)"
-                "mensual" -> "Mensual (cada mes calendario)"
-                "bimestral" -> "Bimestral (cada 2 meses calendario)"
-                else -> plazo
-            }
-
-            // Usar la función corregida para obtener fecha programada
-            proximoPagoProgramado = obtenerFechaProgramadaActual(db, prestamoId)
-
-            Log.d("CuotasScreen", """
-                === DATOS DEL PRÉSTAMO ===
-                - Cliente: $nombreCliente
-                - Capital: L. ${String.format("%.2f", monto)}
-                - Interés total: L. ${String.format("%.2f", interesTotal)}
-                - TOTAL A PAGAR: L. ${String.format("%.2f", monto + interesTotal)}
-                - Plazo: $plazo ($plazoNormalizado)
-                - Cuotas: $cuotasNum
-                - Fecha inicio: ${formatter.format(fechaInicio)}
-                - Próximo pago programado: $proximoPagoProgramado
-                - Estado: $estado
-                - Es activo: $esActivo
-            """.trimIndent())
-
-            // Plan de cuotas usando la función unificada
-            val capitalPorCuota = if (cuotasNum > 0) monto / cuotasNum else 0.0
-            val interesPorCuota = if (cuotasNum > 0) totalInteres / cuotasNum else 0.0
-
-            // Evitar errores por acumulación de decimales
-            val capitalEntero = capitalPorCuota.toInt()
-            val capitalResiduo = monto - (capitalEntero * cuotasNum)
-
-            val interesEntero = interesPorCuota.toInt()
-            val interesResiduo = totalInteres - (interesEntero * cuotasNum)
-
-            val planCuotas = mutableListOf<CuotaAmortizacion>()
-            for (i in 0 until cuotasNum) {
-                val capitalCuota = if (i == cuotasNum - 1) capitalEntero + capitalResiduo else capitalEntero.toDouble()
-                val interesCuota = if (i == cuotasNum - 1) interesEntero + interesResiduo else interesEntero.toDouble()
-
-                // Usar la función unificada para calcular fechas
-                val fechaCuota = calcularFechaCuota(fechaInicio, plazoNormalizado, i + 1)
-
-                planCuotas.add(
-                    CuotaAmortizacion(
-                        numero = i + 1,
-                        fecha = fechaCuota,
-                        capital = capitalCuota,
-                        interes = interesCuota,
-                        total = capitalCuota + interesCuota
-                    )
-                )
-            }
-
-            // === USAR NUEVA FUNCIÓN PARA CALCULAR ESTADO CON PARCIALES ===
-            cuotas = calcularEstadoCuotasConParciales(db, prestamoId, planCuotas)
-
-            // Manejo de mora (igual que antes)
-            val moraValor = prestamoDoc.getDouble("mora") ?: 0.0
-            val moraActiva = moraValor > 0.0 && !moraPagada
-            moraAplicada = if (moraActiva) moraValor else 0.0
-
-            if (moraActiva) {
-                cuotas = cuotas + CuotaAmortizacion(
-                    numero = cuotas.size + 1,
-                    fecha = "Aplicada (mora)",
-                    capital = 0.0,
-                    interes = 0.0,
-                    total = moraValor,
-                    descripcion = "Mora",
-                    pagado = moraPagada
-                )
-            }
-
-            // Verificar si está saldado (actualizado para parciales)
-            val cuotasNormales = cuotas.filter { it.descripcion != "Mora" }
-            val todasPagadas = cuotasNormales.all { it.pagado }
-            val moraCobrada = moraAplicada == 0.0 || moraPagada
-            estaSaldado = todasPagadas && moraCobrada
-
-            if (estaSaldado && esActivo) {
-                db.collection("prestamos").document(prestamoId).update("estado", "saldado").await()
-                esActivo = false
-            }
-
-            // ✅ OBTENER NOMBRE DEL USUARIO (funciona para admin y cobrador)
+            // Obtener nombre del usuario
             val usuarioDoc = db.collection("usuarios").document(uid).get().await()
             nombreCobrador = usuarioDoc.getString("nombre") ?: uid
 
-            Log.d("CuotasScreen", """
-                === RESUMEN FINAL ===
-                - Rol del usuario: $rol
-                - Nombre usuario: $nombreCobrador
-                - Cuotas totales: ${cuotas.filter { it.descripcion != "Mora" }.size}
-                - Cuotas completamente pagadas: ${cuotas.filter { it.descripcion != "Mora" && it.pagado }.size}
-                - Cuotas parcialmente pagadas: ${cuotas.filter { it.descripcion != "Mora" && it.esParcial }.size}
-                - Mora aplicada: L. ${String.format("%.2f", moraAplicada)}
-                - Mora pagada: $moraPagada
-                - Estado saldado: $estaSaldado
-                - Carga exitosa: SÍ
-            """.trimIndent())
+            // Cargar datos completos
+            recargarDatosCompletos()
 
         } catch (e: Exception) {
-            Log.e("CuotasScreen", "Error al cargar datos: ${e.message}", e)
+            Log.e("CuotasScreenCascada", "Error al cargar datos: ${e.message}", e)
             errorCarga = e.message ?: "Error desconocido"
-            Toast.makeText(context, "Error al cargar datos: ${e.message}", Toast.LENGTH_LONG).show()
         } finally {
             cargando = false
         }
@@ -837,786 +395,422 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Tabla de Amortización", color = Color.White) },
+                title = {
+                    Text(
+                        "Cuotas - Sistema Cascada",
+                        color = Color.White,
+                        fontSize = 18.sp
+                    )
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0061A7))
             )
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .padding(16.dp)
-                .fillMaxSize()
-        ) {
-            when {
-                cargando -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator()
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text("Cargando tabla de cuotas...")
+        when {
+            cargando -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = Color(0xFF0061A7))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Cargando información...", color = Color.Gray)
+                    }
+                }
+            }
+
+            errorCarga != null -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Card(
+                        modifier = Modifier.padding(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                "Error",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 20.sp,
+                                color = Color(0xFFD32F2F)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                errorCarga!!,
+                                color = Color(0xFFD32F2F),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(20.dp))
+                            Button(
+                                onClick = { navController.popBackStack() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2))
+                            ) {
+                                Text("Volver", color = Color.White)
+                            }
                         }
                     }
                 }
+            }
 
-                errorCarga != null -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            else -> {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    contentPadding = PaddingValues(16.dp)
+                ) {
+                    // INFORMACIÓN GENERAL DEL PRÉSTAMO
+                    item {
                         Card(
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE))
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5)),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                         ) {
-                            Column(
-                                modifier = Modifier.padding(24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
+                            Column(modifier = Modifier.padding(20.dp)) {
+                                // Título de la sección
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(
+                                        Icons.Default.Info,
+                                        contentDescription = null,
+                                        tint = Color(0xFF0061A7)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        "Información del Préstamo",
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF0061A7)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                // Información en dos columnas
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    // Columna izquierda
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        InfoRow(Icons.Default.Person, "Cliente", nombreCliente)
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        InfoRow(Icons.Default.DateRange, "Modalidad", descripcionPlazo)
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        InfoRow(Icons.Default.AttachMoney, "Capital", "L. ${dec.format(totalCapital)}")
+                                    }
+
+                                    Spacer(modifier = Modifier.width(16.dp))
+
+                                    // Columna derecha
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        InfoRow(Icons.Default.AttachMoney, "Interés", "L. ${dec.format(totalInteres)}")
+                                        Spacer(modifier = Modifier.height(8.dp))
+
+                                        val cuotasNormales = cuotas.filter { it.descripcion != "Mora" }
+                                        InfoRow(Icons.Default.DateRange, "Cuotas", "${cuotasNormales.size}")
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        proximoPagoProgramado?.let { fecha ->
+                                            Text(
+                                                "Próximo pago: $fecha",
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF1976D2),
+                                                fontSize = 14.sp
+                                            )
+                                        }
+                                    }
+                                }
+
+                                if (moraAplicada > 0.0) {
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE))
+                                    ) {
+                                        Text(
+                                            "Mora aplicada: L. ${dec.format(moraAplicada)}",
+                                            modifier = Modifier.padding(12.dp),
+                                            color = Color.Red,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+                                HorizontalDivider(color = Color(0xFFE0E0E0))
+                                Spacer(modifier = Modifier.height(12.dp))
+
                                 Text(
-                                    "Error al cargar",
+                                    "Total a pagar: L. ${dec.format(totalCapital + totalInteres + moraAplicada)}",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 18.sp,
-                                    color = Color(0xFFD32F2F)
+                                    color = Color(0xFF0061A7)
+                                )
+                            }
+                        }
+                    }
+
+                    // PROGRESO DEL PRÉSTAMO
+                    item {
+                        val cuotasNormales = cuotas.filter { it.descripcion != "Mora" }
+                        val cuotasPagadas = cuotasNormales.count { it.estaCompleta }
+                        val totalCuotas = cuotasNormales.size
+                        val progreso = if (totalCuotas > 0) cuotasPagadas.toFloat() / totalCuotas else 0f
+
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (estaSaldado) Color(0xFFE8F5E8) else Color.White
+                            ),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(20.dp)) {
+                                Text(
+                                    if (estaSaldado) "Préstamo Saldado ✓" else "Progreso de Pagos",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (estaSaldado) Color(0xFF4CAF50) else Color(0xFF0061A7)
+                                )
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                if (!estaSaldado) {
+                                    LinearProgressIndicator(
+                                        progress = progreso,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(12.dp),
+                                        color = Color(0xFF4CAF50),
+                                        trackColor = Color(0xFFE0E0E0),
+                                    )
+
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                }
+
+                                Text(
+                                    "$cuotasPagadas de $totalCuotas cuotas completadas (${String.format("%.0f", progreso * 100)}%)",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = if (estaSaldado) Color(0xFF388E3C) else Color(0xFF666666)
+                                )
+                            }
+                        }
+                    }
+
+                    // INFORMACIÓN DEL SISTEMA
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1))
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    "Sistema de Pagos en Cascada",
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFE65100),
+                                    fontSize = 16.sp
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    errorCarga!!,
-                                    color = Color(0xFFD32F2F),
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    "Los pagos se distribuyen automáticamente completando cuotas en orden secuencial. No hay abonos parciales.",
+                                    color = Color(0xFFBF360C),
+                                    fontSize = 14.sp
                                 )
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Button(
-                                    onClick = { navController.popBackStack() },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2))
-                                ) {
-                                    Text("Volver", color = Color.White)
-                                }
                             }
                         }
                     }
-                }
 
-                else -> {
-                    // ---- Cabecera ACTUALIZADA ----
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD))
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text("Información del Préstamo", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text("Cliente: $nombreCliente")
-                            Text("Tipo de plazo: $descripcionPlazo")
-                            proximoPagoProgramado?.let {
-                                Text(
-                                    "Próximo pago programado: $it",
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF1976D2)
+                    // BOTÓN EXPORTAR PDF
+                    item {
+                        Button(
+                            onClick = {
+                                val pdfFile = ReciboHelper.generarCuotasPDF(
+                                    context = context,
+                                    cliente = nombreCliente,
+                                    prestamoId = prestamoId,
+                                    cuotas.map { cuota ->
+                                        mapOf(
+                                            "numero" to cuota.numero,
+                                            "fecha" to cuota.fecha,
+                                            "capital" to cuota.capital,
+                                            "interes" to cuota.interes,
+                                            "total" to cuota.total,
+                                            "pagado" to cuota.estaCompleta,
+                                            "montoPagado" to cuota.montoPagado,
+                                            "fechaPago" to (cuota.fechaPago ?: "")
+                                        )
+                                    },
+                                    totalCapital = totalCapital,
+                                    totalInteres = totalInteres,
+                                    mora = moraAplicada,
+                                    fechaExportacion = formatter.format(Date())
                                 )
-                            }
-                            Text("Número de cuotas: ${cuotas.filter { it.descripcion != "Mora" }.size}")
-                            Text("Capital: L. ${dec.format(totalCapital)}")
-                            Text("Interés Total: L. ${dec.format(totalInteres)}")
-
-                            val cuotasNormales = cuotas.filter { it.descripcion != "Mora" }
-                            val cuotasPagadas = cuotasNormales.count { it.pagado }
-                            val cuotasParciales = cuotasNormales.count { it.esParcial }
-                            val totalCuotas = cuotasNormales.size
-
-                            // PROGRESO MEJORADO con info de parciales
-                            Text(
-                                "Progreso: $cuotasPagadas completas + $cuotasParciales parciales de $totalCuotas cuotas",
-                                fontWeight = FontWeight.Medium,
-                                color = when {
-                                    cuotasPagadas == totalCuotas -> Color(0xFF4CAF50)
-                                    cuotasParciales > 0 -> Color(0xFFFF9800)
-                                    else -> Color(0xFF1976D2)
+                                if (pdfFile != null) {
+                                    ReciboHelper.compartirReciboPDF(context, pdfFile)
+                                    Toast.makeText(context, "PDF generado correctamente", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Error al generar PDF", Toast.LENGTH_LONG).show()
                                 }
-                            )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2))
+                        ) {
+                            Text("📄 Exportar Cuotas en PDF", color = Color.White, fontSize = 16.sp)
+                        }
+                    }
 
-                            if (moraAplicada > 0.0) {
+                    // LISTA DE CUOTAS
+                    items(cuotas) { cuota ->
+                        CuotaCard(
+                            cuota = cuota,
+                            dec = dec,
+                            esActivo = esActivo,
+                            rol = rol,
+                            onMarcarPagada = {
+                                scope.launch {
+                                    try {
+                                        withContext(Dispatchers.IO) {
+                                            // Crear pago manual usando la nueva estructura de cascada
+                                            val abonoManual = mapOf(
+                                                "prestamoId" to prestamoId,
+                                                "monto" to cuota.total,
+                                                "mora" to 0.0,
+                                                "fechaPago" to Timestamp.now(),
+                                                "registradoPor" to uid,
+                                                "nombreCobrador" to nombreCobrador,
+                                                "clienteNombre" to nombreCliente,
+                                                "metodoPago" to "Manual (Admin)",
+                                                "sistemaPagoEnCascada" to true,
+                                                "cuotasCubiertas" to listOf(
+                                                    mapOf(
+                                                        "numeroCuota" to cuota.numero,
+                                                        "montoAplicado" to cuota.total,
+                                                        "completada" to true
+                                                    )
+                                                ),
+                                                "observaciones" to "Marcado manualmente por administrador"
+                                            )
+
+                                            db.collection("pagos").add(abonoManual).await()
+
+                                            // Actualizar préstamo
+                                            val prestamoRef = db.collection("prestamos").document(prestamoId)
+                                            val prestamoSnap = prestamoRef.get().await()
+                                            val saldoActual = prestamoSnap.getDouble("saldo") ?: 0.0
+                                            val montoPagadoActual = prestamoSnap.getDouble("montoPagado") ?: 0.0
+
+                                            val nuevoSaldo = (saldoActual - cuota.total).coerceAtLeast(0.0)
+                                            val nuevoMontoPagado = montoPagadoActual + cuota.total
+
+                                            prestamoRef.update(mapOf(
+                                                "saldo" to nuevoSaldo,
+                                                "montoPagado" to nuevoMontoPagado,
+                                                "fechaUltimaActualizacion" to Timestamp.now()
+                                            )).await()
+                                        }
+
+                                        Toast.makeText(context, "Cuota marcada como pagada", Toast.LENGTH_SHORT).show()
+                                        recargarDatosCompletos()
+
+                                    } catch (e: Exception) {
+                                        Log.e("CuotasScreenCascada", "Error al marcar pago: ${e.message}", e)
+                                        Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                        )
+                    }
+
+                    // RESUMEN FINAL
+                    item {
+                        val cuotasNormales = cuotas.filter { it.descripcion != "Mora" }
+                        val cuotasCompletas = cuotasNormales.count { it.estaCompleta }
+                        val cuotasConPagoParcial = cuotasNormales.count { it.montoPagado > 0 && !it.estaCompleta }
+                        val cuotasPendientes = cuotasNormales.count { it.montoPagado == 0.0 }
+
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF3E5F5))
+                        ) {
+                            Column(modifier = Modifier.padding(20.dp)) {
                                 Text(
-                                    "Mora aplicada: L. ${dec.format(moraAplicada)}",
-                                    color = if (moraPagada) Color(0xFF4CAF50) else Color.Red,
-                                    fontWeight = FontWeight.Bold
+                                    "Resumen del Sistema",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp,
+                                    color = Color(0xFF7B1FA2)
+                                )
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                ResumenRow("Completadas", cuotasCompletas, Color(0xFF388E3C))
+                                ResumenRow("Con pago parcial", cuotasConPagoParcial, Color(0xFFFF9800))
+                                ResumenRow("Pendientes", cuotasPendientes, Color(0xFF757575))
+
+                                Spacer(modifier = Modifier.height(12.dp))
+                                HorizontalDivider(color = Color(0xFFE1BEE7))
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                Text(
+                                    "El sistema de cascada elimina los abonos parciales distribuyendo automáticamente los pagos para completar cuotas en orden secuencial.",
+                                    color = Color(0xFF4A148C),
+                                    fontSize = 14.sp,
+                                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
                                 )
                             }
-                            Divider(modifier = Modifier.padding(vertical = 8.dp))
-                            Text(
-                                "Total a pagar: L. ${dec.format(totalCapital + totalInteres + moraAplicada)}",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp
-                            )
+                        }
+                    }
 
-                            // ✅ MOSTRAR ROL DEL USUARIO PARA DEBUG
+                    // BOTONES DE NAVEGACIÓN
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { navController.popBackStack() },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = Color(0xFF0061A7)
+                                )
+                            ) {
+                                Text("← Regresar")
+                            }
+
+                            Button(
+                                onClick = { navController.popBackStack() },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A7))
+                            ) {
+                                Text("Ir a Registrar Pago →", color = Color.White)
+                            }
+                        }
+                    }
+
+                    // INFORMACIÓN DEL USUARIO
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFFAFAFA))
+                        ) {
                             Text(
-                                "Usuario: $nombreCobrador ($rol)",
+                                "Usuario: $nombreCobrador ($rol) | Préstamo #$numeroPrestamo",
+                                modifier = Modifier.padding(12.dp),
                                 fontSize = 12.sp,
                                 color = Color.Gray,
                                 fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
                             )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // ---- Exportar PDF (disponible para admin y cobrador) ----
-                    Button(
-                        onClick = {
-                            val pdfFile = ReciboHelper.generarCuotasPDF(
-                                context = context,
-                                cliente = nombreCliente,
-                                prestamoId = prestamoId,
-                                cuotas = cuotas,
-                                totalCapital = totalCapital,
-                                totalInteres = totalInteres,
-                                mora = moraAplicada,
-                                fechaExportacion = formatter.format(Date())
-                            )
-                            if (pdfFile != null) {
-                                ReciboHelper.compartirReciboPDF(context, pdfFile)
-                                Toast.makeText(context, "PDF generado correctamente", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(context, "Error al generar PDF", Toast.LENGTH_LONG).show()
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2))
-                    ) {
-                        Text("Exportar Cuotas en PDF", color = Color.White)
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    if (estaSaldado) {
-                        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFD4F6D4))) {
-                            Text(
-                                "Este préstamo está completamente saldado",
-                                modifier = Modifier.padding(16.dp),
-                                color = Color(0xFF2E7D32),
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
-
-                    // ---- Lista de cuotas ACTUALIZADA CON PERMISOS CORREGIDOS ----
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(cuotas) { cuota ->
-                            var mostrarDialogoAdmin by remember { mutableStateOf(false) }
-                            var mostrarDialogoAbonoParcial by remember { mutableStateOf(false) }
-                            var montoAbonoParcial by remember { mutableStateOf("") }
-
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = when {
-                                        cuota.pagado -> Color(0xFFD0F0C0) // Verde para completas
-                                        cuota.esParcial -> Color(0xFFFFF3E0) // Naranja claro para parciales
-                                        else -> Color.White // Blanco para pendientes
-                                    }
-                                )
-                            ) {
-                                Column(modifier = Modifier.padding(12.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            "Cuota ${cuota.numero}" + if (cuota.descripcion.isNotEmpty()) " (${cuota.descripcion})" else "",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 16.sp
-                                        )
-
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(
-                                                when {
-                                                    cuota.pagado -> Icons.Default.CheckCircle
-                                                    cuota.esParcial -> Icons.Default.WbCloudy
-                                                    else -> Icons.Default.HourglassBottom
-                                                },
-                                                contentDescription = null,
-                                                tint = when {
-                                                    cuota.pagado -> Color(0xFF388E3C)
-                                                    cuota.esParcial -> Color(0xFFFF9800)
-                                                    else -> Color.Gray
-                                                }
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                when {
-                                                    cuota.pagado -> "Completa"
-                                                    cuota.esParcial -> "Parcial (${String.format("%.0f", cuota.porcentajePagado)}%)"
-                                                    else -> "Pendiente"
-                                                },
-                                                color = when {
-                                                    cuota.pagado -> Color(0xFF388E3C)
-                                                    cuota.esParcial -> Color(0xFFFF9800)
-                                                    else -> Color.Gray
-                                                },
-                                                fontWeight = FontWeight.Medium
-                                            )
-                                        }
-                                    }
-
-                                    if (cuota.descripcion != "Mora") Text("Fecha: ${cuota.fecha}")
-
-                                    if (cuota.capital > 0) Text("Capital: L. ${dec.format(cuota.capital)}")
-                                    if (cuota.interes > 0) Text("Interés: L. ${dec.format(cuota.interes)}")
-
-                                    Text(
-                                        "Total: L. ${dec.format(cuota.total)}",
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (cuota.descripcion == "Mora") Color.Red else Color.Black
-                                    )
-
-                                    // MOSTRAR INFORMACIÓN DE PAGOS PARCIALES
-                                    if (cuota.esParcial) {
-                                        Text(
-                                            "Pagado: L. ${dec.format(cuota.montoParcialPagado)}",
-                                            color = Color(0xFF388E3C),
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        Text(
-                                            "Resta: L. ${dec.format(cuota.montoRestante)}",
-                                            color = Color(0xFFFF9800),
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-
-                                    // ✅ BOTONES CON PERMISOS CORREGIDOS
-                                    if (!cuota.pagado && esActivo && cuota.descripcion != "Mora") {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(top = 8.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            // ✅ ABONO PARCIAL: Disponible para ADMIN y COBRADOR
-                                            if (rol == "admin" || rol == "cobrador") {
-                                                Button(
-                                                    onClick = { mostrarDialogoAbonoParcial = true },
-                                                    modifier = Modifier.weight(1f),
-                                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800))
-                                                ) {
-                                                    Text(
-                                                        if (cuota.esParcial) "Abonar más" else "Abono Parcial",
-                                                        color = Color.White,
-                                                        fontSize = 12.sp
-                                                    )
-                                                }
-                                            }
-
-                                            // ✅ MARCAR COMO PAGADA: SOLO ADMIN
-                                            if (rol == "admin") {
-                                                Button(
-                                                    onClick = { mostrarDialogoAdmin = true },
-                                                    modifier = Modifier.weight(1f),
-                                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A7))
-                                                ) {
-                                                    Text(
-                                                        "Marcar completa",
-                                                        color = Color.White,
-                                                        fontSize = 12.sp
-                                                    )
-                                                }
-                                            } else {
-                                                // ✅ ESPACIO PARA MANTENER ALINEACIÓN
-                                                Spacer(modifier = Modifier.weight(1f))
-                                            }
-                                        }
-
-                                        // Diálogo para abono parcial (admin y cobrador)
-                                        if (mostrarDialogoAbonoParcial && (rol == "admin" || rol == "cobrador")) {
-                                            AlertDialog(
-                                                onDismissRequest = {
-                                                    mostrarDialogoAbonoParcial = false
-                                                    montoAbonoParcial = ""
-                                                },
-                                                title = { Text("Abono Parcial - Cuota ${cuota.numero}") },
-                                                text = {
-                                                    Column {
-                                                        Text("Total de la cuota: L. ${dec.format(cuota.total)}")
-                                                        if (cuota.esParcial) {
-                                                            Text("Ya pagado: L. ${dec.format(cuota.montoParcialPagado)}")
-                                                            Text(
-                                                                "Resta por pagar: L. ${dec.format(cuota.montoRestante)}",
-                                                                fontWeight = FontWeight.Bold,
-                                                                color = Color(0xFFFF9800)
-                                                            )
-                                                        }
-                                                        Spacer(modifier = Modifier.height(8.dp))
-                                                        OutlinedTextField(
-                                                            value = montoAbonoParcial,
-                                                            onValueChange = { montoAbonoParcial = it },
-                                                            label = { Text("Monto a abonar") },
-                                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                                            modifier = Modifier.fillMaxWidth()
-                                                        )
-                                                    }
-                                                },
-                                                confirmButton = {
-                                                    TextButton(
-                                                        onClick = {
-                                                            val monto = montoAbonoParcial.toDoubleOrNull()
-                                                            if (monto != null && monto > 0) {
-                                                                mostrarDialogoAbonoParcial = false
-                                                                montoAbonoParcial = ""
-
-                                                                scope.launch {
-                                                                    try {
-                                                                        val exito = registrarAbonoParcialCorregido(
-                                                                            db = db,
-                                                                            context = context,
-                                                                            prestamoId = prestamoId,
-                                                                            cuota = cuota,
-                                                                            montoAbono = monto,
-                                                                            nombreCobrador = nombreCobrador,
-                                                                            nombreCliente = nombreCliente,
-                                                                            numeroPrestamo = numeroPrestamo
-                                                                        )
-
-                                                                        if (exito) {
-                                                                            Toast.makeText(
-                                                                                context,
-                                                                                "✅ Abono parcial registrado correctamente",
-                                                                                Toast.LENGTH_SHORT
-                                                                            ).show()
-
-                                                                            // ✅ RECALCULAR CUOTAS COMPLETO
-                                                                            cuotas = recalcularCuotasCompleto(db, prestamoId)
-
-                                                                            // ✅ TAMBIÉN ACTUALIZAR LA MORA SI EXISTE
-                                                                            val prestamoDocActualizado = db.collection("prestamos").document(prestamoId).get().await()
-                                                                            val moraValor = prestamoDocActualizado.getDouble("mora") ?: 0.0
-                                                                            val moraActiva = moraValor > 0.0 && !moraPagada
-                                                                            moraAplicada = if (moraActiva) moraValor else 0.0
-
-                                                                            if (moraActiva) {
-                                                                                cuotas = cuotas + CuotaAmortizacion(
-                                                                                    numero = cuotas.size + 1,
-                                                                                    fecha = "Aplicada (mora)",
-                                                                                    capital = 0.0,
-                                                                                    interes = 0.0,
-                                                                                    total = moraValor,
-                                                                                    descripcion = "Mora",
-                                                                                    pagado = moraPagada
-                                                                                )
-                                                                            }
-
-                                                                            // ✅ VERIFICAR SI ESTÁ SALDADO
-                                                                            val cuotasNormales = cuotas.filter { it.descripcion != "Mora" }
-                                                                            val todasPagadas = cuotasNormales.all { it.pagado }
-                                                                            val moraCobrada = moraAplicada == 0.0 || moraPagada
-                                                                            estaSaldado = todasPagadas && moraCobrada
-
-                                                                            if (estaSaldado && esActivo) {
-                                                                                db.collection("prestamos").document(prestamoId).update("estado", "saldado").await()
-                                                                                esActivo = false
-                                                                            }
-
-                                                                            // ✅ ACTUALIZAR FECHA PROGRAMADA
-                                                                            proximoPagoProgramado = obtenerFechaProgramadaActual(db, prestamoId)
-
-                                                                            Log.d("AbonoParcialUI", "✅ Interfaz actualizada correctamente para $rol")
-                                                                        }
-                                                                    } catch (e: Exception) {
-                                                                        Log.e("AbonoParcial", "Error: ${e.message}", e)
-                                                                        Toast.makeText(
-                                                                            context,
-                                                                            "❌ Error al registrar abono parcial",
-                                                                            Toast.LENGTH_LONG
-                                                                        ).show()
-                                                                    }
-                                                                }
-                                                            } else {
-                                                                Toast.makeText(
-                                                                    context,
-                                                                    "Ingresa un monto válido",
-                                                                    Toast.LENGTH_SHORT
-                                                                ).show()
-                                                            }
-                                                        }
-                                                    ) {
-                                                        Text("Registrar Abono", color = Color(0xFF0061A7))
-                                                    }
-                                                },
-                                                dismissButton = {
-                                                    TextButton(
-                                                        onClick = {
-                                                            mostrarDialogoAbonoParcial = false
-                                                            montoAbonoParcial = ""
-                                                        }
-                                                    ) {
-                                                        Text("Cancelar")
-                                                    }
-                                                }
-                                            )
-                                        }
-                                    }
-
-                                    // ---- Marcar manualmente como pagada (SOLO ADMIN) ----
-                                    if (mostrarDialogoAdmin && rol == "admin") {
-                                        AlertDialog(
-                                            onDismissRequest = { mostrarDialogoAdmin = false },
-                                            title = { Text("Confirmar acción") },
-                                            text = { Text("¿Marcar esta cuota como pagada manualmente?\nSe registrará un pago administrativo para control.") },
-                                            confirmButton = {
-                                                TextButton(onClick = {
-                                                    mostrarDialogoAdmin = false
-
-                                                    scope.launch {
-                                                        try {
-                                                            withContext(Dispatchers.IO) {
-                                                                // CORRECCIÓN: Crear registro de pago administrativo con valor real de la cuota
-                                                                val montoAPagar = if (cuota.descripcion == "Mora") {
-                                                                    cuota.total // Para mora, todo el monto va como mora
-                                                                } else {
-                                                                    cuota.total // Para cuotas normales, todo como monto
-                                                                }
-
-                                                                val abonoManual = mapOf(
-                                                                    "prestamoId" to prestamoId,
-                                                                    // CORRECCIÓN CLAVE: Usar el monto real de la cuota en lugar de 0.0
-                                                                    "monto" to if (cuota.descripcion == "Mora") 0.0 else montoAPagar,
-                                                                    "mora" to if (cuota.descripcion == "Mora") montoAPagar else 0.0,
-                                                                    "fechaPago" to Timestamp.now(),
-                                                                    "registradoPor" to nombreCobrador,
-                                                                    "numeroCuota" to cuota.numero,
-                                                                    "cuota" to cuota.numero,
-                                                                    "cuotasCubiertas" to 1,
-                                                                    "saldoRestante" to "manual",
-                                                                    "lugar" to "Marcado manualmente",
-                                                                    "firma" to nombreCobrador,
-                                                                    "metodoPago" to "Manual (Admin)", // Identificador clave para reconocer pagos manuales
-                                                                    "clienteNombre" to nombreCliente,
-                                                                    "observaciones" to "Marcado manualmente por administrador - Cuota ${cuota.numero}"
-                                                                )
-
-                                                                val batch = db.batch()
-                                                                val pagosRef = db.collection("pagos").document()
-                                                                val historialRef = db.collection("historial").document()
-                                                                val historialGlobalRef = db.collection("historialGlobal").document()
-
-                                                                batch.set(pagosRef, abonoManual)
-                                                                batch.set(historialRef, abonoManual)
-                                                                batch.set(historialGlobalRef, abonoManual)
-
-                                                                // CORRECCIÓN: Actualizar también el saldo del préstamo
-                                                                val prestamoRef = db.collection("prestamos").document(prestamoId)
-                                                                val prestamoSnap = prestamoRef.get().await()
-                                                                val saldoActual = prestamoSnap.getDouble("saldo") ?: 0.0
-                                                                val montoPagadoActual = prestamoSnap.getDouble("montoPagado") ?: 0.0
-
-                                                                val nuevoSaldo = (saldoActual - montoAPagar).coerceAtLeast(0.0)
-                                                                val nuevoMontoPagado = montoPagadoActual + montoAPagar
-
-                                                                batch.update(prestamoRef, mapOf(
-                                                                    "saldo" to nuevoSaldo,
-                                                                    "montoPagado" to nuevoMontoPagado,
-                                                                    "fechaUltimaActualizacion" to Timestamp.now()
-                                                                ))
-
-                                                                batch.commit().await()
-
-                                                                Log.d("CuotasScreen", """
-                                                                    CUOTA MARCADA MANUALMENTE POR ADMIN:
-                                                                    - Usuario: $nombreCobrador ($rol)
-                                                                    - Cuota ${cuota.numero}: L. ${String.format("%.2f", montoAPagar)}
-                                                                    - Nuevo saldo: L. ${String.format("%.2f", nuevoSaldo)}
-                                                                    - Nuevo monto pagado: L. ${String.format("%.2f", nuevoMontoPagado)}
-                                                                """.trimIndent())
-                                                            }
-
-                                                            Toast.makeText(context, "Cuota marcada como pagada exitosamente", Toast.LENGTH_SHORT).show()
-
-                                                            // Recalcular estado completo de cuotas usando la función corregida
-                                                            val cuotasBase = cuotas.map { it.copy(montoParcialPagado = 0.0, pagado = false, esParcial = false) }
-                                                            cuotas = calcularEstadoCuotasConParciales(db, prestamoId, cuotasBase)
-
-                                                            // Actualizar próximo pago
-                                                            scope.launch {
-                                                                withContext(Dispatchers.IO) {
-                                                                    val proximaFecha = encontrarProximaCuotaSinPagar(db, prestamoId, cuotas)
-                                                                    if (proximaFecha != null) {
-                                                                        db.collection("prestamos").document(prestamoId)
-                                                                            .update("proximoPago", proximaFecha).await()
-                                                                        proximoPagoProgramado = proximaFecha
-                                                                    }
-                                                                }
-                                                            }
-
-                                                            // Verificar si está completamente saldado
-                                                            val cuotasNormales = cuotas.filter { it.descripcion != "Mora" }
-                                                            val todasPagadas = cuotasNormales.all { it.pagado }
-                                                            val moraCobrada = moraAplicada == 0.0 || cuotas.any { it.descripcion == "Mora" && it.pagado }
-
-                                                            if (todasPagadas && moraCobrada && esActivo) {
-                                                                scope.launch {
-                                                                    withContext(Dispatchers.IO) {
-                                                                        db.collection("prestamos").document(prestamoId)
-                                                                            .update("estado", "saldado").await()
-                                                                    }
-                                                                    estaSaldado = true
-                                                                    esActivo = false
-                                                                }
-                                                            }
-
-                                                        } catch (e: Exception) {
-                                                            Log.e("CuotasScreen", "Error al marcar pago: ${e.message}", e)
-                                                            Toast.makeText(context, "Error al guardar: ${e.message}", Toast.LENGTH_LONG).show()
-                                                        }
-                                                    }
-
-                                                }) { Text("Confirmar", color = Color.Red) }
-                                            },
-                                            dismissButton = {
-                                                TextButton(onClick = { mostrarDialogoAdmin = false }) { Text("Cancelar") }
-                                            }
-                                        )
-                                    }
-
-                                    // ---- Deshacer pago (ADMIN y COBRADOR pueden verlo, pero con diferentes permisos) ----
-                                    if ((cuota.pagado || cuota.esParcial) && esActivo) {
-                                        var mostrarDialogoDeshacer by remember { mutableStateOf(false) }
-
-                                        // ✅ MOSTRAR BOTÓN DESHACER SEGÚN ROL
-                                        when (rol) {
-                                            "admin" -> {
-                                                Button(
-                                                    onClick = { mostrarDialogoDeshacer = true },
-                                                    modifier = Modifier.padding(top = 8.dp),
-                                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
-                                                ) {
-                                                    Text(
-                                                        if (cuota.esParcial) "Deshacer pagos parciales (Admin)" else "Deshacer pago (Admin)",
-                                                        color = Color.White
-                                                    )
-                                                }
-                                            }
-                                            "cobrador" -> {
-                                                Button(
-                                                    onClick = { mostrarDialogoDeshacer = true },
-                                                    modifier = Modifier.padding(top = 8.dp),
-                                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800))
-                                                ) {
-                                                    Text(
-                                                        if (cuota.esParcial) "Solicitar deshacer parciales" else "Solicitar deshacer pago",
-                                                        color = Color.White,
-                                                        fontSize = 12.sp
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        if (mostrarDialogoDeshacer) {
-                                            AlertDialog(
-                                                onDismissRequest = { mostrarDialogoDeshacer = false },
-                                                title = {
-                                                    Text(
-                                                        if (rol == "admin") "Confirmar acción" else "Contactar administrador"
-                                                    )
-                                                },
-                                                text = {
-                                                    Text(
-                                                        if (rol == "admin") {
-                                                            if (cuota.esParcial)
-                                                                "Esto eliminará todos los pagos parciales (L. ${dec.format(cuota.montoParcialPagado)}) de esta cuota y restaurará el saldo completo."
-                                                            else
-                                                                "Esto eliminará los registros de pago de esta cuota y restaurará el saldo."
-                                                        } else {
-                                                            "Como cobrador, no puedes deshacer pagos directamente. Contacta al administrador para solicitar esta acción.\n\nCuota: ${cuota.numero}\nMonto a restaurar: L. ${dec.format(if (cuota.esParcial) cuota.montoParcialPagado else cuota.total)}"
-                                                        }
-                                                    )
-                                                },
-                                                confirmButton = {
-                                                    TextButton(onClick = {
-                                                        mostrarDialogoDeshacer = false
-
-                                                        if (rol == "admin") {
-                                                            // ✅ ADMIN: PROCESAR DESHACER PAGO
-                                                            scope.launch {
-                                                                var montoTotalRestaurado = 0.0
-
-                                                                try {
-                                                                    withContext(Dispatchers.IO) {
-                                                                        // Buscar TODOS los pagos que afecten esta cuota
-                                                                        val pagosQuery1 = db.collection("pagos")
-                                                                            .whereEqualTo("prestamoId", prestamoId)
-                                                                            .get().await()
-
-                                                                        val pagosAEliminar = mutableListOf<com.google.firebase.firestore.DocumentSnapshot>()
-
-                                                                        // Filtrar pagos que afecten esta cuota específica
-                                                                        for (pago in pagosQuery1.documents) {
-                                                                            val numeroCuotaInicial = when {
-                                                                                pago.contains("numeroCuota") -> pago.getLong("numeroCuota")?.toInt() ?: 1
-                                                                                pago.contains("cuota") -> pago.getLong("cuota")?.toInt() ?: 1
-                                                                                else -> 1
-                                                                            }
-                                                                            val cuotasCubiertas = pago.getLong("cuotasCubiertas")?.toInt() ?: 1
-                                                                            val rangoCuotas = numeroCuotaInicial until (numeroCuotaInicial + cuotasCubiertas)
-
-                                                                            // Si este pago afecta la cuota que queremos deshacer
-                                                                            if (cuota.numero in rangoCuotas) {
-                                                                                val montoPago = pago.getDouble("monto") ?: 0.0
-                                                                                val moraPago = pago.getDouble("mora") ?: 0.0
-                                                                                val montoTotal = montoPago + moraPago
-
-                                                                                // Calcular qué parte de este pago corresponde a nuestra cuota
-                                                                                val montoPorCuota = if (cuotasCubiertas > 1) {
-                                                                                    montoTotal / cuotasCubiertas
-                                                                                } else {
-                                                                                    montoTotal
-                                                                                }
-
-                                                                                montoTotalRestaurado += montoPorCuota
-                                                                                pagosAEliminar.add(pago)
-
-                                                                                Log.d("CuotasScreen", "Pago a eliminar por admin: ${pago.id}, monto total: L. ${String.format("%.2f", montoTotal)}, parte de cuota ${cuota.numero}: L. ${String.format("%.2f", montoPorCuota)}")
-                                                                            }
-                                                                        }
-
-                                                                        val batch = db.batch()
-
-                                                                        // Eliminar los pagos identificados
-                                                                        pagosAEliminar.forEach { pago ->
-                                                                            batch.delete(pago.reference)
-                                                                        }
-
-                                                                        // Eliminar de historial e historialGlobal
-                                                                        pagosAEliminar.forEach { pago ->
-                                                                            val histQuery = db.collection("historial")
-                                                                                .whereEqualTo("prestamoId", prestamoId)
-                                                                                .whereEqualTo("fechaPago", pago.get("fechaPago"))
-                                                                                .get().await()
-                                                                            histQuery.documents.forEach { batch.delete(it.reference) }
-
-                                                                            val globQuery = db.collection("historialGlobal")
-                                                                                .whereEqualTo("prestamoId", prestamoId)
-                                                                                .whereEqualTo("fechaPago", pago.get("fechaPago"))
-                                                                                .get().await()
-                                                                            globQuery.documents.forEach { batch.delete(it.reference) }
-                                                                        }
-
-                                                                        // Restaurar saldo del préstamo
-                                                                        val prestamoRef = db.collection("prestamos").document(prestamoId)
-                                                                        val prestamoSnap = prestamoRef.get().await()
-                                                                        val saldoActual = prestamoSnap.getDouble("saldo") ?: 0.0
-                                                                        val montoPagadoActual = prestamoSnap.getDouble("montoPagado") ?: 0.0
-
-                                                                        val nuevoSaldo = saldoActual + montoTotalRestaurado
-                                                                        val nuevoMontoPagado = (montoPagadoActual - montoTotalRestaurado).coerceAtLeast(0.0)
-
-                                                                        val actualizacionPrestamo = mapOf(
-                                                                            "saldo" to nuevoSaldo,
-                                                                            "montoPagado" to nuevoMontoPagado,
-                                                                            "estado" to if (nuevoSaldo > 0.0) "activo" else "saldado",
-                                                                            "fechaUltimaActualizacion" to Timestamp.now()
-                                                                        )
-
-                                                                        batch.update(prestamoRef, actualizacionPrestamo)
-                                                                        batch.commit().await()
-
-                                                                        Log.d("CuotasScreen", """
-                                                                            PAGOS DESHECHOS POR ADMIN:
-                                                                            - Admin: $nombreCobrador
-                                                                            - Monto total restaurado: L. ${String.format("%.2f", montoTotalRestaurado)}
-                                                                            - Nuevo saldo: L. ${String.format("%.2f", nuevoSaldo)}
-                                                                            - Nuevo monto pagado: L. ${String.format("%.2f", nuevoMontoPagado)}
-                                                                        """.trimIndent())
-                                                                    }
-
-                                                                    Toast.makeText(
-                                                                        context,
-                                                                        "Pagos deshechos correctamente (L. ${dec.format(montoTotalRestaurado)} restaurado)",
-                                                                        Toast.LENGTH_LONG
-                                                                    ).show()
-
-                                                                    // Recalcular todas las cuotas desde cero
-                                                                    val cuotasBase = cuotas.map {
-                                                                        it.copy(
-                                                                            montoParcialPagado = 0.0,
-                                                                            pagado = false,
-                                                                            esParcial = false
-                                                                        )
-                                                                    }
-                                                                    cuotas = calcularEstadoCuotasConParciales(db, prestamoId, cuotasBase)
-
-                                                                    if (cuota.descripcion == "Mora") moraPagada = false
-
-                                                                    // Actualizar próximo pago y estado
-                                                                    scope.launch {
-                                                                        withContext(Dispatchers.IO) {
-                                                                            val proximaFecha = encontrarProximaCuotaSinPagar(db, prestamoId, cuotas)
-                                                                            if (proximaFecha != null) {
-                                                                                db.collection("prestamos").document(prestamoId)
-                                                                                    .update("proximoPago", proximaFecha).await()
-                                                                                proximoPagoProgramado = proximaFecha
-                                                                            }
-                                                                        }
-                                                                    }
-
-                                                                    // Verificar estado de saldado
-                                                                    val cuotasNormales = cuotas.filter { it.descripcion != "Mora" }
-                                                                    val todasPagadasDespues = cuotasNormales.all { it.pagado }
-
-                                                                    if (estaSaldado && !todasPagadasDespues) {
-                                                                        estaSaldado = false
-                                                                        esActivo = true
-                                                                    }
-
-                                                                } catch (e: Exception) {
-                                                                    Log.e("CuotasScreen", "Error al deshacer pagos: ${e.message}", e)
-                                                                    Toast.makeText(context, "Error al deshacer: ${e.message}", Toast.LENGTH_LONG).show()
-                                                                }
-                                                            }
-                                                        } else {
-                                                            // ✅ COBRADOR: MOSTRAR MENSAJE DE CONTACTO
-                                                            Toast.makeText(
-                                                                context,
-                                                                "Contacta al administrador para deshacer esta cuota",
-                                                                Toast.LENGTH_LONG
-                                                            ).show()
-                                                        }
-                                                    }) {
-                                                        Text(
-                                                            if (rol == "admin") "Sí, deshacer" else "Entendido",
-                                                            color = if (rol == "admin") Color.Red else Color(0xFF1976D2)
-                                                        )
-                                                    }
-                                                },
-                                                dismissButton = {
-                                                    TextButton(onClick = { mostrarDialogoDeshacer = false }) { Text("Cancelar") }
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // ---- Botones de navegación ----
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = { navController.popBackStack() },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Regresar")
-                        }
-
-                        Button(
-                            onClick = {
-                                // Navegar de vuelta a registrar pago si es necesario
-                                navController.popBackStack()
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2))
-                        ) {
-                            Text("Registrar Pago", color = Color.White)
                         }
                     }
                 }
@@ -1624,3 +818,280 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
         }
     }
 }
+
+// ===================== COMPOSABLES AUXILIARES =====================
+
+@Composable
+private fun InfoRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    value: String
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = Color(0xFF666666),
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            "$label: ",
+            fontSize = 14.sp,
+            color = Color(0xFF666666)
+        )
+        Text(
+            value,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            color = Color(0xFF333333)
+        )
+    }
+}
+
+@Composable
+private fun CuotaCard(
+    cuota: CuotaInfo,
+    dec: DecimalFormat,
+    esActivo: Boolean,
+    rol: String,
+    onMarcarPagada: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = when {
+                cuota.estaCompleta -> Color(0xFFE8F5E8) // Verde suave
+                cuota.montoPagado > 0 -> Color(0xFFFFF3E0) // Naranja muy suave
+                else -> Color.White
+            }
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            // ENCABEZADO DE LA CUOTA
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (cuota.descripcion == "Mora") "MORA" else "Cuota ${cuota.numero}",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = if (cuota.descripcion == "Mora") Color.Red else Color(0xFF0061A7)
+                    )
+
+                    if (cuota.descripcion == "Mora") {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color.Red)
+                        ) {
+                            Text(
+                                "MORA",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                // INDICADOR DE ESTADO
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (cuota.estaCompleta) Icons.Default.CheckCircle else Icons.Default.HourglassBottom,
+                        contentDescription = null,
+                        tint = if (cuota.estaCompleta) Color(0xFF388E3C) else Color(0xFF757575),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        when {
+                            cuota.estaCompleta -> "Completa"
+                            cuota.montoPagado > 0 -> "Parcial (${String.format("%.0f", cuota.porcentajePagado)}%)"
+                            else -> "Pendiente"
+                        },
+                        color = when {
+                            cuota.estaCompleta -> Color(0xFF388E3C)
+                            cuota.montoPagado > 0 -> Color(0xFFFF9800)
+                            else -> Color(0xFF757575)
+                        },
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // INFORMACIÓN DE FECHAS
+            if (cuota.descripcion != "Mora") {
+                Text(
+                    "Fecha programada: ${cuota.fecha}",
+                    fontSize = 14.sp,
+                    color = Color(0xFF666666)
+                )
+            }
+
+            // INFORMACIÓN DE PAGOS REALIZADOS
+            if (cuota.estaCompleta && cuota.fechaPago != null) {
+                Text(
+                    "✓ Pagada el: ${cuota.fechaPago}",
+                    color = Color(0xFF388E3C),
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 14.sp
+                )
+            } else if (cuota.montoPagado > 0 && cuota.historialPagos.isNotEmpty()) {
+                if (cuota.historialPagos.size == 1) {
+                    Text(
+                        "Pago parcial el: ${cuota.historialPagos.first()}",
+                        color = Color(0xFFFF9800),
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp
+                    )
+                } else {
+                    Text(
+                        "Pagos múltiples:",
+                        color = Color(0xFFFF9800),
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp
+                    )
+                    cuota.historialPagos.forEachIndexed { index, fecha ->
+                        Text(
+                            "  • Pago ${index + 1}: $fecha",
+                            color = Color(0xFFFF9800),
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // INFORMACIÓN FINANCIERA
+            if (cuota.capital > 0 || cuota.interes > 0) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    if (cuota.capital > 0) {
+                        Text(
+                            "Capital: L. ${dec.format(cuota.capital)}",
+                            fontSize = 14.sp,
+                            color = Color(0xFF666666)
+                        )
+                    }
+                    if (cuota.interes > 0) {
+                        Text(
+                            "Interés: L. ${dec.format(cuota.interes)}",
+                            fontSize = 14.sp,
+                            color = Color(0xFF666666)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+            }
+
+            // TOTAL Y MONTOS
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Total: L. ${dec.format(cuota.total)}",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    color = if (cuota.descripcion == "Mora") Color.Red else Color(0xFF333333)
+                )
+
+                if (cuota.montoPagado > 0) {
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            "Pagado: L. ${dec.format(cuota.montoPagado)}",
+                            color = Color(0xFF388E3C),
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 14.sp
+                        )
+                        if (!cuota.estaCompleta) {
+                            val montoRestante = cuota.total - cuota.montoPagado
+                            Text(
+                                "Resta: L. ${dec.format(montoRestante)}",
+                                color = Color(0xFFFF9800),
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            // BOTONES DE ACCIÓN
+            if (!cuota.estaCompleta && esActivo && cuota.descripcion != "Mora") {
+                Spacer(modifier = Modifier.height(12.dp))
+
+                when (rol) {
+                    "admin" -> {
+                        Button(
+                            onClick = onMarcarPagada,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A7))
+                        ) {
+                            Text("Marcar como Pagada (Admin)", color = Color.White)
+                        }
+                    }
+                    "cobrador" -> {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1))
+                        ) {
+                            Text(
+                                "💡 Para registrar pagos, usa la pantalla 'Registrar Pago'. Los pagos se distribuirán automáticamente.",
+                                modifier = Modifier.padding(12.dp),
+                                color = Color(0xFFE65100),
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResumenRow(
+    label: String,
+    cantidad: Int,
+    color: Color
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            fontSize = 14.sp,
+            color = Color(0xFF666666)
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                cantidad.toString(),
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = color
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(color = color, shape = androidx.compose.foundation.shape.CircleShape)
+            )
+        }
+    }}
