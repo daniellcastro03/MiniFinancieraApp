@@ -23,7 +23,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -44,8 +43,6 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
-// ===================== ESTRUCTURA SIMPLIFICADA PARA NOTIFICACIONES CON CASCADA =====================
-
 data class NotificacionCobroCascada(
     val cliente: String,
     val montoSaldoPendiente: Double,
@@ -61,32 +58,18 @@ data class NotificacionCobroCascada(
     val cuotasCompletadas: Int = 0
 )
 
-// Colores
 object NotificationColors {
     val PrimaryBlue = Color(0xFF1565C0)
     val SecondaryBlue = Color(0xFF42A5F5)
-    val AccentBlue = Color(0xFF0277BD)
     val LightBlue = Color(0xFFE3F2FD)
     val DarkBlue = Color(0xFF0D47A1)
-
     val SuccessGreen = Color(0xFF2E7D32)
     val WarningOrange = Color(0xFFEF6C00)
     val DangerRed = Color(0xFFD32F2F)
     val InfoBlue = Color(0xFF1976D2)
-
-    val CardBackground = Color(0xFFFAFAFA)
-    val SurfaceVariant = Color(0xFFF5F5F5)
     val TextSecondary = Color(0xFF757575)
-
-    val BlueGradient = Brush.horizontalGradient(colors = listOf(PrimaryBlue, SecondaryBlue))
-    val RedGradient = Brush.horizontalGradient(colors = listOf(Color(0xFFE53935), Color(0xFFD32F2F)))
-    val GreenGradient = Brush.horizontalGradient(colors = listOf(Color(0xFF43A047), Color(0xFF2E7D32)))
-    val OrangeGradient = Brush.horizontalGradient(colors = listOf(Color(0xFFFF7043), Color(0xFFEF6C00)))
 }
 
-// ===================== FUNCIONES PARA NUEVA LÓGICA DE CASCADA =====================
-
-// Función para calcular fechas
 private fun calcularFechaCuota(fechaInicio: Date, plazo: String, numeroCuota: Int): String {
     val calendar = Calendar.getInstance().apply { time = fechaInicio }
     val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
@@ -110,7 +93,6 @@ private fun calcularFechaCuota(fechaInicio: Date, plazo: String, numeroCuota: In
     return dateFormat.format(calendar.time)
 }
 
-// Función simplificada para obtener estado de cuotas con sistema de cascada
 private suspend fun obtenerEstadoCuotasSimplificado(
     db: FirebaseFirestore,
     prestamoId: String,
@@ -128,7 +110,6 @@ private suspend fun obtenerEstadoCuotasSimplificado(
             val cuotasCubiertas = pago.get("cuotasCubiertas") as? List<*>
 
             if (cuotasCubiertas != null && cuotasCubiertas.isNotEmpty()) {
-                // Nueva estructura de cascada
                 cuotasCubiertas.forEach { cuotaData ->
                     if (cuotaData is Map<*, *>) {
                         val numeroCuota = (cuotaData["numeroCuota"] as? Number)?.toInt() ?: 0
@@ -140,7 +121,6 @@ private suspend fun obtenerEstadoCuotasSimplificado(
                     }
                 }
             } else {
-                // Compatibilidad con estructura anterior
                 val numeroCuota = when {
                     pago.contains("numeroCuota") -> pago.getLong("numeroCuota")?.toInt() ?: 1
                     pago.contains("cuota") -> pago.getLong("cuota")?.toInt() ?: 1
@@ -148,16 +128,13 @@ private suspend fun obtenerEstadoCuotasSimplificado(
                 }
 
                 val montoPago = pago.getDouble("monto") ?: 0.0
-                val moraPago = pago.getDouble("mora") ?: 0.0
-                val montoTotal = montoPago + moraPago
 
-                if (montoTotal > 0) {
-                    montoPorCuota[numeroCuota] = (montoPorCuota[numeroCuota] ?: 0.0) + montoTotal
+                if (montoPago > 0) {
+                    montoPorCuota[numeroCuota] = (montoPorCuota[numeroCuota] ?: 0.0) + montoPago
                 }
             }
         }
 
-        // Contar cuotas completadas y encontrar próxima cuota
         var cuotasCompletadas = 0
         var proximaCuotaNumero = cuotasTotales + 1
 
@@ -175,12 +152,11 @@ private suspend fun obtenerEstadoCuotasSimplificado(
         Pair(cuotasCompletadas, proximaCuotaNumero)
 
     } catch (e: Exception) {
-        Log.e("EstadoCuotasSimple", "Error: ${e.message}")
+        Log.e("EstadoCuotas", "Error: ${e.message}")
         Pair(0, 1)
     }
 }
 
-// Función optimizada para procesar préstamo individual con sistema de cascada
 suspend fun procesarPrestamoConCascada(
     doc: DocumentSnapshot,
     formato: SimpleDateFormat
@@ -189,14 +165,10 @@ suspend fun procesarPrestamoConCascada(
         val cliente = doc.getString("cliente")
         val prestamoId = doc.id
 
-        if (cliente.isNullOrBlank()) {
-            return null
-        }
+        if (cliente.isNullOrBlank()) return null
 
         val eliminado = doc.getBoolean("eliminado") ?: false
-        if (eliminado) {
-            return null
-        }
+        if (eliminado) return null
 
         val plazo = doc.getString("plazo") ?: "semanal"
         val saldoActual = doc.getDouble("saldo") ?: 0.0
@@ -205,19 +177,19 @@ suspend fun procesarPrestamoConCascada(
         val fechaInicio = doc.getTimestamp("fecha")?.toDate() ?: doc.getDate("fecha") ?: Date()
         val cuotaEstimada = doc.getDouble("cuota") ?: 0.0
 
+        // ✅ FILTRAR PRÉSTAMOS SALDADOS
         if (saldoActual <= 0.0 || estadoDoc.equals("saldado", ignoreCase = true)) {
             return null
         }
 
-        if (cuotasNum <= 0 || cuotasNum > 500 || cuotaEstimada <= 0) {
-            return null
-        }
+        if (cuotasNum <= 0 || cuotasNum > 500 || cuotaEstimada <= 0) return null
 
         val db = FirebaseFirestore.getInstance()
         val (cuotasCompletadas, proximaCuotaNumero) = obtenerEstadoCuotasSimplificado(
             db, prestamoId, cuotasNum, cuotaEstimada
         )
 
+        // ✅ FILTRAR SI TODAS LAS CUOTAS ESTÁN COMPLETADAS
         if (cuotasCompletadas >= cuotasNum) {
             return null
         }
@@ -255,12 +227,11 @@ suspend fun procesarPrestamoConCascada(
         )
 
     } catch (e: Exception) {
-        Log.e("NotificacionesCascada", "Error procesando préstamo ${doc.id}: ${e.message}", e)
+        Log.e("NotificacionesCascada", "Error: ${e.message}", e)
         null
     }
 }
 
-// Función para calcular días hasta fecha
 fun calcularDiasHastaFechaCuota(fechaCuota: String): Int {
     if (fechaCuota == "saldado") return 0
 
@@ -287,7 +258,6 @@ fun calcularDiasHastaFechaCuota(fechaCuota: String): Int {
     }
 }
 
-// Función para obtener último pago
 fun obtenerUltimoPago(doc: DocumentSnapshot, formato: SimpleDateFormat): String? {
     return try {
         when (val raw = doc.get("ultimoPago")) {
@@ -309,14 +279,12 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
     val scope = rememberCoroutineScope()
     val formato = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
 
-    // Estados principales
     val notificaciones = remember { mutableStateListOf<NotificacionCobroCascada>() }
     val todasLasNotificaciones = remember { mutableStateListOf<NotificacionCobroCascada>() }
     var isLoading by remember { mutableStateOf(true) }
     var hasError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
 
-    // Estados de filtros
     var filtroTipo by rememberSaveable { mutableStateOf("Todos") }
     var filtroEstado by rememberSaveable { mutableStateOf("Todos") }
     var textoBusqueda by rememberSaveable { mutableStateOf("") }
@@ -324,7 +292,6 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
     val filtrosTipo = listOf("Todos", "vencido", "hoy", "próximo")
     val filtrosEstado = listOf("Todos", "activo", "inactivo", "mora")
 
-    // Estados para diálogo de mora
     var mostrarDialogoMora by remember { mutableStateOf(false) }
     var clienteMora by remember { mutableStateOf("") }
     var prestamoIdMora by remember { mutableStateOf("") }
@@ -332,7 +299,6 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
     var diasMora by remember { mutableStateOf(0) }
     var montoPrestamo by remember { mutableStateOf(0.0) }
 
-    // Función para cargar notificaciones con sistema de cascada - CORREGIDA
     suspend fun cargarNotificacionesConCascada() {
         try {
             isLoading = true
@@ -340,7 +306,6 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
             errorMessage = ""
             todasLasNotificaciones.clear()
 
-            // ✅ CORRECCIÓN: Usar solo un filtro de desigualdad y filtrar el resto en código
             val query = if (rol == "cobrador") {
                 db.collection("prestamos")
                     .whereArrayContains("cobradoresAsignados", uid)
@@ -357,7 +322,6 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                 return
             }
 
-            // ✅ Filtrar documentos válidos EN CÓDIGO (no en consulta Firestore)
             val documentosValidos = documentos.filter { doc ->
                 val eliminado = doc.getBoolean("eliminado") ?: false
                 val cliente = doc.getString("cliente")
@@ -365,7 +329,6 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                 val saldo = doc.getDouble("saldo") ?: 0.0
                 val estado = doc.getString("estado") ?: "activo"
 
-                // Aplicar filtros que no pudimos usar en Firestore
                 !eliminado &&
                         !cliente.isNullOrBlank() &&
                         cuotas > 0 &&
@@ -374,7 +337,6 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                         !estado.equals("saldado", ignoreCase = true)
             }
 
-            // Procesar en lotes
             val loteSize = 15
             for (lote in documentosValidos.chunked(loteSize)) {
                 val notificacionesLote = withContext(Dispatchers.Default) {
@@ -391,7 +353,6 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                 delay(50)
             }
 
-            // Ordenar por prioridad
             todasLasNotificaciones.sortWith(compareBy<NotificacionCobroCascada> {
                 when (it.tipo) {
                     "vencido" -> 0
@@ -406,19 +367,16 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
             hasError = true
             errorMessage = when {
                 e.message?.contains("network", ignoreCase = true) == true ->
-                    "Error de conexión. Verifica tu internet."
+                    "Error de conexión"
                 e.message?.contains("permission", ignoreCase = true) == true ->
-                    "Sin permisos para acceder a los datos."
-                e.message?.contains("inequality", ignoreCase = true) == true ->
-                    "Error de consulta en base de datos."
-                else -> "Error inesperado: ${e.localizedMessage}"
+                    "Sin permisos"
+                else -> "Error: ${e.localizedMessage}"
             }
         } finally {
             isLoading = false
         }
     }
 
-    // Función para aplicar filtros
     fun aplicarFiltros() {
         notificaciones.clear()
 
@@ -436,7 +394,6 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
         notificaciones.addAll(filtradas)
     }
 
-    // Efectos
     LaunchedEffect(filtroTipo, filtroEstado, textoBusqueda, todasLasNotificaciones.size) {
         aplicarFiltros()
     }
@@ -447,13 +404,12 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
         }
     }
 
-    // UI PRINCIPAL
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        "Notificaciones - Cascada",
+                        "Notificaciones",
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = 18.sp
@@ -553,7 +509,7 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                         Spacer(modifier = Modifier.height(24.dp))
                         Text("Cargando notificaciones...")
                         Text(
-                            "Aplicando sistema de cascada",
+                            "Sistema de cascada",
                             color = NotificationColors.TextSecondary
                         )
                     }
@@ -580,7 +536,6 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                     ),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // 1. RESUMEN DEL DÍA COMPACTO
                     item {
                         val vencidos = notificaciones.count { it.tipo == "vencido" }
                         val hoyCount = notificaciones.count { it.tipo == "hoy" }
@@ -594,12 +549,10 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                         )
                     }
 
-                    // 2. INFORMACIÓN DEL SISTEMA COMPACTA
                     item {
                         SistemaCascadaInfo()
                     }
 
-                    // 3. BÚSQUEDA
                     item {
                         OutlinedTextField(
                             value = textoBusqueda,
@@ -620,7 +573,6 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                         )
                     }
 
-                    // 4. FILTROS COMPACTOS
                     item {
                         FiltrosCompactos(
                             filtroTipo = filtroTipo,
@@ -630,7 +582,6 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                         )
                     }
 
-                    // 5. LISTA DE NOTIFICACIONES COMPACTAS
                     if (notificaciones.isEmpty()) {
                         item {
                             Box(
@@ -679,7 +630,6 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
         }
     }
 
-    // DIÁLOGO DE MORA
     if (mostrarDialogoMora) {
         DialogoAplicarMora(
             cliente = clienteMora,
@@ -695,7 +645,7 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
 
                         val eliminado = doc.getBoolean("eliminado") ?: false
                         if (eliminado) {
-                            Toast.makeText(context, "No se puede aplicar mora a un préstamo eliminado", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Préstamo eliminado", Toast.LENGTH_SHORT).show()
                             return@launch
                         }
 
@@ -716,11 +666,11 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                             )
                         ).await()
 
-                        Toast.makeText(context, "Mora aplicada correctamente", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Mora aplicada", Toast.LENGTH_SHORT).show()
                         cargarNotificacionesConCascada()
 
                     } catch (e: Exception) {
-                        Toast.makeText(context, "Error al aplicar mora: ${e.message}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
                     } finally {
                         mostrarDialogoMora = false
                     }
@@ -730,23 +680,13 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
     }
 }
 
-// ===================== COMPONENTES COMPACTOS =====================
-
-// COMPONENTE DE ESTADÍSTICA COMPACTO
 @Composable
-fun StatCard(
-    label: String,
-    count: Int,
-    color: Color,
-    icon: ImageVector
-) {
+fun StatCard(label: String, count: Int, color: Color, icon: ImageVector) {
     Card(
         modifier = Modifier
             .width(100.dp)
             .height(80.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = color.copy(alpha = 0.1f)
-        ),
+        colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.1f)),
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(
@@ -756,19 +696,9 @@ fun StatCard(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = color,
-                modifier = Modifier.size(20.dp)
-            )
+            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(20.dp))
             Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                count.toString(),
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp,
-                color = color
-            )
+            Text(count.toString(), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = color)
             Text(
                 label,
                 fontSize = 11.sp,
@@ -780,14 +710,8 @@ fun StatCard(
     }
 }
 
-// RESUMEN DEL DÍA COMPACTO
 @Composable
-fun ResumenDelDiaCompacto(
-    vencidos: Int,
-    hoyCount: Int,
-    proximos: Int,
-    total: Int
-) {
+fun ResumenDelDiaCompacto(vencidos: Int, hoyCount: Int, proximos: Int, total: Int) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -800,7 +724,7 @@ fun ResumenDelDiaCompacto(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "Resumen - Sistema Cascada",
+                    "Resumen",
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp,
                     color = NotificationColors.DarkBlue
@@ -819,30 +743,14 @@ fun ResumenDelDiaCompacto(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                StatCard(
-                    label = "Vencidos",
-                    count = vencidos,
-                    color = NotificationColors.DangerRed,
-                    icon = Icons.Default.Warning
-                )
-                StatCard(
-                    label = "Hoy",
-                    count = hoyCount,
-                    color = NotificationColors.WarningOrange,
-                    icon = Icons.Default.Today
-                )
-                StatCard(
-                    label = "Próximos",
-                    count = proximos,
-                    color = NotificationColors.SuccessGreen,
-                    icon = Icons.Default.Schedule
-                )
+                StatCard("Vencidos", vencidos, NotificationColors.DangerRed, Icons.Default.Warning)
+                StatCard("Hoy", hoyCount, NotificationColors.WarningOrange, Icons.Default.Today)
+                StatCard("Próximos", proximos, NotificationColors.SuccessGreen, Icons.Default.Schedule)
             }
         }
     }
 }
 
-// INFORMACIÓN DEL SISTEMA COMPACTA
 @Composable
 fun SistemaCascadaInfo() {
     Card(
@@ -861,7 +769,7 @@ fun SistemaCascadaInfo() {
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                "Sistema Cascada: Los pagos se distribuyen automáticamente llenando cuotas completas en orden.",
+                "Sistema Cascada: Pagos automáticos en orden",
                 fontSize = 13.sp,
                 color = Color(0xFF4A148C)
             )
@@ -869,7 +777,6 @@ fun SistemaCascadaInfo() {
     }
 }
 
-// COMPONENTE DE FILTROS COMPACTO
 @Composable
 fun FiltrosCompactos(
     filtroTipo: String,
@@ -889,9 +796,7 @@ fun FiltrosCompactos(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 item {
                     Text("Urgencia:", fontSize = 12.sp, color = NotificationColors.TextSecondary)
                     Spacer(modifier = Modifier.width(4.dp))
@@ -900,12 +805,7 @@ fun FiltrosCompactos(
                     FilterChip(
                         selected = filtroTipo == filtro,
                         onClick = { onFiltroTipoChange(filtro) },
-                        label = {
-                            Text(
-                                filtro,
-                                fontSize = 11.sp
-                            )
-                        },
+                        label = { Text(filtro, fontSize = 11.sp) },
                         modifier = Modifier.height(28.dp)
                     )
                 }
@@ -913,9 +813,7 @@ fun FiltrosCompactos(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 item {
                     Text("Estado:", fontSize = 12.sp, color = NotificationColors.TextSecondary)
                     Spacer(modifier = Modifier.width(4.dp))
@@ -924,12 +822,7 @@ fun FiltrosCompactos(
                     FilterChip(
                         selected = filtroEstado == filtro,
                         onClick = { onFiltroEstadoChange(filtro) },
-                        label = {
-                            Text(
-                                filtro,
-                                fontSize = 11.sp
-                            )
-                        },
+                        label = { Text(filtro, fontSize = 11.sp) },
                         modifier = Modifier.height(28.dp)
                     )
                 }
@@ -938,7 +831,6 @@ fun FiltrosCompactos(
     }
 }
 
-// CARD DE NOTIFICACIÓN COMPACTA Y MEJORADA
 @Composable
 fun NotificacionCardCascada(
     notif: NotificacionCobroCascada,
@@ -980,13 +872,11 @@ fun NotificacionCardCascada(
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // HEADER COMPACTO
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Información del cliente
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         notif.cliente,
@@ -1003,7 +893,6 @@ fun NotificacionCardCascada(
                     )
                 }
 
-                // Estado visual compacto
                 Card(
                     colors = CardDefaults.cardColors(
                         containerColor = urgenciaColor.copy(alpha = 0.1f)
@@ -1033,12 +922,10 @@ fun NotificacionCardCascada(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // INFORMACIÓN RÁPIDA
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Próxima cuota
                 Column {
                     Text(
                         "Cuota ${notif.proximaCuotaNumero}/${notif.totalCuotas}",
@@ -1054,7 +941,6 @@ fun NotificacionCardCascada(
                     )
                 }
 
-                // Progreso visual
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
                         "${(progresoCuotas * 100).toInt()}% completo",
@@ -1074,7 +960,6 @@ fun NotificacionCardCascada(
                 }
             }
 
-            // ÚLTIMO PAGO (solo si existe)
             if (!notif.ultimoPago.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
@@ -1084,20 +969,6 @@ fun NotificacionCardCascada(
                 )
             }
 
-            // SISTEMA CASCADA INFO (compacta)
-            Spacer(modifier = Modifier.height(8.dp))
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1))
-            ) {
-                Text(
-                    "Sistema Cascada: Pagos automáticos en orden",
-                    modifier = Modifier.padding(8.dp),
-                    fontSize = 11.sp,
-                    color = Color(0xFFE65100)
-                )
-            }
-
-            // BOTONES DE ACCIÓN COMPACTOS
             if (notif.estado != "inactivo") {
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -1105,7 +976,6 @@ fun NotificacionCardCascada(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Botón principal de pago
                     Button(
                         onClick = {
                             scope.launch {
@@ -1138,7 +1008,6 @@ fun NotificacionCardCascada(
                         Text("Pagar", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
 
-                    // Botón de cuotas
                     OutlinedButton(
                         onClick = {
                             navController.navigate("CuotasPrestamoScreen/${notif.prestamoId}/${uid}/${rol}")
@@ -1164,7 +1033,6 @@ fun NotificacionCardCascada(
                         )
                     }
 
-                    // Botón de WhatsApp
                     OutlinedButton(
                         onClick = {
                             scope.launch {
@@ -1184,7 +1052,6 @@ fun NotificacionCardCascada(
                         )
                     }
 
-                    // Botón de mora (solo si aplica)
                     if ((rol == "admin" || rol == "cobrador") && notif.diferenciaDias < -3) {
                         val diasMoraReales = -notif.diferenciaDias
                         val moraSugerida = "%.2f".format(notif.montoSaldoPendiente * 0.005 * diasMoraReales)
@@ -1211,7 +1078,6 @@ fun NotificacionCardCascada(
     }
 }
 
-// DIÁLOGO DE MORA
 @Composable
 fun DialogoAplicarMora(
     cliente: String,
@@ -1261,7 +1127,6 @@ fun DialogoAplicarMora(
     )
 }
 
-// FUNCIÓN PARA ENVIAR WHATSAPP
 suspend fun enviarMensajeWhatsAppConNumero(
     context: Context,
     clienteNombre: String,
@@ -1288,7 +1153,7 @@ suspend fun enviarMensajeWhatsAppConNumero(
             return
         }
 
-        val mensaje = "Estimado/a $nombre, le recordamos que tiene un pago pendiente con Capital Express. Con nuestro nuevo sistema de pagos en cascada, cualquier monto que pague se distribuirá automáticamente llenando sus cuotas en orden. ¡Gracias!"
+        val mensaje = "Estimado/a $nombre, le recordamos que tiene un pago pendiente con Capital Express. ¡Gracias!"
         val url = "https://wa.me/504$numero?text=${Uri.encode(mensaje)}"
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
 
@@ -1299,6 +1164,6 @@ suspend fun enviarMensajeWhatsAppConNumero(
         }
 
     } catch (e: Exception) {
-        Toast.makeText(context, "Error al enviar mensaje: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "Error: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
     }
 }

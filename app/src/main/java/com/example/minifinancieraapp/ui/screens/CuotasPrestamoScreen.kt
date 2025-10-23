@@ -268,7 +268,7 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
             val plazo = prestamoDoc.getString("plazo") ?: "Mensual"
             val fechaTimestamp = prestamoDoc.getTimestamp("fecha")
             val fechaInicio = fechaTimestamp?.toDate() ?: Date()
-            val interesTotal = prestamoDoc.getDouble("interes") ?: prestamoDoc.getDouble("interesTotal") ?: 0.0
+            val interesTotal = prestamoDoc.getDouble("interesTotal") ?: prestamoDoc.getDouble("interes") ?: 0.0
 
             totalCapital = monto
             totalInteres = interesTotal

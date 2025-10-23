@@ -30,8 +30,6 @@ import com.google.firebase.firestore.Source
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import java.text.SimpleDateFormat
-import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -149,7 +147,7 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
                     prestamosVencidos = prestamosVencidos,
                     prestamosCompletados = prestamosCompletados,
                     totalPrestamos = totalPrestamos,
-                    tienePagosTarde = doc.getBoolean("tienePagosTarde") ?: false // ✅ NUEVO CAMPO
+                    tienePagosTarde = doc.getBoolean("tienePagosTarde") ?: false
                 )
             }
 
@@ -176,7 +174,7 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
     val clientesConPrestamos = clientesFiltrados.count { it.tienePrestamo }
     val clientesActivos = clientesFiltrados.count { it.estado.equals("activo", ignoreCase = true) }
     val clientesSaldados = clientesFiltrados.count { it.estado.equals("saldado", ignoreCase = true) }
-    val clientesConPagosTarde = clientesFiltrados.count { it.tienePagosTarde } // ✅ NUEVA ESTADÍSTICA
+    val clientesConPagosTarde = clientesFiltrados.count { it.tienePagosTarde }
     val totalMontoPrestado = clientesFiltrados.sumOf { it.monto }
     val totalMontoAbonado = clientesFiltrados.sumOf { it.totalAbonado }
     val totalMontoPendiente = clientesFiltrados.sumOf { it.saldoPendiente }
@@ -188,6 +186,17 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
                 title = { Text("Clientes Registrados", color = Color.White, fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0061A7)),
                 actions = {
+                    // 🔹 Botón Reporte con filtros (estado actual + cobrador si rol = cobrador)
+                    IconButton(
+                        onClick = {
+                            val pref = "none"      // o el id real del cobrador seleccionado
+                            val estado = "Todos"   // o "Activos" / "Saldados" si prefieres
+                            navController.navigate("reporteClientes/$rol/$pref/$estado")
+                        }
+                    ) {
+                        Icon(Icons.Default.Assessment, contentDescription = "Reporte de clientes", tint = Color.White)
+                    }
+
                     // Botón para mostrar/ocultar resumen
                     IconButton(onClick = { mostrarResumen = !mostrarResumen }) {
                         Icon(
@@ -196,6 +205,8 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
                             tint = Color.White
                         )
                     }
+
+                    // Refresh
                     IconButton(onClick = {
                         scope.launch {
                             isLoading = true
@@ -211,7 +222,6 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
                                         val asignadosMultiples = (doc.get("cobradoresAsignados") as? List<*>)
                                             ?.mapNotNull { it?.toString()?.trim() }
                                             ?.contains(uid.trim()) == true
-
                                         asignadoPrincipal || asignadosMultiples
                                     }
                                 } else {
@@ -260,7 +270,7 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
                 Spacer(modifier = Modifier.height(4.dp))
             }
 
-            // Resumen compacto siempre visible
+            // Resumen compacto
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -286,7 +296,6 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
                         icon = Icons.Default.TrendingUp,
                         color = Color.White
                     )
-                    // ✅ NUEVA ESTADÍSTICA - Clientes con pagos tarde
                     StatCardMini(
                         title = "Pagos Tarde",
                         value = clientesConPagosTarde.toString(),
@@ -356,7 +365,7 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
                 }
             }
 
-            // Filtros más compactos
+            // Filtros compactos
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -467,6 +476,10 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
     }
 }
 
+// =====================
+// Helpers y UI Reusables
+// =====================
+
 suspend fun calcularDatosCliente(
     db: FirebaseFirestore,
     doc: com.google.firebase.firestore.DocumentSnapshot,
@@ -549,7 +562,7 @@ suspend fun calcularDatosCliente(
         prestamosVencidos = prestamosVencidos,
         prestamosCompletados = prestamosCompletados,
         totalPrestamos = totalPrestamos,
-        tienePagosTarde = doc.getBoolean("tienePagosTarde") ?: false // ✅ NUEVO CAMPO TAMBIÉN AQUÍ
+        tienePagosTarde = doc.getBoolean("tienePagosTarde") ?: false
     )
 }
 
@@ -613,13 +626,11 @@ fun ClienteCardMejorado(
         elevation = CardDefaults.cardElevation(4.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Header del cliente - ✅ AQUÍ SE MUESTRA EL ÍCONO DE PAGOS TARDE
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    // ✅ NOMBRE CON ÍCONO DE ADVERTENCIA SI TIENE PAGOS TARDE
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = cliente.nombre.uppercase(),
@@ -627,8 +638,6 @@ fun ClienteCardMejorado(
                             fontWeight = FontWeight.Bold,
                             color = Color.Black
                         )
-
-                        // ✅ ÍCONO DE ADVERTENCIA PARA PAGOS TARDE
                         if (cliente.tienePagosTarde) {
                             Icon(
                                 Icons.Default.Warning,
@@ -647,7 +656,6 @@ fun ClienteCardMejorado(
                     }
                 }
 
-                // Foto del cliente
                 if (cliente.fotoPersona.isNotBlank()) {
                     Image(
                         painter = rememberAsyncImagePainter(cliente.fotoPersona),
@@ -673,7 +681,6 @@ fun ClienteCardMejorado(
             Spacer(modifier = Modifier.height(12.dp))
 
             if (cliente.tienePrestamo) {
-                // Estadísticas de préstamos del cliente
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF0061A7))
@@ -688,7 +695,6 @@ fun ClienteCardMejorado(
 
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        // Estadísticas en dos filas
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceEvenly
@@ -713,7 +719,6 @@ fun ClienteCardMejorado(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Información adicional
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
@@ -734,7 +739,6 @@ fun ClienteCardMejorado(
                             )
                         }
 
-                        // ✅ MOSTRAR ALERTA ADICIONAL SI TIENE PAGOS TARDE
                         if (cliente.tienePagosTarde) {
                             Text(
                                 text = "⚠️ Este cliente tiene historial de pagos tardíos",
@@ -756,7 +760,6 @@ fun ClienteCardMejorado(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Estado del cliente y botones
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -785,7 +788,6 @@ fun ClienteCardMejorado(
                     )
                 }
 
-                // Botones de acción
                 Row {
                     IconButton(onClick = {
                         navController.navigate("EditarClienteScreen/${cliente.id}")
@@ -866,5 +868,5 @@ data class ClienteVistaModel(
     val prestamosVencidos: Int = 0,
     val prestamosCompletados: Int = 0,
     val totalPrestamos: Int = 0,
-    val tienePagosTarde: Boolean = false // ✅ NUEVO CAMPO EN EL DATA CLASS
+    val tienePagosTarde: Boolean = false
 )

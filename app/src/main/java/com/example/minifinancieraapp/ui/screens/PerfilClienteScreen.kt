@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Assignment
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -39,6 +40,7 @@ import com.example.minifinancieraapp.ui.models.PagoItem
 import com.example.minifinancieraapp.ui.models.Prestamo
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.Timestamp
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.*
@@ -52,11 +54,13 @@ fun PerfilClienteScreen(
 ) {
     val context = LocalContext.current
     val db = FirebaseFirestore.getInstance()
+    val scope = rememberCoroutineScope()
 
     var cliente by remember { mutableStateOf<ClienteModel?>(null) }
     var prestamos by remember { mutableStateOf<List<Prestamo>>(emptyList()) }
     var pagos by remember { mutableStateOf<List<PagoItem>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
 
     // Totales
     var totalPrestado by remember { mutableStateOf(0.0) }
@@ -261,6 +265,70 @@ fun PerfilClienteScreen(
         } finally {
             isLoading = false
         }
+    }
+
+    // 🗑️ Función para borrar cliente
+    fun borrarCliente() {
+        scope.launch {
+            try {
+                // Borrar el cliente de Firestore
+                db.collection("clientes").document(clienteId).delete().await()
+
+                Toast.makeText(context, "Cliente eliminado correctamente", Toast.LENGTH_SHORT).show()
+                navController.popBackStack()
+            } catch (e: Exception) {
+                Toast.makeText(context, "Error al eliminar cliente: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    // 🚨 Diálogo de confirmación para borrar
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = {
+                Text(
+                    "⚠️ Confirmar Eliminación",
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFD32F2F)
+                )
+            },
+            text = {
+                Column {
+                    Text("¿Estás seguro de que deseas eliminar este cliente?")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Esta acción NO se puede deshacer.",
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFD32F2F)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Nota: Los préstamos y pagos asociados NO serán eliminados automáticamente.",
+                        fontSize = 12.sp,
+                        color = Color.Gray
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteDialog = false
+                        borrarCliente()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFD32F2F)
+                    )
+                ) {
+                    Text("Eliminar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Cancelar")
+                }
+            }
+        )
     }
 
     // 🎨 UI Mejorado
@@ -517,7 +585,7 @@ fun PerfilClienteScreen(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
-            // Botones de navegación en grid 2x2
+            // Botones de navegación en grid dinámico
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -548,12 +616,12 @@ fun PerfilClienteScreen(
                     }
                 }
 
-                // Segunda fila
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    if (rol == "admin") {
+                // Segunda fila - Solo admin puede ver Asignar Cobrador
+                if (rol == "admin") {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         NavigationButton(
                             text = "Asignar Cobrador",
                             icon = Icons.Default.Assignment,
@@ -562,14 +630,28 @@ fun PerfilClienteScreen(
                         ) {
                             navController.navigate("AsignarCobradorScreen/$clienteId")
                         }
-                    }
 
-                    // Botón de regresar mejorado
+                        NavigationButton(
+                            text = "Borrar Cliente",
+                            icon = Icons.Default.Delete,
+                            color = Color(0xFFD32F2F),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            showDeleteDialog = true
+                        }
+                    }
+                }
+
+                // Botón de regresar
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     NavigationButton(
                         text = "Regresar",
                         icon = Icons.Default.ArrowBack,
                         color = Color(0xFF6200EA),
-                        modifier = Modifier.weight(if (rol == "admin") 1f else 2f)
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         navController.popBackStack()
                     }

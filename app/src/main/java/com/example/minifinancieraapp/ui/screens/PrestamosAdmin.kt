@@ -119,9 +119,21 @@ private fun calcularFechaCuotaAdmin(fechaInicio: Date, plazo: String, numeroCuot
 private suspend fun verificarEstadoRealPrestamoAdmin(
     db: FirebaseFirestore,
     prestamoId: String,
-    cuotasTotales: Int
+    cuotasTotales: Int,
+    saldo: Double
 ): String {
     return try {
+        // ✅ VERIFICACIÓN PRIORITARIA POR SALDO
+        if (saldo <= 0) {
+            Log.d("PrestamoAdminScreen", """
+                ✅ PRÉSTAMO SALDADO POR SALDO
+                - Préstamo: $prestamoId
+                - Saldo: $saldo
+                - Estado: saldado
+            """.trimIndent())
+            return "saldado"
+        }
+
         if (cuotasTotales == 0) {
             return "activo" // Si no tiene cuotas válidas, asumir activo
         }
@@ -150,6 +162,7 @@ private suspend fun verificarEstadoRealPrestamoAdmin(
         Log.d("PrestamoAdminScreen", """
             === VERIFICACIÓN ESTADO REAL ===
             - Préstamo: $prestamoId
+            - Saldo: $saldo
             - Cuotas totales: $cuotasTotales
             - Cuotas pagadas: $cuotasPagadas
             - Cuotas pagadas set: ${cuotasPagadasSet.sorted()}
@@ -596,7 +609,7 @@ fun EstadisticaItem(label: String, valor: String, color: Color) {
     }
 }
 
-// Extensiones helper (mantener las existentes)
+// Extensiones helper
 fun DocumentSnapshot.getTimestampSafe(field: String): Timestamp? {
     return try {
         this.getTimestamp(field)
@@ -728,36 +741,43 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                                 val cuotasTotales = doc.getLong("cuotas")?.toInt() ?: 0
                                 val estadoFirestore = doc.getString("estado") ?: "activo"
                                 val prestamoId = doc.id
+                                val saldo = doc.getDouble("saldo") ?: 0.0
 
-                                // ✅ VERIFICAR ESTADO REAL BASADO EN CUOTAS PAGADAS
-                                val estadoReal = if (estadoFirestore.equals("saldado", ignoreCase = true)) {
-                                    // Si dice que está saldado, verificar si realmente lo está
-                                    val estadoVerificado = verificarEstadoRealPrestamoAdmin(db, prestamoId, cuotasTotales)
-
-                                    if (estadoVerificado != "saldado" && estadoFirestore.equals("saldado", ignoreCase = true)) {
-                                        Log.w("PrestamoAdminScreen", """
-                                            ⚠️ INCONSISTENCIA DETECTADA EN PRESTAMO ADMIN:
-                                            - Cliente: $cliente
-                                            - Préstamo ID: $prestamoId
-                                            - Estado en Firestore: $estadoFirestore
-                                            - Estado real verificado: $estadoVerificado
-                                            - Cuotas totales: $cuotasTotales
-                                            - MOSTRANDO COMO: $estadoVerificado
-                                        """.trimIndent())
-
-                                        // Actualizar el estado en Firestore
-                                        try {
-                                            db.collection("prestamos").document(prestamoId)
-                                                .update("estado", estadoVerificado)
-                                                .await()
-                                        } catch (updateE: Exception) {
-                                            Log.e("PrestamoAdminScreen", "Error actualizando estado: ${updateE.message}")
-                                        }
+                                // ✅ VERIFICAR ESTADO REAL BASADO EN SALDO Y CUOTAS PAGADAS
+                                val estadoReal = when {
+                                    saldo <= 0 -> {
+                                        // ✅ SI EL SALDO ES 0 O NEGATIVO, DEBE SER SALDADO
+                                        "saldado"
                                     }
+                                    estadoFirestore.equals("saldado", ignoreCase = true) -> {
+                                        // Si dice que está saldado pero el saldo es positivo, verificar cuotas
+                                        val estadoVerificado = verificarEstadoRealPrestamoAdmin(db, prestamoId, cuotasTotales, saldo)
 
-                                    estadoVerificado
-                                } else {
-                                    estadoFirestore
+                                        if (estadoVerificado != "saldado") {
+                                            Log.w("PrestamoAdminScreen", """
+                                                ⚠️ INCONSISTENCIA DETECTADA EN PRESTAMO ADMIN:
+                                                - Cliente: $cliente
+                                                - Préstamo ID: $prestamoId
+                                                - Estado en Firestore: $estadoFirestore
+                                                - Estado real verificado: $estadoVerificado
+                                                - Saldo: $saldo
+                                                - Cuotas totales: $cuotasTotales
+                                                - MOSTRANDO COMO: $estadoVerificado
+                                            """.trimIndent())
+
+                                            // Actualizar el estado en Firestore
+                                            try {
+                                                db.collection("prestamos").document(prestamoId)
+                                                    .update("estado", estadoVerificado)
+                                                    .await()
+                                            } catch (updateE: Exception) {
+                                                Log.e("PrestamoAdminScreen", "Error actualizando estado: ${updateE.message}")
+                                            }
+                                        }
+
+                                        estadoVerificado
+                                    }
+                                    else -> estadoFirestore
                                 }
 
                                 val prestamoAdmin = PrestamoAdmin(
@@ -774,7 +794,7 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                                     firma = doc.getString("firma") ?: "",
                                     cobrador = doc.getString("cobrador") ?: "",
                                     montoPagado = doc.getDouble("montoPagado") ?: 0.0,
-                                    saldo = doc.getDouble("saldo") ?: 0.0,
+                                    saldo = saldo,
                                     saldoAnterior = doc.getDouble("saldoAnterior") ?: 0.0,
                                     estado = estadoReal, // ✅ USAR ESTADO VERIFICADO
                                     observaciones = doc.getString("observaciones") ?: "",

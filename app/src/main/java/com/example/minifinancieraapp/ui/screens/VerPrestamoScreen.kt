@@ -23,8 +23,6 @@ import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -80,97 +78,161 @@ fun VerPrestamoScreen(
         scope.launch {
             isLoading = true
             try {
-                val doc = db.collection("prestamos").document(prestamoId).get().await()
-
-                if (doc.exists()) {
-                    val data = doc.data!!
-
-                    // Lógica de estado corregida
-                    val estadoOriginal = (data["estado"] as? String ?: "activo").lowercase()
-                    val eliminado = data["eliminado"] as? Boolean ?: false
-                    val estado = if (eliminado) "eliminado" else estadoOriginal
-
-                    val cliente = data["cliente"] as? String ?: "Cliente desconocido"
-                    val monto = (data["monto"] as? Number)?.toDouble() ?: 0.0
-                    val totalPagar = (data["totalPagar"] as? Number)?.toDouble() ?: 0.0
-                    val montoPagado = (data["montoPagado"] as? Number)?.toDouble() ?: 0.0
-                    val saldoPendiente = totalPagar - montoPagado
-                    val cuota = (data["cuota"] as? Number)?.toDouble() ?: 0.0
-                    val cuotas = (data["cuotas"] as? Number)?.toInt() ?: 0
-                    val plazo = data["plazo"] as? String ?: "No especificado"
-
-                    val cobrador = (data["cobrador"] as? String)
-                        ?: (data["cobradorAsignado"] as? String) ?: "No asignado"
-
-                    val interesMensual = (data["interesMensual"] as? Number)?.toDouble()
-                        ?: (data["interes"] as? Number)?.toDouble() ?: 0.0
-                    val diasEfectivos = (data["diasEfectivos"] as? Number)?.toInt() ?: 0
-                    val interesTotal = (data["interesTotal"] as? Number)?.toDouble()
-                        ?: (data["interes"] as? Number)?.toDouble() ?: 0.0
-
-                    val observaciones = data["observaciones"] as? String
-                    val telefono = data["telefono"] as? String
-                    val direccion = data["direccion"] as? String
-                    val cedula = data["cedula"] as? String
-                    clienteId = data["clienteId"]?.toString() ?: ""
-
-                    val fecha = when (val f = data["fecha"] ?: data["fechaCreacion"]) {
-                        is Timestamp -> dateFormatter.format(f.toDate())
-                        is String -> f
-                        else -> "Sin fecha"
-                    }
-
-                    val proximoPago = when (val p = data["proximoPago"]) {
-                        is Timestamp -> dateFormatter.format(p.toDate())
-                        is String -> p
-                        else -> "Sin definir"
-                    }
-
-                    val fechaCreacion = when (val fc = data["fechaCreacion"]) {
-                        is Timestamp -> formatter.format(fc.toDate())
-                        is String -> fc
-                        else -> "Sin fecha"
-                    }
-
-                    val ultimaActualizacion = when (val ua = data["ultimaActualizacion"]) {
-                        is Timestamp -> formatter.format(ua.toDate())
-                        is String -> ua
-                        else -> null
-                    }
-
-                    prestamo = PrestamoDetalle(
-                        id = prestamoId,
-                        clienteId = clienteId,
-                        cliente = cliente,
-                        monto = monto,
-                        totalPagar = totalPagar,
-                        montoPagado = montoPagado,
-                        saldoPendiente = saldoPendiente,
-                        cuota = cuota,
-                        cuotas = cuotas,
-                        plazo = plazo,
-                        fecha = fecha,
-                        proximoPago = proximoPago,
-                        estado = estado,
-                        cobrador = cobrador,
-                        interesMensual = interesMensual,
-                        diasEfectivos = diasEfectivos,
-                        interesTotal = interesTotal,
-                        observaciones = observaciones,
-                        telefono = telefono,
-                        direccion = direccion,
-                        cedula = cedula,
-                        fechaCreacion = fechaCreacion,
-                        ultimaActualizacion = ultimaActualizacion
-                    )
-                } else {
+                val docRef = db.collection("prestamos").document(prestamoId)
+                val doc = docRef.get().await()
+                if (!doc.exists()) {
                     Toast.makeText(context, "Préstamo no encontrado", Toast.LENGTH_SHORT).show()
                     navController.popBackStack()
                     navController.previousBackStackEntry?.savedStateHandle?.set("refreshHistorial", true)
+                    isLoading = false
+                    return@launch
                 }
+
+                val data = doc.data!!
+
+                val eliminado = data["eliminado"] as? Boolean ?: false
+                val estadoOriginal = (data["estado"] as? String ?: "activo").lowercase()
+
+                val cliente       = data["cliente"] as? String ?: "Cliente desconocido"
+                val monto         = (data["monto"] as? Number)?.toDouble() ?: 0.0
+                val interesTotal  = (data["interesTotal"] as? Number)?.toDouble()
+                    ?: (data["interes"] as? Number)?.toDouble() ?: 0.0
+                val totalPagarRaw = (data["totalPagar"] as? Number)?.toDouble()
+                val totalPagar    = totalPagarRaw ?: (monto + interesTotal)
+
+                val montoPagado   = (data["montoPagado"] as? Number)?.toDouble() ?: 0.0
+                val cuota         = (data["cuota"] as? Number)?.toDouble() ?: 0.0
+                val cuotas        = (data["cuotas"] as? Number)?.toInt() ?: 0
+                val plazo         = data["plazo"] as? String ?: "No especificado"
+
+                val cobrador = (data["cobrador"] as? String)
+                    ?: (data["cobradorAsignado"] as? String) ?: "No asignado"
+
+                val interesMensual = (data["interesMensual"] as? Number)?.toDouble()
+                    ?: (data["interes"] as? Number)?.toDouble() ?: 0.0
+                val diasEfectivos  = (data["diasEfectivos"] as? Number)?.toInt() ?: 0
+
+                val observaciones  = data["observaciones"] as? String
+                val telefono       = data["telefono"] as? String
+                val direccion      = data["direccion"] as? String
+                val cedula         = data["cedula"] as? String
+                clienteId          = data["clienteId"]?.toString() ?: ""
+
+                val fecha = when (val f = data["fecha"] ?: data["fechaCreacion"]) {
+                    is Timestamp -> dateFormatter.format(f.toDate())
+                    is String    -> f
+                    else         -> "Sin fecha"
+                }
+
+                val proximoPagoRaw = when (val p = data["proximoPago"]) {
+                    is Timestamp -> dateFormatter.format(p.toDate())
+                    is String    -> p
+                    else         -> "Sin definir"
+                }
+
+                val fechaCreacion = when (val fc = data["fechaCreacion"]) {
+                    is Timestamp -> formatter.format(fc.toDate())
+                    is String    -> fc
+                    else         -> "Sin fecha"
+                }
+
+                val ultimaActualizacion = when (val ua = data["ultimaActualizacion"]) {
+                    is Timestamp -> formatter.format(ua.toDate())
+                    is String    -> ua
+                    else         -> null
+                }
+
+                // ====== NORMALIZACIÓN CRÍTICA ======
+                val epsilon = 0.01
+                // Calcular saldo pendiente
+                val saldoPendienteCalculado = totalPagar - montoPagado
+                val saldoPendiente = if (saldoPendienteCalculado <= epsilon) 0.0 else saldoPendienteCalculado
+
+                Log.d("VerPrestamoScreen", """
+                    === CÁLCULO DE ESTADO ===
+                    Préstamo ID: $prestamoId
+                    Total a pagar: $totalPagar
+                    Monto pagado: $montoPagado
+                    Saldo calculado: $saldoPendienteCalculado
+                    Saldo final: $saldoPendiente
+                    Estado original: $estadoOriginal
+                    Eliminado: $eliminado
+                """.trimIndent())
+
+                // Determinar el estado efectivo basado en el saldo
+                val estadoEfectivo = when {
+                    eliminado -> "eliminado"
+                    // Si el saldo es 0 o negativo, SIEMPRE es saldado
+                    saldoPendiente <= epsilon -> "saldado"
+                    saldoPendienteCalculado <= epsilon -> "saldado"
+                    montoPagado >= totalPagar -> "saldado"
+                    estadoOriginal == "saldado" -> "saldado"
+                    estadoOriginal == "completado" -> "saldado"
+                    else -> estadoOriginal
+                }
+
+                Log.d("VerPrestamoScreen", "Estado efectivo determinado: $estadoEfectivo")
+
+                // Si está saldado, muestra "saldado" en Próximo pago
+                val proximoPago = if (estadoEfectivo == "saldado") "saldado" else proximoPagoRaw
+
+                prestamo = PrestamoDetalle(
+                    id = prestamoId,
+                    clienteId = clienteId,
+                    cliente = cliente,
+                    monto = monto,
+                    totalPagar = totalPagar,
+                    montoPagado = montoPagado,
+                    saldoPendiente = saldoPendiente,
+                    cuota = cuota,
+                    cuotas = cuotas,
+                    plazo = plazo,
+                    fecha = fecha,
+                    proximoPago = proximoPago,
+                    estado = estadoEfectivo,
+                    cobrador = cobrador,
+                    interesMensual = interesMensual,
+                    diasEfectivos = diasEfectivos,
+                    interesTotal = interesTotal,
+                    observaciones = observaciones,
+                    telefono = telefono,
+                    direccion = direccion,
+                    cedula = cedula,
+                    fechaCreacion = fechaCreacion,
+                    ultimaActualizacion = ultimaActualizacion
+                )
+
+                // Corregir el documento en Firestore si está inconsistente
+                val saldoDoc = (data["saldo"] as? Number)?.toDouble()
+                val estadoDoc = data["estado"] as? String ?: "activo"
+
+                val debeActualizar =
+                    (estadoEfectivo == "saldado" && estadoDoc != "saldado") ||
+                            (estadoEfectivo != estadoOriginal && estadoEfectivo != "eliminado") ||
+                            (saldoDoc == null || kotlin.math.abs(saldoDoc - saldoPendiente) > epsilon) ||
+                            (totalPagarRaw == null)
+
+                if (debeActualizar) {
+                    try {
+                        val updates = mutableMapOf<String, Any>(
+                            "estado" to estadoEfectivo,
+                            "saldo" to saldoPendiente,
+                            "ultimaActualizacion" to Timestamp.now()
+                        )
+                        if (totalPagarRaw == null) updates["totalPagar"] = totalPagar
+
+                        Log.d("VerPrestamoScreen", "🔧 Actualizando préstamo $prestamoId: estado=$estadoEfectivo, saldo=$saldoPendiente")
+                        docRef.update(updates).await()
+                        Log.d("VerPrestamoScreen", "✅ Préstamo actualizado correctamente en Firestore")
+                    } catch (e: Exception) {
+                        Log.w("VerPrestamoScreen", "⚠️ No se pudo normalizar el doc: ${e.message}")
+                    }
+                }
+
                 isLoading = false
             } catch (e: Exception) {
                 Toast.makeText(context, "Error al cargar el préstamo: ${e.message}", Toast.LENGTH_LONG).show()
+                Log.e("VerPrestamoScreen", "Error al cargar préstamo", e)
                 isLoading = false
             }
         }
@@ -496,6 +558,7 @@ fun VerPrestamoScreen(
                         colors = CardDefaults.cardColors(
                             containerColor = when (p.estado.lowercase()) {
                                 "activo" -> Color(0xFFE8F5E8)
+                                "saldado" -> Color(0xFFE3F2FD)
                                 "completado" -> Color(0xFFE3F2FD)
                                 "vencido" -> Color(0xFFFFEBEE)
                                 "eliminado" -> Color(0xFFFFF3E0)
@@ -526,6 +589,7 @@ fun VerPrestamoScreen(
                                     fontWeight = FontWeight.Bold,
                                     color = when (p.estado.lowercase()) {
                                         "activo" -> Color(0xFF4CAF50)
+                                        "saldado" -> Color(0xFF2196F3)
                                         "completado" -> Color(0xFF2196F3)
                                         "vencido" -> Color(0xFFFF5722)
                                         "eliminado" -> Color(0xFFFF9800)
@@ -537,6 +601,7 @@ fun VerPrestamoScreen(
                             Icon(
                                 when (p.estado.lowercase()) {
                                     "activo" -> Icons.Default.Schedule
+                                    "saldado" -> Icons.Default.CheckCircle
                                     "completado" -> Icons.Default.CheckCircle
                                     "vencido" -> Icons.Default.Warning
                                     "eliminado" -> Icons.Default.Delete
@@ -546,6 +611,7 @@ fun VerPrestamoScreen(
                                 modifier = Modifier.size(52.dp),
                                 tint = when (p.estado.lowercase()) {
                                     "activo" -> Color(0xFF4CAF50)
+                                    "saldado" -> Color(0xFF2196F3)
                                     "completado" -> Color(0xFF2196F3)
                                     "vencido" -> Color(0xFFFF5722)
                                     "eliminado" -> Color(0xFFFF9800)
@@ -713,7 +779,6 @@ fun VerPrestamoScreen(
                         Spacer(modifier = Modifier.height(16.dp))
                     }
 
-                    // ✅ NAVEGACIÓN SIMPLE - IGUAL QUE NOTIFICACIONES
                     Button(
                         onClick = {
                             try {
@@ -722,13 +787,11 @@ fun VerPrestamoScreen(
                                 Log.d("VerPrestamoScreen", "UID: '$uid'")
                                 Log.d("VerPrestamoScreen", "ROL: '$rol'")
 
-                                // Verificar que tenemos todos los datos
                                 if (p.id.isBlank() || uid.isBlank() || rol.isBlank()) {
                                     Toast.makeText(context, "Error: Faltan datos para navegar", Toast.LENGTH_SHORT).show()
                                     return@Button
                                 }
 
-                                // ✅ NAVEGACIÓN SIMPLE - IGUAL QUE NotificacionesScreen
                                 val ruta = "CuotasPrestamoScreen/${p.id}/$uid/$rol"
                                 Log.d("VerPrestamoScreen", "Navegando con ruta: '$ruta'")
 

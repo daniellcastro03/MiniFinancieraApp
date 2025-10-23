@@ -56,12 +56,21 @@ suspend fun verificarPrestamosActivos(db: FirebaseFirestore, clienteId: String):
             .get()
             .await()
 
-        val prestamosActivos = snapshot.documents
-        val numerosPrestamo = prestamosActivos.mapNotNull { doc ->
+        // Filtrar préstamos que realmente tienen saldo pendiente
+        val prestamosConSaldo = snapshot.documents.filter { doc ->
+            val saldo = doc.getDouble("saldo") ?: 0.0
+            val totalPagar = doc.getDouble("totalPagar") ?: 0.0
+            val montoPagado = doc.getDouble("montoPagado") ?: 0.0
+
+            // Considerar activo si tiene saldo > 0 Y aún no está completamente pagado
+            saldo > 0.0 && montoPagado < totalPagar
+        }
+
+        val numerosPrestamo = prestamosConSaldo.mapNotNull { doc ->
             doc.id
         }
 
-        Pair(prestamosActivos.size, numerosPrestamo)
+        Pair(prestamosConSaldo.size, numerosPrestamo)
     } catch (e: Exception) {
         Pair(0, emptyList())
     }

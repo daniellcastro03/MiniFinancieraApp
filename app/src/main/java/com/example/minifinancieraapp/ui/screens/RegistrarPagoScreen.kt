@@ -24,15 +24,12 @@ import com.example.capitalexpressapp.util.ReciboHelper
 import com.example.minifinancieraapp.util.SessionManager
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.FieldValue
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import android.util.Log
-
-// ===================== NUEVAS ESTRUCTURAS DE DATOS PARA PAGOS EN CASCADA =====================
 
 data class CuotaCubierta(
     val numeroCuota: Int,
@@ -47,17 +44,12 @@ data class ResultadoDistribucion(
     val totalCuotasCompletas: Int
 )
 
-// ===================== FUNCIONES PARA LA NUEVA LÓGICA DE PAGOS EN CASCADA =====================
-
-// Función para calcular fechas de cuotas (mantenida igual)
 private fun calcularFechaCuota(fechaInicio: Date, plazo: String, numeroCuota: Int): String {
     val calendar = Calendar.getInstance().apply { time = fechaInicio }
     val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
 
     when (plazo.lowercase()) {
-        "diario" -> {
-            calendar.add(Calendar.DAY_OF_YEAR, numeroCuota)
-        }
+        "diario" -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota)
         "lunes a sábado" -> {
             repeat(numeroCuota) {
                 do {
@@ -65,27 +57,94 @@ private fun calcularFechaCuota(fechaInicio: Date, plazo: String, numeroCuota: In
                 } while (calendar.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY)
             }
         }
-        "semanal" -> {
-            calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 7)
-        }
-        "quincenal" -> {
-            calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 15)
-        }
-        "mensual" -> {
-            calendar.add(Calendar.MONTH, numeroCuota)
-        }
-        "bimestral" -> {
-            calendar.add(Calendar.MONTH, numeroCuota * 2)
-        }
-        else -> {
-            calendar.add(Calendar.MONTH, numeroCuota)
-        }
+        "semanal" -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 7)
+        "quincenal" -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 15)
+        "mensual" -> calendar.add(Calendar.MONTH, numeroCuota)
+        "bimestral" -> calendar.add(Calendar.MONTH, numeroCuota * 2)
+        else -> calendar.add(Calendar.MONTH, numeroCuota)
     }
 
     return dateFormat.format(calendar.time)
 }
 
-// NUEVA FUNCIÓN PRINCIPAL: Distribución de pagos en cascada
+private suspend fun obtenerEstadoCuotasCompleto(
+    db: FirebaseFirestore,
+    prestamoId: String
+): Map<Int, Double> {
+    // 1) Intentar con pagos reales (admin u otros roles con permiso)
+    try {
+        val pagosSnapshot = db.collection("pagos")
+            .whereEqualTo("prestamoId", prestamoId)
+            .get().await()
+
+        if (!pagosSnapshot.isEmpty) {
+            val pagosPorCuota = mutableMapOf<Int, Double>()
+
+            for (pago in pagosSnapshot.documents) {
+                val cuotasCubiertas = pago.get("cuotasCubiertas") as? List<*>
+                if (!cuotasCubiertas.isNullOrEmpty()) {
+                    cuotasCubiertas.forEach { cuotaData ->
+                        if (cuotaData is Map<*, *>) {
+                            val numeroCuota = (cuotaData["numeroCuota"] as? Number)?.toInt() ?: return@forEach
+                            val montoAplicado = (cuotaData["montoAplicado"] as? Number)?.toDouble() ?: 0.0
+                            if (numeroCuota > 0 && montoAplicado > 0) {
+                                pagosPorCuota[numeroCuota] = (pagosPorCuota[numeroCuota] ?: 0.0) + montoAplicado
+                            }
+                        }
+                    }
+                } else {
+                    // Backward-compat: pagos antiguos con un solo campo de cuota
+                    val numeroCuota = when {
+                        pago.contains("numeroCuota") -> pago.getLong("numeroCuota")?.toInt() ?: 1
+                        pago.contains("cuota") -> pago.getLong("cuota")?.toInt() ?: 1
+                        else -> 1
+                    }
+                    val montoPago = pago.getDouble("monto") ?: 0.0
+                    if (montoPago > 0) {
+                        pagosPorCuota[numeroCuota] = (pagosPorCuota[numeroCuota] ?: 0.0) + montoPago
+                    }
+                }
+            }
+
+            if (pagosPorCuota.isNotEmpty()) return pagosPorCuota
+        }
+    } catch (e: Exception) {
+        // Es normal que falle aquí por reglas si el rol no es admin
+        Log.w("EstadoCuotas", "Lectura de pagos no disponible para este rol: ${e.message}")
+    }
+
+    // 2) Fallback: calcular avance sólo con el documento del préstamo
+    return try {
+        val p = db.collection("prestamos").document(prestamoId).get().await()
+        val cuota = p.getDouble("cuota") ?: 0.0
+        val cuotasTotales = p.getLong("cuotas")?.toInt() ?: 1
+        // Preferir "montoPagado"; si no, calcular desde total/ saldo
+        val montoPagado = p.getDouble("montoPagado")
+            ?: run {
+                val monto = p.getDouble("monto") ?: 0.0
+                val interesTotal = p.getDouble("interesTotal") ?: p.getDouble("interes") ?: 0.0
+                val totalPagar = p.getDouble("totalPagar") ?: (monto + interesTotal)
+                val saldo = p.getDouble("saldo") ?: (totalPagar)
+                (totalPagar - saldo).coerceAtLeast(0.0)
+            }
+
+        if (cuota <= 0.0 || montoPagado <= 0.0) return emptyMap()
+
+        val completas = kotlin.math.floor(montoPagado / cuota).toInt().coerceAtMost(cuotasTotales)
+        val parcial = (montoPagado - (completas * cuota)).coerceAtLeast(0.0)
+
+        val mapa = mutableMapOf<Int, Double>()
+        for (i in 1..completas) mapa[i] = cuota
+        if (parcial > 0.01 && completas + 1 <= cuotasTotales) mapa[completas + 1] = parcial
+
+        Log.d("EstadoCuotas", "Fallback por préstamo: completas=$completas, parcial=$parcial")
+        mapa
+    } catch (e: Exception) {
+        Log.e("EstadoCuotas", "Fallback falló: ${e.message}")
+        emptyMap()
+    }
+}
+
 private suspend fun distribuirPagoEnCascada(
     db: FirebaseFirestore,
     prestamoId: String,
@@ -94,25 +153,19 @@ private suspend fun distribuirPagoEnCascada(
     cuotasTotales: Int
 ): ResultadoDistribucion {
     return try {
-        // Obtener estado actual de todas las cuotas
         val estadoCuotas = obtenerEstadoCuotasCompleto(db, prestamoId)
 
         var montoRestante = montoPagado
         val cuotasCubiertas = mutableListOf<CuotaCubierta>()
         var totalCuotasCompletas = 0
 
-        Log.d("DistribucionCascada", "=== INICIANDO DISTRIBUCIÓN EN CASCADA ===")
-        Log.d("DistribucionCascada", "Monto a distribuir: L. ${String.format("%.2f", montoPagado)}")
-        Log.d("DistribucionCascada", "Cuota estimada: L. ${String.format("%.2f", cuotaEstimada)}")
-
-        // Distribuir el dinero secuencialmente desde la cuota 1
         for (i in 1..cuotasTotales) {
-            if (montoRestante <= 0.01) break // Parar si ya no hay dinero
+            if (montoRestante <= 0.01) break
 
             val montoPagadoEnCuota = estadoCuotas[i] ?: 0.0
             val montoRestanteCuota = (cuotaEstimada - montoPagadoEnCuota).coerceAtLeast(0.0)
 
-            if (montoRestanteCuota > 0.01) { // Solo si la cuota no está completa
+            if (montoRestanteCuota > 0.01) {
                 val montoAAplicar = minOf(montoRestante, montoRestanteCuota)
                 val cuotaCompleta = montoAAplicar >= montoRestanteCuota - 0.01
 
@@ -124,17 +177,11 @@ private suspend fun distribuirPagoEnCascada(
                     )
                 )
 
-                if (cuotaCompleta) {
-                    totalCuotasCompletas++
-                }
-
+                if (cuotaCompleta) totalCuotasCompletas++
                 montoRestante -= montoAAplicar
-
-                Log.d("DistribucionCascada", "Cuota $i: aplicado L. ${String.format("%.2f", montoAAplicar)}, completa: $cuotaCompleta")
             }
         }
 
-        // Encontrar próxima cuota pendiente
         val estadoActualizado = estadoCuotas.toMutableMap()
         cuotasCubiertas.forEach { cuota ->
             estadoActualizado[cuota.numeroCuota] = (estadoActualizado[cuota.numeroCuota] ?: 0.0) + cuota.montoAplicado
@@ -149,7 +196,6 @@ private suspend fun distribuirPagoEnCascada(
             }
         }
 
-        // Calcular fecha de próximo pago
         val fechaProximoPago = if (proximaCuotaPendiente <= cuotasTotales) {
             val prestamoDoc = db.collection("prestamos").document(prestamoId).get().await()
             val fechaInicio = prestamoDoc.getTimestamp("fecha")?.toDate() ?: Date()
@@ -159,12 +205,6 @@ private suspend fun distribuirPagoEnCascada(
             "saldado"
         }
 
-        Log.d("DistribucionCascada", "=== RESULTADO DISTRIBUCIÓN ===")
-        Log.d("DistribucionCascada", "Cuotas afectadas: ${cuotasCubiertas.size}")
-        Log.d("DistribucionCascada", "Cuotas completadas: $totalCuotasCompletas")
-        Log.d("DistribucionCascada", "Próxima cuota pendiente: $proximaCuotaPendiente")
-        Log.d("DistribucionCascada", "Fecha próximo pago: $fechaProximoPago")
-
         ResultadoDistribucion(
             cuotasCubiertas = cuotasCubiertas,
             proximaCuotaPendiente = proximaCuotaPendiente,
@@ -173,8 +213,7 @@ private suspend fun distribuirPagoEnCascada(
         )
 
     } catch (e: Exception) {
-        Log.e("DistribucionCascada", "Error en distribución en cascada: ${e.message}", e)
-        // Fallback: aplicar todo a la primera cuota disponible
+        Log.e("DistribucionCascada", "Error: ${e.message}", e)
         ResultadoDistribucion(
             cuotasCubiertas = listOf(CuotaCubierta(1, montoPagado, false)),
             proximaCuotaPendiente = 1,
@@ -184,73 +223,22 @@ private suspend fun distribuirPagoEnCascada(
     }
 }
 
-// Función auxiliar para obtener estado completo de cuotas
-private suspend fun obtenerEstadoCuotasCompleto(
-    db: FirebaseFirestore,
-    prestamoId: String
-): Map<Int, Double> {
-    return try {
-        val pagosSnapshot = db.collection("pagos")
-            .whereEqualTo("prestamoId", prestamoId)
-            .get().await()
-
-        val pagosPorCuota = mutableMapOf<Int, Double>()
-
-        for (pago in pagosSnapshot.documents) {
-            val cuotasCubiertas = pago.get("cuotasCubiertas") as? List<*> ?: emptyList<Map<String, Any>>()
-
-            if (cuotasCubiertas.isNotEmpty()) {
-                // Nueva estructura con cuotas múltiples
-                cuotasCubiertas.forEach { cuotaData ->
-                    if (cuotaData is Map<*, *>) {
-                        val numeroCuota = (cuotaData["numeroCuota"] as? Number)?.toInt() ?: 0
-                        val montoAplicado = (cuotaData["montoAplicado"] as? Number)?.toDouble() ?: 0.0
-
-                        if (numeroCuota > 0) {
-                            pagosPorCuota[numeroCuota] = (pagosPorCuota[numeroCuota] ?: 0.0) + montoAplicado
-                        }
-                    }
-                }
-            } else {
-                // Compatibilidad con estructura antigua
-                val numeroCuota = when {
-                    pago.contains("numeroCuota") -> pago.getLong("numeroCuota")?.toInt() ?: 1
-                    pago.contains("cuota") -> pago.getLong("cuota")?.toInt() ?: 1
-                    else -> 1
-                }
-
-                val montoPago = pago.getDouble("monto") ?: 0.0
-                val moraPago = pago.getDouble("mora") ?: 0.0
-                val montoTotal = montoPago + moraPago
-
-                pagosPorCuota[numeroCuota] = (pagosPorCuota[numeroCuota] ?: 0.0) + montoTotal
-            }
-        }
-
-        pagosPorCuota
-    } catch (e: Exception) {
-        Log.e("EstadoCuotas", "Error obteniendo estado de cuotas: ${e.message}")
-        emptyMap()
-    }
-}
-
-// Función para crear o verificar documento cliente
 suspend fun verificarYCrearCliente(db: FirebaseFirestore, clienteId: String, nombreCliente: String): Boolean {
     return try {
         val clienteDoc = db.collection("clientes").document(clienteId).get().await()
         if (!clienteDoc.exists()) {
-            val clienteData = mapOf<String, Any>(
-                "nombre" to nombreCliente,
-                "fechaCreacion" to Timestamp.now(),
-                "ultimaActividad" to Timestamp.now(),
-                "estado" to "activo"
-            )
-            db.collection("clientes").document(clienteId).set(clienteData).await()
-            Log.d("CrearCliente", "Cliente creado: $clienteId")
+            db.collection("clientes").document(clienteId).set(
+                mapOf(
+                    "nombre" to nombreCliente,
+                    "fechaCreacion" to Timestamp.now(),
+                    "ultimaActividad" to Timestamp.now(),
+                    "estado" to "activo"
+                )
+            ).await()
         }
         true
     } catch (e: Exception) {
-        Log.e("CrearCliente", "Error creando cliente: ${e.message}")
+        Log.e("CrearCliente", "Error: ${e.message}")
         false
     }
 }
@@ -269,7 +257,6 @@ fun RegistrarPagoScreen(
     val scope = rememberCoroutineScope()
     val session = remember { SessionManager(context) }
 
-    // Estados principales
     var nombreCliente by remember { mutableStateOf("") }
     var montoAbono by remember { mutableStateOf("") }
     var lugar by remember { mutableStateOf("El Paraíso, Danlí") }
@@ -281,7 +268,6 @@ fun RegistrarPagoScreen(
     var nombreCobrador by remember { mutableStateOf(cobrador) }
     var botonHabilitado by remember { mutableStateOf(true) }
 
-    // Variables del préstamo
     var montoPrestamo by remember { mutableStateOf(0.0) }
     var interesTotal by remember { mutableStateOf(0.0) }
     var totalAPagar by remember { mutableStateOf(0.0) }
@@ -294,13 +280,9 @@ fun RegistrarPagoScreen(
     var proximaCuotaPendiente by remember { mutableStateOf(1) }
     var fechaProximoPago by remember { mutableStateOf("") }
 
-    // NUEVA: Vista previa de distribución en cascada
     var vistaPrevia by remember { mutableStateOf<ResultadoDistribucion?>(null) }
 
-    // Carga inicial de datos
     LaunchedEffect(Unit) {
-        Log.d("RegistrarPagoScreen", "=== INICIANDO NUEVA LÓGICA DE PAGOS EN CASCADA ===")
-
         if (cobrador.isEmpty()) {
             Toast.makeText(context, "Error: UID del cobrador no válido", Toast.LENGTH_LONG).show()
             navController.popBackStack()
@@ -308,7 +290,6 @@ fun RegistrarPagoScreen(
         }
 
         try {
-            // Cargar datos del cliente
             val clienteDoc = db.collection("clientes").document(clienteId).get().await()
             nombreCliente = if (clienteDoc.exists()) {
                 clienteDoc.getString("nombre") ?: "Cliente"
@@ -316,12 +297,10 @@ fun RegistrarPagoScreen(
                 "Cliente $clienteId"
             }
 
-            // Cargar datos del cobrador
             val usuarioDoc = db.collection("usuarios").document(cobrador).get().await()
             nombreCobrador = usuarioDoc.getString("nombre") ?: "Cobrador Desconocido"
             firmaPrestamista = nombreCobrador
 
-            // Cargar datos del préstamo
             val prestamoDoc = db.collection("prestamos").document(prestamoId).get().await()
             if (!prestamoDoc.exists()) {
                 Toast.makeText(context, "Error: El préstamo no existe", Toast.LENGTH_LONG).show()
@@ -329,10 +308,9 @@ fun RegistrarPagoScreen(
                 return@LaunchedEffect
             }
 
-            // Extraer información del préstamo
             montoPrestamo = prestamoDoc.getDouble("monto") ?: 0.0
-            interesTotal = prestamoDoc.getDouble("interes") ?: prestamoDoc.getDouble("interesTotal") ?: 0.0
-            totalAPagar = montoPrestamo + interesTotal
+            interesTotal = prestamoDoc.getDouble("interesTotal") ?: prestamoDoc.getDouble("interes") ?: 0.0
+            totalAPagar = prestamoDoc.getDouble("totalPagar") ?: (montoPrestamo + interesTotal)
             cuotaEstimada = prestamoDoc.getDouble("cuota") ?: 0.0
             cuotasTotales = prestamoDoc.getLong("cuotas")?.toInt() ?: 1
             plazo = prestamoDoc.getString("plazo") ?: "Semanal"
@@ -340,29 +318,16 @@ fun RegistrarPagoScreen(
             montoPagadoActual = prestamoDoc.getDouble("montoPagado") ?: 0.0
             saldoActualizado = (totalAPagar - montoPagadoActual).coerceAtLeast(0.0)
 
-            // Calcular cuota y fecha pendiente con nueva lógica
             val resultado = distribuirPagoEnCascada(db, prestamoId, 0.0, cuotaEstimada, cuotasTotales)
             proximaCuotaPendiente = resultado.proximaCuotaPendiente
             fechaProximoPago = resultado.fechaProximoPago
 
-            Log.d("RegistrarPagoScreen", """
-                === DATOS CARGADOS CON NUEVA LÓGICA ===
-                - Capital: L. ${String.format("%.2f", montoPrestamo)}
-                - Interés: L. ${String.format("%.2f", interesTotal)}
-                - Total a pagar: L. ${String.format("%.2f", totalAPagar)}
-                - Ya pagado: L. ${String.format("%.2f", montoPagadoActual)}
-                - Saldo pendiente: L. ${String.format("%.2f", saldoActualizado)}
-                - Próxima cuota: $proximaCuotaPendiente de $cuotasTotales
-                - Fecha próximo pago: $fechaProximoPago
-            """.trimIndent())
-
         } catch (e: Exception) {
-            Toast.makeText(context, "Error al cargar datos: ${e.message}", Toast.LENGTH_LONG).show()
-            Log.e("RegistrarPagoScreen", "Error al cargar datos", e)
+            Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+            Log.e("RegistrarPagoScreen", "Error: ", e)
         }
     }
 
-    // Calcular vista previa cuando cambie el monto
     LaunchedEffect(montoAbono) {
         val abono = montoAbono.toDoubleOrNull() ?: 0.0
         if (abono > 0.0) {
@@ -375,7 +340,7 @@ fun RegistrarPagoScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Registrar Pago - Nueva Lógica", color = MaterialTheme.colorScheme.primary) },
+                title = { Text("Registrar Pago", color = MaterialTheme.colorScheme.primary) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
             )
         }
@@ -388,7 +353,6 @@ fun RegistrarPagoScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Información del préstamo
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD))
@@ -396,50 +360,17 @@ fun RegistrarPagoScreen(
                 Column(Modifier.padding(16.dp)) {
                     Text("Información del Préstamo", fontWeight = FontWeight.Bold)
                     Text("Cliente: $nombreCliente", fontWeight = FontWeight.Bold)
-                    Text("Capital prestado: L. ${"%.2f".format(montoPrestamo)}")
-                    Text("Interés total: L. ${"%.2f".format(interesTotal)}")
-                    Text(
-                        "Total a pagar: L. ${"%.2f".format(totalAPagar)}",
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1E88E5)
-                    )
-                    Text(
-                        "Ya pagado: L. ${"%.2f".format(montoPagadoActual)}",
-                        color = Color(0xFF4CAF50)
-                    )
-                    Text(
-                        "Saldo pendiente: L. ${"%.2f".format(saldoActualizado)}",
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFFFF5722)
-                    )
-                    Text("Plazo: $plazo")
-                    Text("Cuota estimada: L. ${"%.2f".format(cuotaEstimada)}")
-                    Text("Próxima cuota pendiente: #$proximaCuotaPendiente de $cuotasTotales")
-                    Text(
-                        "Fecha próximo pago: $fechaProximoPago",
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1976D2)
-                    )
+                    Text("Capital: L. ${"%.2f".format(montoPrestamo)}")
+                    Text("Interés: L. ${"%.2f".format(interesTotal)}")
+                    Text("Total: L. ${"%.2f".format(totalAPagar)}", fontWeight = FontWeight.Bold)
+                    Text("Pagado: L. ${"%.2f".format(montoPagadoActual)}", color = Color(0xFF4CAF50))
+                    Text("Saldo: L. ${"%.2f".format(saldoActualizado)}", fontWeight = FontWeight.Bold, color = Color(0xFFFF5722))
+                    Text("Cuota: L. ${"%.2f".format(cuotaEstimada)}")
+                    Text("Próxima: #$proximaCuotaPendiente de $cuotasTotales")
+                    Text("Fecha: $fechaProximoPago", fontWeight = FontWeight.Bold)
                 }
             }
 
-            // NUEVA: Explicación del sistema
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0))
-            ) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("Nueva Lógica de Pagos", fontWeight = FontWeight.Bold, color = Color(0xFFE65100))
-                    Text(
-                        "El dinero se distribuirá automáticamente llenando cuotas completas en orden secuencial. " +
-                                "No hay abonos parciales: si pagas L. 2000 y la cuota es L. 1330, se llenará la cuota 1 (L. 1330) " +
-                                "y se aplicarán L. 670 a la cuota 2.",
-                        color = Color(0xFFE65100)
-                    )
-                }
-            }
-
-            // Campo de monto
             PrimaryTextField(
                 value = montoAbono,
                 onValueChange = { montoAbono = it },
@@ -447,60 +378,32 @@ fun RegistrarPagoScreen(
                 keyboardType = KeyboardType.Number
             )
 
-            // NUEVA: Vista previa de distribución en cascada
             vistaPrevia?.let { preview ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E8))
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("Vista Previa de Distribución", fontWeight = FontWeight.Bold)
-
-                        if (preview.cuotasCubiertas.isNotEmpty()) {
-                            Text("Cuotas que se llenarán:", fontWeight = FontWeight.Medium)
-                            preview.cuotasCubiertas.forEach { cuota ->
-                                val estado = if (cuota.completada) "COMPLETA" else "PARCIAL"
-                                Text(
-                                    "• Cuota ${cuota.numeroCuota}: L. ${"%.2f".format(cuota.montoAplicado)} ($estado)",
-                                    color = if (cuota.completada) Color(0xFF4CAF50) else Color(0xFFFF9800)
-                                )
-                            }
-
+                        Text("Vista Previa", fontWeight = FontWeight.Bold)
+                        preview.cuotasCubiertas.forEach { cuota ->
                             Text(
-                                "Total de cuotas completadas: ${preview.totalCuotasCompletas}",
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF4CAF50)
+                                "• Cuota ${cuota.numeroCuota}: L. ${"%.2f".format(cuota.montoAplicado)} ${if (cuota.completada) "✓" else "parcial"}",
+                                color = if (cuota.completada) Color(0xFF4CAF50) else Color(0xFFFF9800)
                             )
-
-                            val nuevoSaldo = saldoActualizado - (montoAbono.toDoubleOrNull() ?: 0.0)
-                            if (nuevoSaldo <= 0) {
-                                Text(
-                                    "¡PRÉSTAMO SALDADO COMPLETAMENTE!",
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF4CAF50)
-                                )
-                            } else {
-                                Text("Próxima cuota pendiente: #${preview.proximaCuotaPendiente}")
-                                Text(
-                                    "Nueva fecha programada: ${preview.fechaProximoPago}",
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF1976D2)
-                                )
-                            }
+                        }
+                        Text("Completas: ${preview.totalCuotasCompletas}", fontWeight = FontWeight.Bold)
+                        if ((saldoActualizado - (montoAbono.toDoubleOrNull() ?: 0.0)) > 0) {
+                            Text("Próxima: #${preview.proximaCuotaPendiente} - ${preview.fechaProximoPago}")
+                        } else {
+                            Text("¡SALDADO!", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             }
 
-            // Campos adicionales
             PrimaryTextField(value = lugar, onValueChange = { lugar = it }, label = "Lugar")
-            PrimaryTextField(
-                value = firmaPrestamista,
-                onValueChange = { firmaPrestamista = it },
-                label = "Firma"
-            )
+            PrimaryTextField(value = firmaPrestamista, onValueChange = { firmaPrestamista = it }, label = "Firma")
 
-            // Selector de método de pago
             ExposedDropdownMenuBox(
                 expanded = expandedMetodoPago,
                 onExpandedChange = { expandedMetodoPago = !expandedMetodoPago }
@@ -529,9 +432,8 @@ fun RegistrarPagoScreen(
                 }
             }
 
-            // Botón principal
             PrimaryButton(
-                text = "Registrar Pago en Cascada",
+                text = "Registrar Pago",
                 onClick = {
                     if (!botonHabilitado) return@PrimaryButton
 
@@ -551,28 +453,72 @@ fun RegistrarPagoScreen(
 
                     scope.launch {
                         try {
-                            // Verificar/crear cliente
                             if (!verificarYCrearCliente(db, clienteId, nombreCliente)) {
                                 Toast.makeText(context, "Error al verificar cliente", Toast.LENGTH_LONG).show()
                                 botonHabilitado = true
                                 return@launch
                             }
 
-                            // Calcular distribución final
+                            // ✅ CALCULAR DISTRIBUCIÓN FRESCA JUSTO ANTES DE USAR
                             val distribucion = distribuirPagoEnCascada(db, prestamoId, abono, cuotaEstimada, cuotasTotales)
+
+                            // ✅ LOG DETALLADO PARA DEBUG
+                            Log.d("RegistrarPago", "========================================")
+                            Log.d("RegistrarPago", "DISTRIBUCIÓN CALCULADA:")
+                            Log.d("RegistrarPago", "Total cuotas cubiertas: ${distribucion.cuotasCubiertas.size}")
+                            distribucion.cuotasCubiertas.forEachIndexed { index, cuota ->
+                                Log.d("RegistrarPago", "  [$index] Cuota #${cuota.numeroCuota}: L.${String.format("%.2f", cuota.montoAplicado)} ${if(cuota.completada) "✓ COMPLETA" else "⚠ PARCIAL"}")
+                            }
+                            Log.d("RegistrarPago", "Próxima cuota pendiente: #${distribucion.proximaCuotaPendiente}")
+                            Log.d("RegistrarPago", "Fecha próximo pago: ${distribucion.fechaProximoPago}")
+                            Log.d("RegistrarPago", "========================================")
 
                             val fechaActual = Timestamp.now()
                             val fechaFormateada = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(fechaActual.toDate())
                             val nuevoMontoPagado = montoPagadoActual + abono
                             val nuevoSaldo = (saldoActualizado - abono).coerceAtLeast(0.0)
 
-                            // Generar descripción para el recibo
-                            val descripcionCuotas = distribucion.cuotasCubiertas.joinToString(", ") { cuota ->
-                                val estado = if (cuota.completada) "completa" else "parcial"
-                                "#${cuota.numeroCuota} ($estado)"
+                            // ✅ DESCRIPCIÓN MEJORADA PARA EL RECIBO (calculada DESPUÉS de obtener distribución)
+                            val descripcionDetallada = when {
+                                distribucion.cuotasCubiertas.isEmpty() -> {
+                                    Log.w("RegistrarPago", "⚠️ NO SE CUBRIERON CUOTAS")
+                                    "Sin cuotas"
+                                }
+                                distribucion.cuotasCubiertas.size == 1 -> {
+                                    val c = distribucion.cuotasCubiertas.first()
+                                    val desc = if (c.completada) "Cuota #${c.numeroCuota}" else "Cuota #${c.numeroCuota} parcial"
+                                    Log.d("RegistrarPago", "📝 Descripción: $desc")
+                                    desc
+                                }
+                                else -> {
+                                    val nums = distribucion.cuotasCubiertas.map { it.numeroCuota }
+                                    val desc = if (nums.size <= 3) {
+                                        "Cuotas ${nums.joinToString(", ") { "#$it" }}"
+                                    } else {
+                                        "Cuotas #${nums.first()} a #${nums.last()}"
+                                    }
+                                    Log.d("RegistrarPago", "📝 Descripción: $desc")
+                                    desc
+                                }
                             }
 
-                            // Generar PDF
+                            val descripcionCorta = when {
+                                distribucion.cuotasCubiertas.isEmpty() -> "N/A"
+                                distribucion.cuotasCubiertas.size == 1 -> {
+                                    val c = distribucion.cuotasCubiertas.first()
+                                    if (c.completada) "#${c.numeroCuota}" else "#${c.numeroCuota}*"
+                                }
+                                else -> {
+                                    val nums = distribucion.cuotasCubiertas.map { it.numeroCuota }
+                                    if (nums.size <= 3) nums.joinToString(", ") { "#$it" }
+                                    else "#${nums.first()}-#${nums.last()}"
+                                }
+                            }
+
+                            Log.d("RegistrarPago", "📋 Descripción detallada para PDF: '$descripcionDetallada'")
+                            Log.d("RegistrarPago", "📋 Descripción corta para BD: '$descripcionCorta'")
+
+                            // ✅ GENERAR PDF CON LA DESCRIPCIÓN CORRECTA
                             val pdfFile = ReciboHelper.generarReciboPDF(
                                 context = context,
                                 cliente = nombreCliente,
@@ -581,7 +527,7 @@ fun RegistrarPagoScreen(
                                 montoPagado = abono.toString(),
                                 saldoAnterior = saldoActualizado,
                                 proximoPago = distribucion.fechaProximoPago,
-                                cuota = "Cuotas: $descripcionCuotas",
+                                cuota = descripcionDetallada, // ✅ USA LA DESCRIPCIÓN RECIÉN CALCULADA
                                 cobrador = nombreCobrador,
                                 lugar = lugar,
                                 firma = firmaPrestamista,
@@ -597,16 +543,15 @@ fun RegistrarPagoScreen(
                                 try {
                                     ReciboHelper.imprimirPDF(context, pdfFile!!)
                                     pdfImpreso = true
-                                    Toast.makeText(context, "Recibo impreso correctamente", Toast.LENGTH_SHORT).show()
+                                    Log.d("RegistrarPago", "✅ PDF impreso correctamente")
                                 } catch (e: Exception) {
-                                    pdfImpreso = false
-                                    Toast.makeText(context, "Error al imprimir. Compartiendo...", Toast.LENGTH_SHORT).show()
+                                    Log.e("ImprimirPDF", "❌ Error al imprimir: ${e.message}")
                                 }
                                 ReciboHelper.compartirReciboPDF(context, pdfFile!!)
                             }
 
-                            // Registrar pago con nueva estructura
-                            val abonoData = mapOf<String, Any>(
+                            // ✅ GUARDAR EN FIREBASE
+                            val abonoData = mapOf(
                                 "clienteId" to clienteId,
                                 "clienteNombre" to nombreCliente,
                                 "prestamoId" to prestamoId,
@@ -625,32 +570,32 @@ fun RegistrarPagoScreen(
                                 "pdfImpreso" to pdfImpreso,
                                 "proximaFechaProgramada" to distribucion.fechaProximoPago,
                                 "totalCuotasCompletas" to distribucion.totalCuotasCompletas,
-                                // NUEVA ESTRUCTURA: Lista de cuotas cubiertas
-                                "cuotasCubiertas" to distribucion.cuotasCubiertas.map { cuota ->
+                                "cuotasCubiertas" to distribucion.cuotasCubiertas.map {
                                     mapOf(
-                                        "numeroCuota" to cuota.numeroCuota,
-                                        "montoAplicado" to cuota.montoAplicado,
-                                        "completada" to cuota.completada
+                                        "numeroCuota" to it.numeroCuota,
+                                        "montoAplicado" to it.montoAplicado,
+                                        "completada" to it.completada
                                     )
                                 },
-                                "sistemaPagoEnCascada" to true,
-                                "observaciones" to "Pago distribuido automáticamente en cascada: $descripcionCuotas"
+                                "descripcionCuotas" to descripcionCorta,
+                                "sistemaPagoEnCascada" to true
                             )
 
                             if (isInternetAvailable(context)) {
-                                // Guardar en Firestore
                                 db.collection("pagos").add(abonoData).await()
+                                Log.d("RegistrarPago", "✅ Pago guardado en Firebase")
 
-                                // Actualizar préstamo
+                                // ✅ ACTUALIZAR PRÉSTAMO
                                 val actualizacionPrestamo = if (nuevoSaldo <= 0.01) {
                                     mapOf<String, Any>(
                                         "saldo" to 0.0,
-                                        "montoPagado" to nuevoMontoPagado,
+                                        "montoPagado" to totalAPagar,
                                         "estado" to "saldado",
                                         "proximoPago" to "saldado",
                                         "fechaUltimaActualizacion" to fechaActual,
                                         "ultimoPago" to fechaFormateada,
-                                        "fechaSaldado" to fechaActual
+                                        "fechaSaldado" to fechaActual,
+                                        "totalPagar" to totalAPagar
                                     )
                                 } else {
                                     mapOf<String, Any>(
@@ -664,8 +609,8 @@ fun RegistrarPagoScreen(
                                 }
 
                                 db.collection("prestamos").document(prestamoId).update(actualizacionPrestamo).await()
+                                Log.d("RegistrarPago", "✅ Préstamo actualizado")
 
-                                // Actualizar cliente
                                 try {
                                     db.collection("clientes").document(clienteId).update(
                                         mapOf(
@@ -674,42 +619,29 @@ fun RegistrarPagoScreen(
                                         )
                                     ).await()
                                 } catch (e: Exception) {
-                                    Log.e("ActualizarCliente", "Error actualizando cliente: ${e.message}")
+                                    Log.e("ActualizarCliente", "Error: ${e.message}")
                                 }
 
-                                val mensajeExito = if (nuevoSaldo <= 0.01) {
-                                    "¡PRÉSTAMO SALDADO COMPLETAMENTE! ${distribucion.totalCuotasCompletas} cuotas completadas"
-                                } else {
-                                    "Pago registrado correctamente. ${distribucion.totalCuotasCompletas} cuotas completadas"
-                                }
+                                val msg = if (nuevoSaldo <= 0.01) "¡PRÉSTAMO SALDADO! ✅"
+                                else "Pago registrado. ${distribucion.totalCuotasCompletas} cuotas completas"
 
-                                Toast.makeText(context, mensajeExito, Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
 
                             } else {
                                 guardarAbonoPendiente(context, abonoData)
                                 Toast.makeText(context, "Pago guardado offline", Toast.LENGTH_LONG).show()
                             }
 
-                            // Actualizar variables locales
+                            // ✅ ACTUALIZAR UI
                             montoPagadoActual = nuevoMontoPagado
                             saldoActualizado = nuevoSaldo
                             proximaCuotaPendiente = distribucion.proximaCuotaPendiente
                             fechaProximoPago = distribucion.fechaProximoPago
                             montoAbono = ""
 
-                            Log.d("RegistrarPago", """
-                                === PAGO EN CASCADA REGISTRADO EXITOSAMENTE ===
-                                - Monto pagado: L. ${String.format("%.2f", abono)}
-                                - Cuotas afectadas: ${distribucion.cuotasCubiertas.size}
-                                - Cuotas completadas: ${distribucion.totalCuotasCompletas}
-                                - Nuevo saldo: L. ${String.format("%.2f", nuevoSaldo)}
-                                - Próxima cuota: ${distribucion.proximaCuotaPendiente}
-                                - Fecha próximo pago: ${distribucion.fechaProximoPago}
-                            """.trimIndent())
-
                         } catch (e: Exception) {
-                            Toast.makeText(context, "Error al registrar el pago: ${e.message}", Toast.LENGTH_LONG).show()
-                            Log.e("RegistrarPago", "Error registrando pago en cascada: ", e)
+                            Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                            Log.e("RegistrarPago", "❌ Error general: ", e)
                         } finally {
                             botonHabilitado = true
                         }
@@ -719,16 +651,15 @@ fun RegistrarPagoScreen(
                 enabled = botonHabilitado && (montoAbono.toDoubleOrNull() ?: 0.0) > 0
             )
 
-            // Botones adicionales si hay PDF
             if (archivoPDF != null) {
                 OutlinedButton(
                     onClick = {
                         archivoPDF?.let {
                             try {
                                 ReciboHelper.imprimirPDF(context, it)
-                                Toast.makeText(context, "Recibo reenviado a impresora", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Recibo reenviado", Toast.LENGTH_SHORT).show()
                             } catch (e: Exception) {
-                                Toast.makeText(context, "Error al reimprimir: ${e.message}", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Error al reimprimir", Toast.LENGTH_SHORT).show()
                             }
                         }
                     },
@@ -737,21 +668,16 @@ fun RegistrarPagoScreen(
 
                 OutlinedButton(
                     onClick = {
-                        archivoPDF?.let {
-                            ReciboHelper.compartirReciboPDF(context, it)
-                        }
+                        archivoPDF?.let { ReciboHelper.compartirReciboPDF(context, it) }
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("Compartir Recibo") }
             }
 
-            // Botón para volver
             OutlinedButton(
                 onClick = { navController.popBackStack() },
                 modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Regresar")
-            }
+            ) { Text("Regresar") }
         }
     }
 }

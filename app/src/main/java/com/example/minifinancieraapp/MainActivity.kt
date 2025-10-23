@@ -25,6 +25,7 @@ import com.example.capitalexpressapp.ui.screens.LoginScreen
 import com.example.capitalexpressapp.ui.screens.NotificacionesScreen
 import com.example.capitalexpressapp.ui.screens.PerfilClienteScreen
 import com.example.capitalexpressapp.ui.screens.PrestamoAdminScreen
+import com.example.capitalexpressapp.ui.screens.ReporteClientesScreen
 import com.example.capitalexpressapp.ui.screens.VerPrestamoScreen
 import com.example.capitalexpressapp.ui.theme.CapitalExpressAppTheme
 import com.example.minifinancieraapp.ui.screens.*
@@ -298,6 +299,26 @@ class MainActivity : ComponentActivity() {
                                 solicitudId = solicitudId
                             )
                         }
+
+                        composable(
+                            route = "reporteClientes/{rol}/{prefCobradorId}/{initialEstado}",
+                            arguments = listOf(
+                                navArgument("rol") { type = NavType.StringType },
+                                navArgument("prefCobradorId") { type = NavType.StringType },
+                                navArgument("initialEstado") { type = NavType.StringType }
+                            )
+                        ) { backStackEntry ->
+                            val rol = backStackEntry.arguments?.getString("rol") ?: "admin"
+                            // Si luego quieres usar los otros parámetros para fijar filtros iniciales:
+                            // val pref = backStackEntry.arguments?.getString("prefCobradorId") ?: "none"
+                            // val initialEstado = backStackEntry.arguments?.getString("initialEstado") ?: "Todos"
+
+                            ReporteClientesScreen(
+                                navController = navController,
+                                rol = rol
+                            )
+                        }
+
 
                         composable("solicitudesAdmin") {
                             SolicitudesAdminScreen(navController)
