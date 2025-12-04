@@ -227,7 +227,7 @@ fun PerfilClienteScreen(
                         firma = doc.getString("firma") ?: "",
                         tipoPago = doc.getString("metodoPago") ?: "",
                         saldoRestante = doc.getDouble("saldoRestante") ?: 0.0,
-                        numeroPrestamo = doc.getLong("numeroPrestamo")?.toInt() ?: 0
+                        numeroPrestamo = doc.getString("numeroPrestamo")?.toString() ?: ""
                     )
                 }
             } catch (e: Exception) {

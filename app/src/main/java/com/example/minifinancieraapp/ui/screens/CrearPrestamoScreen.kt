@@ -769,12 +769,19 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
                             ).show()
                         }
 
+                        // ⭐⭐⭐ GENERAR NÚMERO ÚNICO DE PRÉSTAMO ⭐⭐⭐
+                        val numeroPrestamoUnico = com.example.capitalexpressapp.util.PrestamoNumberHelper.generarNumeroPrestamo(
+                            clienteNombre = selectedCliente!!.nombre,
+                            db = db
+                        )
+
                         val docRef = db.collection("prestamos").document()
                         val prestamoId = docRef.id
                         val fecha = formatter.format(fechaSeleccionada.time)
 
                         val prestamo = hashMapOf(
                             "id" to prestamoId,
+                            "numeroPrestamo" to numeroPrestamoUnico,
                             "cliente" to selectedCliente!!.nombre,
                             "clienteId" to selectedCliente!!.id,
                             "monto" to montoDouble,
@@ -795,6 +802,7 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
                             "cobrador" to nombreCobrador,
                             "numeroCobrador" to numeroCobrador,
                             "cobradorUid" to currentUid,
+                            "cobradoresAsignados" to listOf(currentUid), // ✅ AGREGAR ESTO - Array de cobradores
                             "prestamoId" to prestamoId,
                             "proximoPago" to proximoPagoTimestamp,
                             "montoPagado" to 0.0,
@@ -803,7 +811,8 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
                             "observaciones" to observaciones,
                             "fotos" to fotosSeleccionadas.map { it.toString() },
                             "diasEfectivos" to diasEfectivos.toDouble(),
-                            "saldo" to totalAPagar
+                            "saldo" to totalAPagar,
+                            "eliminado" to false // ✅ AGREGAR ESTO - Para el filtro de eliminados
                         )
 
                         docRef.set(prestamo).await()
@@ -812,8 +821,8 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
                         val nuevoTotal = prestamosActivos + 1
                         Toast.makeText(
                             context,
-                            "Préstamo creado exitosamente. Cliente ahora tiene $nuevoTotal préstamo(s) activo(s).",
-                            Toast.LENGTH_SHORT
+                            "Préstamo creado exitosamente.\nNúmero: $numeroPrestamoUnico\nCliente ahora tiene $nuevoTotal préstamo(s) activo(s).",
+                            Toast.LENGTH_LONG
                         ).show()
 
                         try {
@@ -827,7 +836,7 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
                                 fecha = fecha,
                                 lugar = lugar,
                                 numeroCobrador = numeroCobrador,
-                                numeroPrestamo = prestamoId,
+                                numeroPrestamo = numeroPrestamoUnico, // ⭐ USAR NUEVO NÚMERO
                                 nombreCobrador = nombreCobrador,
                                 fechaProximoPago = proximoPagoString
                             )

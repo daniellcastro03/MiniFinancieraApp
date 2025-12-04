@@ -43,7 +43,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.rotate
 import com.example.capitalexpressapp.util.ReciboHelper
 
-// Data class para historial
+// ⭐ Data class actualizada con numeroPrestamo como String
 data class PrestamoHistorial(
     val id: String = "",
     val cliente: String = "",
@@ -72,7 +72,7 @@ data class PrestamoHistorial(
     val fotos: List<String> = emptyList(),
     val diasEfectivos: Int = 0,
     val cobradores: List<String> = emptyList(),
-    val numeroPrestamo: Int = 0,
+    val numeroPrestamo: String = "", // ⭐ CAMBIADO A STRING
     val prestamoId: String = "",
     val eliminado: Boolean = false,
     val mora: Double = 0.0,
@@ -84,13 +84,11 @@ private fun PrestamoHistorial.estadoEfectivo(): String {
     val total = if (totalPagar > 0.0) totalPagar else (monto + interesTotal)
     return when {
         estado.equals("saldado", ignoreCase = true) -> "saldado"
-        // si el saldo es ~0 o lo pagado >= total, es saldado aunque el doc diga "activo"
         saldo <= epsilon || (montoPagado + epsilon) >= total -> "saldado"
         else -> estado.lowercase()
     }
 }
 
-// Funciones helper
 fun DocumentSnapshot.getTimestampSafeHistorial(field: String): Timestamp? {
     return try {
         this.getTimestamp(field)
@@ -140,21 +138,18 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
     val formatter = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
     val fullFormatter = SimpleDateFormat("dd 'de' MMMM 'de' yyyy, HH:mm:ss a", Locale("es", "ES"))
 
-    // Estados principales
     var prestamosOriginales by remember { mutableStateOf<List<PrestamoHistorial>>(emptyList()) }
     var prestamosFiltrados by remember { mutableStateOf<List<PrestamoHistorial>>(emptyList()) }
     var cargando by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf("") }
     var firestoreListener by remember { mutableStateOf<ListenerRegistration?>(null) }
 
-    // Estados de filtros
     var filtroFecha by remember { mutableStateOf("Todos") }
     var filtroEstado by remember { mutableStateOf("Todos") }
     var busqueda by remember { mutableStateOf("") }
     var expandedCard by remember { mutableStateOf<String?>(null) }
     var resumenExpandido by remember { mutableStateOf(false) }
 
-    // Estados para DatePickers
     var fechaInicio by remember { mutableStateOf("") }
     var fechaFin by remember { mutableStateOf("") }
     val datePickerInicio = rememberDatePickerState()
@@ -162,20 +157,17 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
     val showInicioPicker = remember { mutableStateOf(false) }
     val showFinPicker = remember { mutableStateOf(false) }
 
-    // Estado para exportación PDF
     var exportandoPDF by remember { mutableStateOf(false) }
 
     val esAdmin = rol.equals("admin", ignoreCase = true)
     val esCobrador = rol.equals("cobrador", ignoreCase = true)
 
-    // Función para verificar conectividad
     fun isNetworkAvailable(context: Context): Boolean {
         val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
         val activeNetwork = connectivityManager.activeNetworkInfo
         return activeNetwork?.isConnectedOrConnecting == true
     }
 
-    // Función para resetear filtros
     fun resetearFiltros() {
         filtroFecha = "Todos"
         filtroEstado = "Todos"
@@ -184,14 +176,13 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
         fechaFin = ""
     }
 
-    // Función para aplicar filtros
     fun aplicarFiltros() {
         prestamosFiltrados = prestamosOriginales.filter { prestamo ->
             val coincideBusqueda = if (busqueda.isBlank()) {
                 true
             } else {
                 prestamo.cliente.contains(busqueda, ignoreCase = true) ||
-                        prestamo.numeroPrestamo.toString().contains(busqueda)
+                        prestamo.numeroPrestamo.contains(busqueda, ignoreCase = true) // ⭐ String contains
             }
 
             val coincideEstado = if (filtroEstado == "Todos") {
@@ -261,7 +252,6 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
         )
     }
 
-    // Función para configurar listener Firebase
     fun configurarListenerFirebase() {
         cargando = true
         errorMessage = ""
@@ -302,14 +292,12 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                             if (eliminado) return@mapNotNull null
 
                             val monto = doc.getDouble("monto") ?: 0.0
-                            // OJO: primero interesTotal (monto), luego interes (posible tasa)
                             val interesTotal = doc.getDouble("interesTotal") ?: doc.getDouble("interes") ?: 0.0
                             val totalPagar = doc.getDouble("totalPagar") ?: (monto + interesTotal)
 
                             val montoPagado = doc.getDouble("montoPagado") ?: 0.0
-                            val saldoDoc = doc.getDouble("saldo") // puede venir ya correcto
+                            val saldoDoc = doc.getDouble("saldo")
                             val saldoCalculado = (totalPagar - montoPagado)
-                            // Usa el mejor dato disponible, evitando negativos, y tolerando centavos
                             val saldoBase = when {
                                 saldoDoc != null -> saldoDoc
                                 else -> saldoCalculado
@@ -318,22 +306,22 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                             val epsilon = 0.01
                             val estadoDoc = (doc.getString("estado") ?: "activo").lowercase()
 
-                            // REGLAS DE ORO:
-                            // 1) Si el doc ya dice "saldado", respétalo.
-                            // 2) Si el saldo (doc o calculado) es ~0, fuerza "saldado".
-                            // 3) Caso contrario, conserva el estado del doc.
                             val estadoCalculado = when {
                                 estadoDoc == "saldado" -> "saldado"
                                 saldoBase <= epsilon -> "saldado"
                                 else -> estadoDoc
                             }
 
-                            // Unifica cobradores
                             val cobradores = mutableListOf<String>()
                             (doc.get("cobradoresAsignados") as? List<*>)?.forEach { it?.toString()?.takeIf { s -> s.isNotBlank() }?.let(cobradores::add) }
                             (doc.get("cobradores") as? List<*>)?.forEach { it?.toString()?.takeIf { s -> s.isNotBlank() }?.let(cobradores::add) }
                             val cobradorAsignado = doc.getString("cobradorAsignado") ?: ""
                             if (cobradorAsignado.isNotBlank() && !cobradores.contains(cobradorAsignado)) cobradores.add(cobradorAsignado)
+
+                            // ⭐ OBTENER NÚMERO DE PRÉSTAMO COMO STRING
+                            val numeroPrestamoStr = doc.getString("numeroPrestamo")
+                                ?: doc.getLong("numeroPrestamo")?.toString()
+                                ?: ""
 
                             PrestamoHistorial(
                                 id = doc.id,
@@ -350,11 +338,11 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                 cobrador = doc.getString("cobrador") ?: "Administrador",
                                 cobradorAsignado = cobradorAsignado,
                                 montoPagado = montoPagado,
-                                saldo = saldoBase,                      // ← usa saldo del doc si existe
-                                estado = estadoCalculado,               // ← fuerza "saldado" si aplica
+                                saldo = saldoBase,
+                                estado = estadoCalculado,
                                 observaciones = doc.getString("observaciones") ?: "",
                                 diasEfectivos = doc.getLong("diasEfectivos")?.toInt() ?: 0,
-                                numeroPrestamo = doc.getLong("numeroPrestamo")?.toInt() ?: 0,
+                                numeroPrestamo = numeroPrestamoStr, // ⭐ STRING
                                 prestamoId = doc.getString("prestamoId") ?: "",
                                 mora = doc.getDouble("mora") ?: 0.0,
                                 telefonoCobrador = doc.getString("telefonoCobrador") ?: "",
@@ -428,7 +416,6 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
 
         val activos    = prestamosFiltrados.count { it.estadoEfectivo() == "activo" }
         val vencidos   = prestamosFiltrados.count { it.estadoEfectivo() == "vencido" }
-        // si quieres separar "saldado" de "completado", mantenlos aparte:
         val saldados   = prestamosFiltrados.count { it.estadoEfectivo() == "saldado" }
         val completados = prestamosFiltrados.count { it.estadoEfectivo() == "completado" }
 
@@ -440,8 +427,6 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
             "total"         to totalPrestamos,
             "activos"       to activos,
             "vencidos"      to vencidos,
-            // si tu UI muestra "completados" como saldados+completados, puedes sumar:
-            // "completados"   to (completados + saldados),
             "completados"   to completados,
             "montoPrestado" to totalMontoPrestado,
             "montoPagado"   to totalMontoPagado,
@@ -475,7 +460,6 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                         Icon(Icons.Default.Refresh, "Actualizar", tint = Color.White, modifier = Modifier.size(22.dp))
                     }
 
-                    // BOTÓN PDF
                     if (!cargando && prestamosFiltrados.isNotEmpty()) {
                         IconButton(
                             onClick = {
@@ -489,7 +473,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                                 "montoPagado" to prestamo.montoPagado,
                                                 "saldo" to prestamo.saldo,
                                                 "estado" to prestamo.estadoEfectivo(),
-                                                "numeroPrestamo" to prestamo.numeroPrestamo,
+                                                "numeroPrestamo" to prestamo.numeroPrestamo, // ⭐ STRING
                                                 "fecha" to prestamo.fecha,
                                                 "totalPagar" to prestamo.totalPagar,
                                                 "cuotas" to prestamo.cuotas,
@@ -578,7 +562,6 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Resumen expandible
                 if (!cargando && prestamosFiltrados.isNotEmpty()) {
                     val rotationAngle by animateFloatAsState(
                         targetValue = if (resumenExpandido) 180f else 0f,
@@ -646,7 +629,6 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                     }
                 }
 
-                // Filtros
                 Card(
                     colors = CardDefaults.cardColors(containerColor = Color.White),
                     shape = RoundedCornerShape(12.dp),
@@ -1083,7 +1065,8 @@ fun PrestamoCardHistorial(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(text = "👤 ${prestamo.cliente}", fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = Color(0xFF333333))
-                        if (prestamo.numeroPrestamo > 0) {
+                        // ⭐ MOSTRAR NÚMERO DE PRÉSTAMO (STRING)
+                        if (prestamo.numeroPrestamo.isNotEmpty()) {
                             Text(text = "📋 Préstamo #${prestamo.numeroPrestamo}", fontSize = 11.sp, color = Color(0xFF666666))
                         }
                     }
@@ -1187,7 +1170,7 @@ fun PrestamoCardHistorial(
                                                         fecha = prestamo.fecha,
                                                         lugar = prestamo.lugar.ifBlank { "No especificado" },
                                                         numeroCobrador = prestamo.telefonoCobrador,
-                                                        numeroPrestamo = "Préstamo Nº ${prestamo.numeroPrestamo}",
+                                                        numeroPrestamo = if (prestamo.numeroPrestamo.isNotEmpty()) "Préstamo N° ${prestamo.numeroPrestamo}" else "Préstamo", // ⭐ STRING
                                                         nombreCobrador = prestamo.cobrador,
                                                         fechaProximoPago = prestamo.proximoPago
                                                     )

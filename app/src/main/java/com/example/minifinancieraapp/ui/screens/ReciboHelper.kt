@@ -37,10 +37,12 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.RectF
 import android.util.Log
+import com.example.capitalexpressapp.ui.screens.CuotaPendiente
 import com.example.capitalexpressapp.ui.screens.EstadoClienteFiltro
 import com.example.minifinancieraapp.ui.models.ClienteModel
 import com.example.minifinancieraapp.ui.models.PagoItem
 import com.example.minifinancieraapp.ui.models.Prestamo
+import com.google.common.collect.Table
 import com.google.firebase.firestore.Query
 import com.itextpdf.text.PageSize
 import com.itextpdf.text.Phrase
@@ -694,223 +696,409 @@ object ReciboHelper {
         nombreCobrador: String = "Cobrador",
         fechaProximoPago: String = ""
     ): File? {
-        val clienteNombre = cliente.nombre
+
         return try {
+
+            // ==== CONFIG BÁSICA PARA TÉRMICA ====
+            val pageWidth = 384              // mantenemos ancho térmico
+            val pageHeight = 1300            // MÁS LARGO para que no corte
+            val leftMargin = 20f
+            val rightMargin = pageWidth - 20f
+            val contentWidth = rightMargin - leftMargin
+
             val pdfDocument = PdfDocument()
-            val pageInfo = PdfDocument.PageInfo.Builder(384, 850, 1).create()
+            val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create()
             val page = pdfDocument.startPage(pageInfo)
             val canvas = page.canvas
 
-            // Colores personalizados
-            val colorPrimario = Color.parseColor("#1565C0") // Azul profesional
-            val colorSecundario = Color.parseColor("#2E7D32") // Verde para montos
-            val colorTexto = Color.parseColor("#212121") // Gris oscuro
-            val colorFondo = Color.parseColor("#F5F5F5") // Gris claro para fondos
+            // ==== COLORES ====
+            val colorPrimario = Color.parseColor("#1565C0")
+            val colorSecundario = Color.parseColor("#2E7D32")
+            val colorTexto = Color.parseColor("#212121")
+            val colorFondo = Color.parseColor("#F5F5F5")
 
-            // Estilos de texto mejorados
+            // ==== PINTURAS (TAMAÑOS LEGIBLES EN TÉRMICA) ====
             val paintTitle = Paint().apply {
                 color = colorPrimario
-                textSize = 20f
+                textSize = 18f
                 isFakeBoldText = true
                 typeface = Typeface.DEFAULT_BOLD
+                isAntiAlias = true
+                textAlign = Paint.Align.CENTER
             }
 
             val paintSubtitle = Paint().apply {
                 color = colorPrimario
-                textSize = 16f
+                textSize = 15f
                 isFakeBoldText = true
+                isAntiAlias = true
+                textAlign = Paint.Align.LEFT
             }
 
             val paintLabel = Paint().apply {
                 color = colorTexto
-                textSize = 14f
+                textSize = 13f
                 typeface = Typeface.DEFAULT
+                isAntiAlias = true
+                textAlign = Paint.Align.LEFT
             }
 
             val paintValue = Paint().apply {
                 color = colorTexto
-                textSize = 14f
+                textSize = 13f
                 isFakeBoldText = true
+                isAntiAlias = true
+                textAlign = Paint.Align.LEFT
             }
 
             val paintMoney = Paint().apply {
                 color = colorSecundario
-                textSize = 15f
+                textSize = 14f
                 isFakeBoldText = true
+                isAntiAlias = true
+                textAlign = Paint.Align.RIGHT
             }
 
             val paintTotal = Paint().apply {
                 color = colorSecundario
-                textSize = 18f
+                textSize = 16f
                 isFakeBoldText = true
                 typeface = Typeface.DEFAULT_BOLD
+                isAntiAlias = true
+                textAlign = Paint.Align.RIGHT
             }
 
             val paintLine = Paint().apply {
                 color = colorPrimario
                 strokeWidth = 2f
+                isAntiAlias = true
             }
 
             val paintBackground = Paint().apply {
                 color = colorFondo
             }
 
-            var y = 25
+            // ==== HELPERS ====
+            val lineSpacing = 18f
 
-            // Encabezado con fondo
-            canvas.drawRect(10f, y.toFloat(), 374f, (y + 120).toFloat(), paintBackground)
-
-            // Logo centrado
-            val logoBitmap =
-                BitmapFactory.decodeResource(context.resources, R.drawable.logo_capital)
-            val logoSize = 80
-            canvas.drawBitmap(
-                Bitmap.createScaledBitmap(logoBitmap, logoSize, logoSize, true),
-                (384 - logoSize) / 2f,
-                (y + 10).toFloat(),
-                null
-            )
-            y += 95
-
-            // Título principal centrado
-            val tituloTexto = "CAPITAL EXPRESS"
-            val tituloAncho = paintTitle.measureText(tituloTexto)
-            canvas.drawText(tituloTexto, (384 - tituloAncho) / 2f, y.toFloat(), paintTitle)
-            y += 35
-
-            // Información de ubicación y fecha
-            canvas.drawText("📍 $lugar", 20f, y.toFloat(), paintLabel)
-            canvas.drawText("📅 $fecha", 200f, y.toFloat(), paintLabel)
-            y += 25
-
-            if (fechaProximoPago.isNotBlank()) {
-                val proximoPagoTexto = "📆 Próximo pago: $fechaProximoPago"
-                val proximoPagoAncho = paintLabel.measureText(proximoPagoTexto)
-                canvas.drawText(
-                    proximoPagoTexto,
-                    (384 - proximoPagoAncho) / 2f,
-                    y.toFloat(),
-                    paintLabel
-                )
-                y += 25
+            fun wrapText(texto: String, paint: Paint, maxWidth: Float): List<String> {
+                if (texto.isBlank()) return listOf("")
+                val palabras = texto.trim().split(" ")
+                val lineas = mutableListOf<String>()
+                var actual = ""
+                for (w in palabras) {
+                    val intento = if (actual.isEmpty()) w else "$actual $w"
+                    if (paint.measureText(intento) > maxWidth) {
+                        if (actual.isNotEmpty()) lineas.add(actual)
+                        actual = w
+                    } else {
+                        actual = intento
+                    }
+                }
+                if (actual.isNotEmpty()) lineas.add(actual)
+                return lineas
             }
 
-            // Línea separadora principal
-            canvas.drawLine(10f, y.toFloat(), 374f, y.toFloat(), paintLine)
-            y += 30
+            // Dibuja varias líneas y devuelve el Y final después de todo el bloque
+            fun drawWrappedText(
+                texto: String,
+                x: Float,
+                yStart: Float,
+                paint: Paint,
+                maxWidth: Float
+            ): Float {
+                val lines = wrapText(texto, paint, maxWidth)
+                var yCur = yStart
+                lines.forEach { linea ->
+                    canvas.drawText(linea, x, yCur, paint)
+                    yCur += lineSpacing
+                }
+                return yCur
+            }
 
-            // Título del recibo centrado
-            val reciboTexto = "RECIBO DE PRÉSTAMO"
-            val reciboAncho = paintSubtitle.measureText(reciboTexto)
-            canvas.drawText(reciboTexto, (384 - reciboAncho) / 2f, y.toFloat(), paintSubtitle)
-            y += 35
+            // etiqueta + valor multilínea alineados tipo:
+            // [Etiqueta:] [valor en varias líneas]
+            fun drawLabelValueBlock(
+                etiqueta: String,
+                valor: String,
+                yStart: Float,
+                labelPaint: Paint = paintLabel,
+                valuePaint: Paint = paintValue,
+                minGapAfterLabel: Float = 100f
+            ): Float {
+                val xLabel = leftMargin
+                val xValue = xLabel + maxOf(minGapAfterLabel, labelPaint.measureText(etiqueta) + 10f)
+                val maxValueWidth = rightMargin - xValue
 
-            // Sección de datos del cliente con fondo
-            canvas.drawRect(15f, y.toFloat(), 369f, (y + 85).toFloat(), paintBackground)
-            y += 15
+                // primera línea: dibujar etiqueta
+                canvas.drawText(etiqueta, xLabel, yStart, labelPaint)
 
-            canvas.drawText("DATOS DEL CLIENTE", 25f, y.toFloat(), paintSubtitle)
-            y += 25
+                // valor puede ser multilínea
+                val lines = wrapText(valor, valuePaint, maxValueWidth)
+                var yCur = yStart
+                lines.forEachIndexed { idx, linea ->
+                    if (idx == 0) {
+                        canvas.drawText(linea, xValue, yCur, valuePaint)
+                    } else {
+                        yCur += lineSpacing
+                        canvas.drawText(linea, xValue, yCur, valuePaint)
+                    }
+                }
 
-            canvas.drawText("👤 Nombre:", 25f, y.toFloat(), paintLabel)
-            canvas.drawText(cliente.nombre, 110f, y.toFloat(), paintValue)
-            y += 20
+                // devolución: dejamos un espacio extra al final del bloque
+                return yCur + lineSpacing
+            }
+
+            // ==== COMENZAMOS A PINTAR ====
+            var y = 25f
+
+            // Header gris con logo
+            canvas.drawRect(
+                leftMargin,
+                y,
+                rightMargin,
+                y + 90f,
+                paintBackground
+            )
+
+            // Logo centrado (safe try)
+            runCatching {
+                val logoBitmap = BitmapFactory.decodeResource(context.resources, R.drawable.logo_capital)
+                val logoScaled = Bitmap.createScaledBitmap(logoBitmap, 60, 60, true)
+                val logoX = (pageWidth - logoScaled.width) / 2f
+                val logoY = y + 10f
+                canvas.drawBitmap(logoScaled, logoX, logoY, null)
+            }
+
+            y += 70f
+            canvas.drawText(
+                "CAPITAL EXPRESS",
+                pageWidth / 2f,
+                y,
+                paintTitle
+            )
+
+            y += 30f
+
+            // Lugar y fecha (lugar envuelto si es largo)
+            y = drawWrappedText(
+                texto = "📍 $lugar",
+                x = leftMargin,
+                yStart = y,
+                paint = paintLabel,
+                maxWidth = contentWidth * 0.6f
+            )
+
+            // fecha en la misma fila inicial (arriba), la dibujamos alineada a la derecha del recibo
+            canvas.drawText(
+                "📅 $fecha",
+                rightMargin,
+                y - (lineSpacing), // subirla a la primera línea del bloque anterior
+                paintLabel.apply { textAlign = Paint.Align.RIGHT }
+            )
+            paintLabel.textAlign = Paint.Align.LEFT
+
+            // Próximo pago (centrado, con wrap si largo)
+            if (fechaProximoPago.isNotBlank()) {
+                val proxTexto = "📆 Próximo pago: $fechaProximoPago"
+                val proxLines = wrapText(proxTexto, paintLabel, contentWidth)
+                proxLines.forEach { linea ->
+                    canvas.drawText(
+                        linea,
+                        pageWidth / 2f,
+                        y,
+                        paintLabel.apply { textAlign = Paint.Align.CENTER }
+                    )
+                    y += lineSpacing
+                }
+                paintLabel.textAlign = Paint.Align.LEFT
+            }
+
+            // separador
+            canvas.drawLine(leftMargin, y, rightMargin, y, paintLine)
+            y += 25f
+
+            // título recibo
+            canvas.drawText(
+                "RECIBO DE PRÉSTAMO",
+                pageWidth / 2f,
+                y,
+                paintSubtitle.apply { textAlign = Paint.Align.CENTER }
+            )
+            y += 30f
+            paintSubtitle.textAlign = Paint.Align.LEFT
+
+            // ==== DATOS DEL CLIENTE ====
+            canvas.drawRect(
+                leftMargin,
+                y,
+                rightMargin,
+                y + 80f,
+                paintBackground
+            )
+
+            y += 20f
+            canvas.drawText("DATOS DEL CLIENTE", leftMargin + 5f, y, paintSubtitle)
+            y += 25f
+
+            y = drawLabelValueBlock(
+                etiqueta = "👤 Nombre:",
+                valor = cliente.nombre,
+                yStart = y
+            )
 
             if (cliente.telefono.isNotBlank()) {
-                canvas.drawText("📱 Teléfono:", 25f, y.toFloat(), paintLabel)
-                canvas.drawText(cliente.telefono, 110f, y.toFloat(), paintValue)
-                y += 20
+                y = drawLabelValueBlock(
+                    etiqueta = "📱 Teléfono:",
+                    valor = cliente.telefono,
+                    yStart = y
+                )
             }
 
             if (cliente.direccionCasa.isNotBlank()) {
-                canvas.drawText("🏠 Dirección:", 25f, y.toFloat(), paintLabel)
-                // Dividir dirección larga si es necesario
-                val direccion = cliente.direccionCasa
-                if (direccion.length > 25) {
-                    canvas.drawText(direccion.substring(0, 25), 120f, y.toFloat(), paintValue)
-                    y += 15
-                    canvas.drawText(direccion.substring(25), 120f, y.toFloat(), paintValue)
-                } else {
-                    canvas.drawText(direccion, 120f, y.toFloat(), paintValue)
-                }
-                y += 20
+                y = drawLabelValueBlock(
+                    etiqueta = "🏠 Dirección:",
+                    valor = cliente.direccionCasa,
+                    yStart = y
+                )
             }
 
-            y += 15
+            // ==== DETALLES DEL PRÉSTAMO ====
+            canvas.drawText("DETALLES DEL PRÉSTAMO", leftMargin + 5f, y, paintSubtitle)
+            y += 25f
 
-            // Sección de datos del préstamo
-            canvas.drawText("DETALLES DEL PRÉSTAMO", 25f, y.toFloat(), paintSubtitle)
-            y += 30
+            // Monto prestado
+            canvas.drawText("💲 Monto prestado:", leftMargin, y, paintLabel)
+            canvas.drawText(
+                "L. ${"%.2f".format(monto)}",
+                rightMargin,
+                y,
+                paintMoney
+            )
+            y += lineSpacing
 
-            // Tabla de montos con mejor alineación
-            canvas.drawText("💲 Monto prestado:", 25f, y.toFloat(), paintLabel)
-            canvas.drawText("L. ${"%.2f".format(monto)}", 280f, y.toFloat(), paintMoney)
-            y += 22
+            // Interés total
+            canvas.drawText("📈 Interés total:", leftMargin, y, paintLabel)
+            canvas.drawText(
+                "L. ${"%.2f".format(interesTotal)}",
+                rightMargin,
+                y,
+                paintMoney
+            )
+            y += lineSpacing
 
-            canvas.drawText("📈 Interés total:", 25f, y.toFloat(), paintLabel)
-            canvas.drawText("L. ${"%.2f".format(interesTotal)}", 280f, y.toFloat(), paintMoney)
-            y += 22
+            // Nº de cuotas
+            canvas.drawText("⏳ Nº de cuotas:", leftMargin, y, paintLabel)
+            canvas.drawText(
+                cuotas.toString(),
+                rightMargin,
+                y,
+                paintValue.apply { textAlign = Paint.Align.RIGHT }
+            )
+            y += lineSpacing
+            paintValue.textAlign = Paint.Align.LEFT
 
-            canvas.drawText("⏳ Número de cuotas:", 25f, y.toFloat(), paintLabel)
-            canvas.drawText("$cuotas", 280f, y.toFloat(), paintValue)
-            y += 22
+            // Mora
+            canvas.drawText("⚠️ Mora diaria:", leftMargin, y, paintLabel)
+            canvas.drawText(
+                "L. ${"%.2f".format(mora)}",
+                rightMargin,
+                y,
+                paintMoney
+            )
+            y += lineSpacing + 5f
 
-            canvas.drawText("⚠️ Mora diaria:", 25f, y.toFloat(), paintLabel)
-            canvas.drawText("L. ${"%.2f".format(mora)}", 280f, y.toFloat(), paintMoney)
-            y += 30
-
-            // Total destacado con fondo
+            // TOTAL A PAGAR con fondo
             val total = monto + interesTotal
-            canvas.drawRect(15f, y.toFloat(), 369f, (y + 35).toFloat(), paintBackground)
-            y += 25
-            canvas.drawText("💰 TOTAL A PAGAR:", 25f, y.toFloat(), paintTotal)
-            canvas.drawText("L. ${"%.2f".format(total)}", 250f, y.toFloat(), paintTotal)
-            y += 40
+            canvas.drawRect(leftMargin, y, rightMargin, y + 40f, paintBackground)
+            y += 28f
+            canvas.drawText(
+                "💰 TOTAL A PAGAR:",
+                leftMargin + 5f,
+                y,
+                paintTotal.apply { textAlign = Paint.Align.LEFT }
+            )
+            canvas.drawText(
+                "L. ${"%.2f".format(total)}",
+                rightMargin - 5f,
+                y,
+                paintTotal.apply { textAlign = Paint.Align.RIGHT }
+            )
+            y += lineSpacing + 5f
 
-            // Línea separadora
-            canvas.drawLine(10f, y.toFloat(), 374f, y.toFloat(), paintLine)
-            y += 30
+            // separador
+            canvas.drawLine(leftMargin, y, rightMargin, y, paintLine)
+            y += 25f
 
-            // Información del cobrador
-            canvas.drawText("INFORMACIÓN DE CONTACTO", 25f, y.toFloat(), paintSubtitle)
-            y += 25
+            // ==== INFORMACIÓN DEL COBRADOR ====
+            canvas.drawText("INFORMACIÓN DE CONTACTO", leftMargin + 5f, y, paintSubtitle)
+            y += 25f
 
-            canvas.drawText("👨‍💼 Atendido por:", 25f, y.toFloat(), paintLabel)
-            canvas.drawText(nombreCobrador, 140f, y.toFloat(), paintValue)
-            y += 20
+            y = drawLabelValueBlock(
+                etiqueta = "👨‍💼 Atendido por:",
+                valor = nombreCobrador,
+                yStart = y
+            )
 
-            canvas.drawText("📱 Teléfono:", 25f, y.toFloat(), paintLabel)
-            canvas.drawText(numeroCobrador, 100f, y.toFloat(), paintValue)
-            y += 40
+            y = drawLabelValueBlock(
+                etiqueta = "📱 Teléfono:",
+                valor = numeroCobrador,
+                yStart = y
+            )
 
-            // Área de firma mejorada
-            canvas.drawText("FIRMA DE AUTORIZACIÓN", 25f, y.toFloat(), paintSubtitle)
-            y += 30
-            canvas.drawLine(80f, y.toFloat(), 304f, y.toFloat(), paintLabel)
-            y += 20
-            val firmaTexto = "Firma del cobrador"
-            val firmaAncho = paintLabel.measureText(firmaTexto)
-            canvas.drawText(firmaTexto, (384 - firmaAncho) / 2f, y.toFloat(), paintLabel)
-            y += 40
+            // ==== FIRMA ====
+            canvas.drawText("FIRMA DE AUTORIZACIÓN", leftMargin + 5f, y, paintSubtitle)
+            y += 30f
 
-            // Mensaje final centrado
-            val mensajeFinal1 = "¡Gracias por confiar en nosotros!"
-            val mensajeFinal2 = "Tu socio financiero en Danlí"
+            val firmaLineStart = pageWidth * 0.2f
+            val firmaLineEnd = pageWidth * 0.8f
+            canvas.drawLine(
+                firmaLineStart,
+                y,
+                firmaLineEnd,
+                y,
+                paintLabel
+            )
+            y += lineSpacing
 
-            val mensaje1Ancho = paintLabel.measureText(mensajeFinal1)
-            val mensaje2Ancho = paintLabel.measureText(mensajeFinal2)
+            paintLabel.textAlign = Paint.Align.CENTER
+            canvas.drawText(
+                "Firma del cobrador",
+                pageWidth / 2f,
+                y,
+                paintLabel
+            )
+            paintLabel.textAlign = Paint.Align.LEFT
+            y += lineSpacing + 10f
 
-            canvas.drawText(mensajeFinal1, (384 - mensaje1Ancho) / 2f, y.toFloat(), paintLabel)
-            y += 18
-            canvas.drawText(mensajeFinal2, (384 - mensaje2Ancho) / 2f, y.toFloat(), paintLabel)
+            // Mensaje final
+            paintLabel.textAlign = Paint.Align.CENTER
+            canvas.drawText(
+                "¡Gracias por confiar en nosotros!",
+                pageWidth / 2f,
+                y,
+                paintLabel
+            )
+            y += lineSpacing
+            canvas.drawText(
+                "Tu socio financiero en Danlí",
+                pageWidth / 2f,
+                y,
+                paintLabel
+            )
+            paintLabel.textAlign = Paint.Align.LEFT
 
+            // ==== TERMINAR Y GUARDAR ====
             pdfDocument.finishPage(page)
 
             val file = File(
                 context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS),
                 "recibo_prestamo_$numeroPrestamo.pdf"
             )
-            pdfDocument.writeTo(FileOutputStream(file))
+
+            FileOutputStream(file).use { fos ->
+                pdfDocument.writeTo(fos)
+            }
             pdfDocument.close()
 
             file
@@ -919,6 +1107,7 @@ object ReciboHelper {
             null
         }
     }
+
 
     fun generarInformeClientePDF(
         context: Context,
@@ -1161,9 +1350,120 @@ object ReciboHelper {
         """.trimIndent().format(saldoAnterior)
     }
 
+    private suspend fun obtenerFechaCancelacionPrestamo(
+        prestamoId: String,
+        pagosFiltrados: List<PagoItem>
+    ): String {
+        return try {
+            val db = FirebaseFirestore.getInstance()
+            val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+
+            // 🔥 PASO 1: Obtener información del préstamo desde Firestore
+            val prestamoDoc = db.collection("prestamos").document(prestamoId).get().await()
+
+            if (!prestamoDoc.exists()) {
+                Log.w("FechaCancelacion", "⚠️ Préstamo $prestamoId no existe")
+                return "Sin datos"
+            }
+
+            val clienteNombre = prestamoDoc.getString("cliente") ?: "Sin nombre"
+            val estadoPrestamo = prestamoDoc.getString("estado") ?: "activo"
+            val saldoActual = prestamoDoc.getDouble("saldo") ?: 0.0
+
+            Log.d("FechaCancelacion", """
+            🔍 Procesando: $clienteNombre
+            • Préstamo ID: $prestamoId
+            • Estado en Firestore: $estadoPrestamo
+            • Saldo actual: L. $saldoActual
+        """.trimIndent())
+
+            // 🔥 PASO 2: Obtener TODOS los pagos del préstamo (NO usar pagosFiltrados)
+            val todosPagosSnapshot = db.collection("pagos")
+                .whereEqualTo("prestamoId", prestamoId)
+                .get()
+                .await()
+
+            Log.d("FechaCancelacion", "  📦 Total pagos en Firestore: ${todosPagosSnapshot.size()}")
+
+            if (todosPagosSnapshot.isEmpty) {
+                Log.d("FechaCancelacion", "  ⚠️ No hay pagos registrados")
+                return "Sin pagos"
+            }
+
+            // 🔥 PASO 3: Convertir todos los pagos a una lista ordenada por fecha
+            // CORRECCIÓN CRÍTICA: Buscar "fechaPago" primero, luego "fecha"
+            val todosPagos = todosPagosSnapshot.documents.mapNotNull { doc ->
+                // 🔥 Intentar obtener el timestamp del campo correcto
+                val timestamp = doc.getTimestamp("fechaPago") ?: doc.getTimestamp("fecha")
+
+                if (timestamp == null) {
+                    Log.w("FechaCancelacion", "  ⚠️ Pago ${doc.id} no tiene campo 'fechaPago' ni 'fecha'")
+                    return@mapNotNull null
+                }
+
+                val fechaDate = timestamp.toDate()
+                val monto = doc.getDouble("monto") ?: 0.0
+
+                Triple(doc.id, fechaDate, monto)
+            }.sortedByDescending { it.second } // Ordenar del más reciente al más antiguo
+
+            if (todosPagos.isEmpty()) {
+                Log.d("FechaCancelacion", "  ⚠️ No se pudieron procesar los pagos (sin timestamps válidos)")
+                return "Sin pagos"
+            }
+
+            Log.d("FechaCancelacion", "  ✅ Pagos procesados correctamente: ${todosPagos.size}")
+
+            // 🔥 PASO 4: Calcular si el préstamo está realmente saldado
+            val montoPrestamo = prestamoDoc.getDouble("monto") ?: 0.0
+            val interes = prestamoDoc.getDouble("interesTotal")
+                ?: prestamoDoc.getDouble("interes")
+                ?: 0.0
+            val totalAPagar = montoPrestamo + interes
+            val totalPagado = todosPagos.sumOf { it.third }
+            val saldoCalculado = (totalAPagar - totalPagado).coerceAtLeast(0.0)
+
+            // Determinar si está saldado (con margen de error de 1 lempira)
+            val estaSaldado = estadoPrestamo.equals("saldado", ignoreCase = true)
+                    || saldoActual <= 0.01
+                    || saldoCalculado <= 1.0
+
+            Log.d("FechaCancelacion", """
+            💰 Cálculo de saldo:
+            • Monto préstamo: L. $montoPrestamo
+            • Interés: L. $interes
+            • Total a pagar: L. $totalAPagar
+            • Total pagado: L. $totalPagado
+            • Saldo calculado: L. $saldoCalculado
+            • ¿Está saldado?: $estaSaldado
+        """.trimIndent())
+
+            // 🔥 PASO 5: Obtener la fecha del último pago
+            val ultimoPago = todosPagos.firstOrNull() // Ya está ordenado descendente
+
+            if (ultimoPago != null) {
+                val fechaFormateada = sdf.format(ultimoPago.second)
+
+                if (estaSaldado) {
+                    Log.d("FechaCancelacion", "  ✅ SALDADO - Fecha de cancelación: $fechaFormateada")
+                } else {
+                    Log.d("FechaCancelacion", "  📅 ACTIVO - Último pago: $fechaFormateada")
+                }
+
+                return fechaFormateada
+            }
+
+            return "Sin fecha"
+
+        } catch (e: Exception) {
+            Log.e("FechaCancelacion", "❌ Error al obtener fecha de cancelación", e)
+            return "Error"
+        }
+    }
+
     suspend fun generarResumenPagosPDF(
         context: Context,
-        pagos: List<PagoItem>, // ✅ Recibe directamente los pagos filtrados
+        pagos: List<PagoItem>,
         fechaInicio: Date,
         fechaFin: Date,
         periodo: String
@@ -1171,47 +1471,69 @@ object ReciboHelper {
         val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
         val sdfHora = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
 
-        // ✅ Si no hay pagos, retornar null
         if (pagos.isEmpty()) return null
 
-        // ✅ Convertir PagoItem a Row directamente (sin consultas a Firestore)
+        // 🔥 ESTRUCTURA DE DATOS con fechaCancelacion
         data class Row(
             val cliente: String,
-            val fecha: Date,
-            val fechaStr: String,
+            val numeroPrestamo: String,
+            val fechaPago: Date,
+            val fechaPagoStr: String,
+            val fechaCancelacion: String, // 🔥 NUEVO CAMPO
             val monto: Double,
             val mora: Double,
             val cuota: String,
-            val cobrador: String
+            val cobrador: String,
+            val prestamoId: String
         )
 
         fun parseFechaDePago(pago: PagoItem): Pair<Date, String> {
             return try {
-                // Extraer solo la parte de fecha (sin hora si existe)
-                val fechaStr = pago.fecha.split(" ")[0] // "dd/MM/yyyy"
+                val fechaStr = pago.fecha.split(" ")[0]
                 val fechaDate = sdf.parse(fechaStr) ?: Date()
                 fechaDate to fechaStr
             } catch (e: Exception) {
+                Log.e("GenerarPDF", "Error parseando fecha '${pago.fecha}': ${e.message}")
                 Date() to sdf.format(Date())
             }
         }
 
-        // ✅ Convertir pagos filtrados a rows y ordenar por fecha
+        // 🔥 PASO CRÍTICO: Obtener fechas de cancelación ANTES de crear las filas
+        Log.d("GenerarPDF", "🔄 Obteniendo fechas de cancelación...")
+
+        val prestamosUnicos = pagos.distinctBy { it.prestamoId }
+        val fechasCancelacion = mutableMapOf<String, String>()
+
+        // Obtener la fecha de cancelación para cada préstamo
+        for (pago in prestamosUnicos) {
+            val fecha = obtenerFechaCancelacionPrestamo(pago.prestamoId, pagos)
+            fechasCancelacion[pago.prestamoId] = fecha
+            Log.d("GenerarPDF", "  • ${pago.cliente}: $fecha")
+        }
+
+        Log.d("GenerarPDF", "✅ Fechas obtenidas para ${fechasCancelacion.size} préstamos")
+
+        // 🔥 Convertir pagos a rows CON las fechas de cancelación correctas
         val rows = pagos.map { pago ->
             val (fechaReal, fechaFmt) = parseFechaDePago(pago)
+            val fechaCancelacion = fechasCancelacion[pago.prestamoId] ?: "Sin cancelar"
+
             Row(
                 cliente = pago.cliente,
-                fecha = fechaReal,
-                fechaStr = fechaFmt,
+                numeroPrestamo = pago.numeroPrestamo.ifEmpty { "-" },
+                fechaPago = fechaReal,
+                fechaPagoStr = fechaFmt,
+                fechaCancelacion = fechaCancelacion, // 🔥 USAR LA FECHA OBTENIDA
                 monto = pago.monto,
                 mora = pago.mora,
                 cuota = pago.cuota,
-                cobrador = pago.cobrador
+                cobrador = pago.cobrador,
+                prestamoId = pago.prestamoId
             )
-        }.sortedBy { it.fecha }
+        }.sortedBy { it.fechaPago }
 
-        // ✅ Resto del código igual (construcción del PDF)
-        val pageWidth = 595 // A4 (72dpi)
+        // Configuración de página
+        val pageWidth = 595
         val pageHeight = 842
         val margin = 32f
         val headerY = 120f
@@ -1222,28 +1544,45 @@ object ReciboHelper {
         val colorLinea = Color.parseColor("#E5E7EB")
 
         val titlePaint = Paint().apply {
-            isAntiAlias = true; textSize = 18f
+            isAntiAlias = true
+            textSize = 18f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             color = Color.BLACK
         }
-        val subPaint = Paint().apply { isAntiAlias = true; textSize = 12f; color = Color.DKGRAY }
+        val subPaint = Paint().apply {
+            isAntiAlias = true
+            textSize = 12f
+            color = Color.DKGRAY
+        }
         val headerPaint = Paint().apply {
-            isAntiAlias = true; textSize = 11f
+            isAntiAlias = true
+            textSize = 10f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             color = Color.WHITE
         }
-        val cellPaint = Paint().apply { isAntiAlias = true; textSize = 10f; color = colorTexto }
-        val linePaint = Paint().apply { color = colorLinea; strokeWidth = 1f }
-        val headerBg = Paint().apply { color = colorPrimario }
+        val cellPaint = Paint().apply {
+            isAntiAlias = true
+            textSize = 9f
+            color = colorTexto
+        }
+        val linePaint = Paint().apply {
+            color = colorLinea
+            strokeWidth = 1f
+        }
+        val headerBg = Paint().apply {
+            color = colorPrimario
+        }
 
-        // columnas
+        // Posiciones de columnas
         val colXs = floatArrayOf(
-            margin,           // Cliente
-            margin + 210f,    // Fecha
-            margin + 280f,    // Monto
-            margin + 350f,    // Mora
-            margin + 410f,    // Cuota
-            margin + 470f     // Cobrador
+            margin,              // Cliente
+            margin + 130f,       // Nº Préstamo
+            margin + 180f,       // Fecha Pago
+            margin + 245f,       // Fecha Cancelación
+            margin + 320f,       // Monto
+            margin + 380f,       // Mora
+            margin + 430f,       // Cuota
+            margin + 470f        // Cobrador
         )
 
         val pdf = PdfDocument()
@@ -1255,21 +1594,16 @@ object ReciboHelper {
             val page = pdf.startPage(pageInfo)
             val c = page.canvas
 
-            // Encabezado
             c.drawText("Resumen de Pagos", margin, 40f, titlePaint)
             c.drawText("Periodo: $periodo", margin, 58f, subPaint)
             c.drawText(
-                "Rango: ${sdf.format(fechaInicio)} a ${sdf.format(fechaFin)}   |   Generado: ${
-                    sdfHora.format(
-                        Date()
-                    )
-                }",
+                "Rango: ${sdf.format(fechaInicio)} a ${sdf.format(fechaFin)}   |   Generado: ${sdfHora.format(Date())}",
                 margin, 74f, subPaint
             )
 
-            // Header de tabla
+            // Encabezados
             c.drawRect(margin, headerY - 14f, pageWidth - margin, headerY + 6f, headerBg)
-            val headers = arrayOf("Cliente", "Fecha", "Monto", "Mora", "Cuota", "Cobrador")
+            val headers = arrayOf("Cliente", "N° Prést", "F. Pago", "F. Cancel.", "Monto", "Mora", "Cuota", "Cobrador")
             for (i in headers.indices) {
                 c.drawText(headers[i], colXs[i] + 2f, headerY, headerPaint)
             }
@@ -1280,7 +1614,11 @@ object ReciboHelper {
         }
 
         fun footer(canvas: Canvas) {
-            val p = Paint().apply { isAntiAlias = true; textSize = 10f; color = Color.GRAY }
+            val p = Paint().apply {
+                isAntiAlias = true
+                textSize = 10f
+                color = Color.GRAY
+            }
             canvas.drawText("Página $pageNum", pageWidth / 2f - 20f, pageHeight - 24f, p)
         }
 
@@ -1299,15 +1637,21 @@ object ReciboHelper {
                 canvas = page.canvas
             }
 
+            // 🔥 AQUÍ ESTÁ LA CLAVE: USAR r.fechaCancelacion
             val cols = arrayOf(
                 r.cliente,
-                r.fechaStr,
+                r.numeroPrestamo,
+                r.fechaPagoStr,
+                r.fechaCancelacion, // 🔥 ESTA ES LA LÍNEA CRÍTICA
                 "L. %,.2f".format(Locale.getDefault(), r.monto),
                 if (r.mora > 0) "L. %,.2f".format(Locale.getDefault(), r.mora) else "-",
                 r.cuota,
                 r.cobrador
             )
-            for (i in cols.indices) canvas.drawText(cols[i], colXs[i] + 2f, y, cellPaint)
+
+            for (i in cols.indices) {
+                canvas.drawText(cols[i], colXs[i] + 2f, y, cellPaint)
+            }
             canvas.drawLine(margin, y + 4f, pageWidth - margin, y + 4f, linePaint)
             y += rowH
 
@@ -1317,8 +1661,13 @@ object ReciboHelper {
 
         // Totales
         if (y + 2 * rowH > pageHeight - 60f) {
-            footer(canvas); pdf.finishPage(page); pageNum++; page = newPage(); canvas = page.canvas
+            footer(canvas)
+            pdf.finishPage(page)
+            pageNum++
+            page = newPage()
+            canvas = page.canvas
         }
+
         val totalsY = y + 10f
         canvas.drawText("Registros: ${rows.size}", margin, totalsY, subPaint)
         canvas.drawText(
@@ -1333,7 +1682,6 @@ object ReciboHelper {
         footer(canvas)
         pdf.finishPage(page)
 
-        // Guardar
         return try {
             val file = File(
                 context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS),
@@ -1341,11 +1689,330 @@ object ReciboHelper {
             )
             FileOutputStream(file).use { pdf.writeTo(it) }
             pdf.close()
+
+            Log.d("GenerarPDF", "✅ PDF generado exitosamente: ${file.absolutePath}")
             file
         } catch (e: Exception) {
+            Log.e("GenerarPDF", "❌ Error al guardar PDF: ${e.message}", e)
             pdf.close()
             Toast.makeText(context, "Error al generar PDF: ${e.message}", Toast.LENGTH_LONG).show()
             null
+        }
+    }
+
+    suspend fun generarResumenPrestamosSaldadosPDF(
+        context: Context,
+        pagos: List<PagoItem>,
+        fechaInicio: Date?,
+        fechaFin: Date?,
+        periodo: String
+    ): File? {
+        val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+        val sdfHora = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+        val db = FirebaseFirestore.getInstance()
+
+        if (pagos.isEmpty()) return null
+
+        // Agrupar pagos por préstamo
+        val prestamosPorId = pagos.groupBy { it.prestamoId }
+
+        data class PrestamoSaldado(
+            val cliente: String,
+            val numeroPrestamo: String,
+            val montoPrestado: Double,
+            val totalAbonado: Double,
+            val fechaCreacion: String,
+            val fechaFinalizacion: String
+        )
+
+        val prestamosSaldados = mutableListOf<PrestamoSaldado>()
+
+        Log.d("GenerarPDFSaldados", "🔄 Procesando ${prestamosPorId.size} préstamos saldados...")
+
+        // 🔥 Obtener información de cada préstamo
+        for ((prestamoId, pagosPrestamo) in prestamosPorId) {
+            try {
+                val prestamoDoc = db.collection("prestamos").document(prestamoId).get().await()
+
+                val cliente = prestamoDoc.getString("cliente") ?: "Sin nombre"
+                val numeroPrestamo = prestamoDoc.getString("numeroPrestamo")
+                    ?: prestamoDoc.getLong("numeroPrestamo")?.toString()
+                    ?: "-"
+                val montoPrestado = prestamoDoc.getDouble("monto") ?: 0.0
+
+                // Calcular total abonado (suma de todos los pagos)
+                val totalAbonado = pagosPrestamo.sumOf { it.monto + it.mora }
+
+                // Fecha de creación del préstamo
+                val fechaCreacionTimestamp = prestamoDoc.getTimestamp("fecha")
+                val fechaCreacion = fechaCreacionTimestamp?.toDate()?.let { sdf.format(it) } ?: "-"
+
+                // 🔥 CORRECCIÓN: Obtener la fecha REAL del último pago que saldó el préstamo
+                // NO usar los pagos filtrados, sino TODOS los pagos del préstamo
+                val fechaFinalizacion = obtenerFechaFinalizacionPrestamo(prestamoId)
+
+                Log.d("GenerarPDFSaldados", "  • $cliente (N° $numeroPrestamo) - Finalizado: $fechaFinalizacion")
+
+                prestamosSaldados.add(
+                    PrestamoSaldado(
+                        cliente = cliente,
+                        numeroPrestamo = numeroPrestamo,
+                        montoPrestado = montoPrestado,
+                        totalAbonado = totalAbonado,
+                        fechaCreacion = fechaCreacion,
+                        fechaFinalizacion = fechaFinalizacion
+                    )
+                )
+            } catch (e: Exception) {
+                Log.e("GenerarPDFSaldados", "❌ Error obteniendo préstamo $prestamoId: ${e.message}")
+            }
+        }
+
+        Log.d("GenerarPDFSaldados", "✅ ${prestamosSaldados.size} préstamos procesados")
+
+        // Ordenar por fecha de finalización
+        prestamosSaldados.sortBy {
+            try {
+                sdf.parse(it.fechaFinalizacion)?.time ?: 0L
+            } catch (e: Exception) {
+                0L
+            }
+        }
+
+        // ✅ Configuración de página
+        val pageWidth = 595
+        val pageHeight = 842
+        val margin = 32f
+        val headerY = 120f
+        val rowH = 20f
+
+        val colorPrimario = Color.parseColor("#059669") // Verde para saldados
+        val colorTexto = Color.parseColor("#1F2937")
+        val colorLinea = Color.parseColor("#E5E7EB")
+
+        val titlePaint = Paint().apply {
+            isAntiAlias = true
+            textSize = 18f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            color = Color.BLACK
+        }
+        val subPaint = Paint().apply {
+            isAntiAlias = true
+            textSize = 12f
+            color = Color.DKGRAY
+        }
+        val headerPaint = Paint().apply {
+            isAntiAlias = true
+            textSize = 10f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            color = Color.WHITE
+        }
+        val cellPaint = Paint().apply {
+            isAntiAlias = true
+            textSize = 9f
+            color = colorTexto
+        }
+        val linePaint = Paint().apply {
+            color = colorLinea
+            strokeWidth = 1f
+        }
+        val headerBg = Paint().apply {
+            color = colorPrimario
+        }
+
+        // Posiciones de columnas
+        val colXs = floatArrayOf(
+            margin,              // Cliente
+            margin + 120f,       // Nº Préstamo
+            margin + 200f,       // Monto Prestado
+            margin + 290f,       // Total Abonado
+            margin + 380f,       // Fecha Creación
+            margin + 460f        // Fecha Finalización
+        )
+
+        val pdf = PdfDocument()
+        var pageNum = 1
+        var y = 0f
+
+        fun newPage(): PdfDocument.Page {
+            val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNum).create()
+            val page = pdf.startPage(pageInfo)
+            val c = page.canvas
+
+            c.drawText("Préstamos Saldados", margin, 40f, titlePaint)
+            c.drawText("Periodo: $periodo", margin, 58f, subPaint)
+
+            val rangoTexto = if (fechaInicio != null && fechaFin != null) {
+                "Rango: ${sdf.format(fechaInicio)} a ${sdf.format(fechaFin)}"
+            } else {
+                "Todos los préstamos saldados"
+            }
+            c.drawText(
+                "$rangoTexto   |   Generado: ${sdfHora.format(Date())}",
+                margin, 74f, subPaint
+            )
+
+            // Encabezados
+            c.drawRect(margin, headerY - 14f, pageWidth - margin, headerY + 6f, headerBg)
+            val headers = arrayOf("Cliente", "Nº Préstamo", "Prestado", "Abonado", "F. Creación", "F. Finalización")
+            for (i in headers.indices) {
+                c.drawText(headers[i], colXs[i] + 2f, headerY, headerPaint)
+            }
+            c.drawLine(margin, headerY + 8f, pageWidth - margin, headerY + 8f, linePaint)
+
+            y = headerY + 24f
+            return page
+        }
+
+        fun footer(canvas: Canvas) {
+            val p = Paint().apply {
+                isAntiAlias = true
+                textSize = 10f
+                color = Color.GRAY
+            }
+            canvas.drawText("Página $pageNum", pageWidth / 2f - 20f, pageHeight - 24f, p)
+        }
+
+        var page = newPage()
+        var canvas = page.canvas
+
+        var totalPrestado = 0.0
+        var totalAbonado = 0.0
+
+        prestamosSaldados.forEach { prestamo ->
+            if (y + rowH > pageHeight - 60f) {
+                footer(canvas)
+                pdf.finishPage(page)
+                pageNum++
+                page = newPage()
+                canvas = page.canvas
+            }
+
+            val cols = arrayOf(
+                prestamo.cliente,
+                prestamo.numeroPrestamo,
+                "L. %,.2f".format(Locale.getDefault(), prestamo.montoPrestado),
+                "L. %,.2f".format(Locale.getDefault(), prestamo.totalAbonado),
+                prestamo.fechaCreacion,
+                prestamo.fechaFinalizacion // 🔥 Ahora muestra la fecha real del último pago
+            )
+
+            for (i in cols.indices) {
+                canvas.drawText(cols[i], colXs[i] + 2f, y, cellPaint)
+            }
+            canvas.drawLine(margin, y + 4f, pageWidth - margin, y + 4f, linePaint)
+            y += rowH
+
+            totalPrestado += prestamo.montoPrestado
+            totalAbonado += prestamo.totalAbonado
+        }
+
+        // Totales
+        if (y + 3 * rowH > pageHeight - 60f) {
+            footer(canvas)
+            pdf.finishPage(page)
+            pageNum++
+            page = newPage()
+            canvas = page.canvas
+        }
+
+        y += 10f
+        canvas.drawRect(margin, y - 14f, pageWidth - margin, y + 30f, Paint().apply {
+            color = Color.parseColor("#F0FDF4") // Fondo verde claro
+        })
+
+        val totalPaint = Paint().apply {
+            isAntiAlias = true
+            textSize = 11f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            color = colorPrimario
+        }
+
+        canvas.drawText("Préstamos Saldados: ${prestamosSaldados.size}", margin + 10f, y + 5f, totalPaint)
+        canvas.drawText(
+            "Total Prestado: L. %,.2f".format(Locale.getDefault(), totalPrestado),
+            margin + 10f, y + 20f, totalPaint
+        )
+        canvas.drawText(
+            "Total Recaudado: L. %,.2f".format(Locale.getDefault(), totalAbonado),
+            margin + 260f, y + 20f, totalPaint
+        )
+
+        footer(canvas)
+        pdf.finishPage(page)
+
+        return try {
+            val file = File(
+                context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS),
+                "prestamos_saldados_${System.currentTimeMillis()}.pdf"
+            )
+            FileOutputStream(file).use { pdf.writeTo(it) }
+            pdf.close()
+
+            Log.d("GenerarPDFSaldados", "✅ PDF de préstamos saldados generado: ${file.absolutePath}")
+            file
+        } catch (e: Exception) {
+            Log.e("GenerarPDFSaldados", "❌ Error al guardar PDF: ${e.message}", e)
+            pdf.close()
+            Toast.makeText(context, "Error al generar PDF: ${e.message}", Toast.LENGTH_LONG).show()
+            null
+        }
+    }
+
+    private suspend fun obtenerFechaFinalizacionPrestamo(prestamoId: String): String {
+        return try {
+            val db = FirebaseFirestore.getInstance()
+            val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+
+            Log.d("FechaFinalizacion", "🔍 Buscando fecha de finalización para préstamo: $prestamoId")
+
+            // 🔥 Obtener TODOS los pagos del préstamo (sin filtrar)
+            val todosPagos = db.collection("pagos")
+                .whereEqualTo("prestamoId", prestamoId)
+                .get()
+                .await()
+
+            if (todosPagos.isEmpty) {
+                Log.w("FechaFinalizacion", "  ⚠️ No hay pagos para este préstamo")
+                return "Sin pagos"
+            }
+
+            Log.d("FechaFinalizacion", "  📦 Encontrados ${todosPagos.size()} pagos")
+
+            // 🔥 CORRECCIÓN CRÍTICA: Buscar "fechaPago" primero, luego "fecha"
+            val pagosOrdenados = todosPagos.documents.mapNotNull { doc ->
+                // Intentar obtener el timestamp del campo correcto
+                val timestamp = doc.getTimestamp("fechaPago") ?: doc.getTimestamp("fecha")
+
+                if (timestamp == null) {
+                    Log.w("FechaFinalizacion", "  ⚠️ Pago ${doc.id} no tiene campo 'fechaPago' ni 'fecha'")
+                    return@mapNotNull null
+                }
+
+                val fechaDate = timestamp.toDate()
+                Pair(doc.id, fechaDate)
+            }.sortedByDescending { it.second } // Del más reciente al más antiguo
+
+            if (pagosOrdenados.isEmpty()) {
+                Log.w("FechaFinalizacion", "  ⚠️ No se pudieron procesar los pagos (sin timestamps válidos)")
+                return "Sin fecha"
+            }
+
+            Log.d("FechaFinalizacion", "  ✅ Pagos procesados correctamente: ${pagosOrdenados.size}")
+
+            // 🔥 El último pago es el que saldó el préstamo
+            val ultimoPago = pagosOrdenados.firstOrNull()
+            if (ultimoPago != null) {
+                val fechaFormateada = sdf.format(ultimoPago.second)
+                Log.d("FechaFinalizacion", "  ✅ Fecha de finalización encontrada: $fechaFormateada")
+                return fechaFormateada
+            }
+
+            return "Sin fecha"
+
+        } catch (e: Exception) {
+            Log.e("FechaFinalizacion", "❌ Error al obtener fecha de finalización", e)
+            return "Error"
         }
     }
 
@@ -1460,7 +2127,7 @@ object ReciboHelper {
         saldoAnterior: Double,
         proximoPago: String,
         cuota: String,
-        cobrador: String,
+        cobrador: String?,
         lugar: String,
         firma: String,
         tipoPago: String,
@@ -1468,28 +2135,47 @@ object ReciboHelper {
         saldoNuevoFijo: Double? = null
     ): File? {
         return try {
+            Log.d("ReciboPDF", "cliente='$cliente', cobrador='${cobrador ?: "null"}'")
+
             val pagoIngresado = montoPagado.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
             val saldoPrevio = saldoAnterior.coerceAtLeast(0.0)
-            val pagoAplicado = minOf(pagoIngresado, saldoPrevio)
-            val nuevoSaldoCalc = (saldoPrevio - pagoAplicado).coerceAtLeast(0.0)
-            val nuevoSaldo = saldoNuevoFijo?.coerceAtLeast(0.0) ?: nuevoSaldoCalc
+
+            // ✅✅✅ CORRECCIÓN CRÍTICA: Priorizar saldoNuevoFijo si viene del sistema ✅✅✅
+            val nuevoSaldo = if (saldoNuevoFijo != null) {
+                // Si viene el saldo nuevo desde la pantalla, úsalo directamente
+                saldoNuevoFijo.coerceAtLeast(0.0)
+            } else {
+                // Fallback: calcular localmente (backward compatibility)
+                val pagoAplicado = minOf(pagoIngresado, saldoPrevio)
+                (saldoPrevio - pagoAplicado).coerceAtLeast(0.0)
+            }
+
+            Log.d("ReciboPDF", """
+                💰 CÁLCULO DE SALDO:
+                - Saldo anterior: L. $saldoPrevio
+                - Pago ingresado: L. $pagoIngresado
+                - saldoNuevoFijo recibido: ${saldoNuevoFijo ?: "null"}
+                - Saldo nuevo calculado: L. $nuevoSaldo
+            """.trimIndent())
 
             fun fmt(n: Double) = "L. %,.2f".format(Locale.getDefault(), n)
 
             // ===== CONFIG =====
-            val espacioLinea = 18f
+            val lineSpacing = 18f
+            val extraBlockSpacing = 6f
             val margenIzq = 15f
             val margenDer = 305f
             val espacioSeccion = 22f
 
-            // Medición previa para calcular altura dinámica
+            // Paint base para medir
             val paintMeasure = Paint().apply {
                 isAntiAlias = true
                 textSize = 11f
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
+
             fun wrap(texto: String, ancho: Float): List<String> {
-                if (texto.isBlank()) return listOf("")
+                if (texto.isBlank()) return listOf("—")
                 val palabras = texto.split(" ")
                 val res = mutableListOf<String>()
                 var cur = ""
@@ -1501,34 +2187,55 @@ object ReciboHelper {
                     } else cur = test
                 }
                 if (cur.isNotEmpty()) res.add(cur)
-                return res
+                return if (res.isEmpty()) listOf("—") else res
             }
 
+            // ⭐⭐⭐ CORRECCIÓN CRÍTICA: Determinar estado saldado basado en saldo REAL ⭐⭐⭐
+            val estaSaldado = nuevoSaldo <= 0.01
+
+            val proximoPrintable = when {
+                estaSaldado -> "✅ SALDADO"
+                proximoPago.isBlank() -> "—"
+                proximoPago.equals("saldado", ignoreCase = true) && !estaSaldado -> "Pendiente de confirmar"
+                else -> proximoPago
+            }
+
+            val clientePrintable  = cliente.ifBlank { "—" }
+            val cobradorPrintable = (cobrador ?: "").ifBlank { "—" }
+            val cuotaPrintable    = cuota.ifBlank { "—" }
+            val tipoPagoPrintable = tipoPago.ifBlank { "—" }
+            val firmaPrintable    = firma.ifBlank { "—" }
+
+            // Cálculo de altura dinámica más generosa
             val anchoValor = (margenDer - (margenIzq + 80f) - 5f)
-            val proximoPrintable = proximoPago.ifBlank { "—" } // SIEMPRE mostramos algo
-            val lineasCliente  = wrap(cliente, anchoValor).size
-            val lineasCobrador = wrap(cobrador, anchoValor).size
-            val lineasCuota    = wrap(cuota, anchoValor).size
+
+            val lineasCliente  = wrap(clientePrintable, anchoValor).size
+            val lineasCobrador = wrap(cobradorPrintable, anchoValor).size
+            val lineasCuota    = wrap(cuotaPrintable, anchoValor).size
             val lineasLugar    = wrap(lugar, margenDer - margenIzq - 100f).size
             val lineasProx     = wrap(proximoPrintable, anchoValor).size
-            val lineasTipo     = wrap(tipoPago, anchoValor).size
+            val lineasTipo     = wrap(tipoPagoPrintable, anchoValor).size
 
             val alturaBase = 620f
             val alturaDinamica =
                 alturaBase +
-                        (lineasLugar - 1) * (espacioLinea - 3f) +
-                        (lineasCliente - 1) * (espacioLinea - 3f) +
-                        (lineasCobrador - 1) * (espacioLinea - 3f) +
-                        (lineasCuota - 1) * (espacioLinea - 3f) +
-                        (lineasProx - 1).coerceAtLeast(0) * (espacioLinea - 3f) +
-                        (lineasTipo - 1) * (espacioLinea - 3f) +
-                        80f // colchón final
+                        (lineasLugar - 1) * (lineSpacing - 3f) +
+                        (lineasCliente - 1) * (lineSpacing - 3f) +
+                        (lineasCobrador - 1) * (lineSpacing - 3f) +
+                        (lineasCuota - 1) * (lineSpacing - 3f) +
+                        (lineasProx - 1).coerceAtLeast(0) * (lineSpacing - 3f) +
+                        (lineasTipo - 1) * (lineSpacing - 3f) +
+                        140f
+
+            val pageWidth = 320
+            val pageHeight = alturaDinamica.toInt().coerceAtLeast(900)
 
             val pdfDocument = PdfDocument()
-            val pageInfo = PdfDocument.PageInfo.Builder(320, alturaDinamica.toInt(), 1).create()
+            val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create()
             val page = pdfDocument.startPage(pageInfo)
             val canvas = page.canvas
 
+            // ===== COLORES / PAINTS =====
             val colorPrimario = Color.parseColor("#1565C0")
             val colorSecundario = Color.parseColor("#2E7D32")
             val colorMora = Color.parseColor("#D32F2F")
@@ -1536,153 +2243,263 @@ object ReciboHelper {
             val colorFondo = Color.parseColor("#F8F9FA")
 
             val paintTitle = Paint().apply {
-                isAntiAlias = true; color = colorPrimario; textAlign = Paint.Align.CENTER
-                textSize = 16f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                isAntiAlias = true
+                color = colorPrimario
+                textAlign = Paint.Align.CENTER
+                textSize = 16f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
             val paintSubtitle = Paint().apply {
-                isAntiAlias = true; color = colorPrimario; textAlign = Paint.Align.CENTER
-                textSize = 14f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                isAntiAlias = true
+                color = colorPrimario
+                textAlign = Paint.Align.CENTER
+                textSize = 14f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
             val paintLabel = Paint().apply {
-                isAntiAlias = true; color = colorTexto; textAlign = Paint.Align.LEFT
-                textSize = 11f; typeface = Typeface.DEFAULT
+                isAntiAlias = true
+                color = colorTexto
+                textAlign = Paint.Align.LEFT
+                textSize = 11f
+                typeface = Typeface.DEFAULT
             }
             val paintValue = Paint().apply {
-                isAntiAlias = true; color = colorTexto; textAlign = Paint.Align.LEFT
-                textSize = 11f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                isAntiAlias = true
+                color = colorTexto
+                textAlign = Paint.Align.LEFT
+                textSize = 11f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
             val paintMoney = Paint().apply {
-                isAntiAlias = true; color = colorSecundario; textAlign = Paint.Align.RIGHT
-                textSize = 12f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                isAntiAlias = true
+                color = colorSecundario
+                textAlign = Paint.Align.RIGHT
+                textSize = 12f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
             val paintMoraPaint = Paint().apply {
-                isAntiAlias = true; color = colorMora; textAlign = Paint.Align.RIGHT
-                textSize = 11f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                isAntiAlias = true
+                color = colorMora
+                textAlign = Paint.Align.RIGHT
+                textSize = 11f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
-            val paintLine = Paint().apply { color = colorPrimario; strokeWidth = 1.5f }
-            val paintBackground = Paint().apply { color = colorFondo }
+            val paintLine = Paint().apply {
+                isAntiAlias = true
+                color = colorPrimario
+                strokeWidth = 1.5f
+            }
+            val paintBackground = Paint().apply {
+                isAntiAlias = true
+                color = colorFondo
+            }
 
             var y = 15f
 
-            // HEADER
+            // ===== HEADER =====
             canvas.drawRect(5f, y, 315f, y + 80f, paintBackground)
-            try {
+            runCatching {
                 BitmapFactory.decodeResource(context.resources, R.drawable.logo_capital)?.let {
                     val scaled = Bitmap.createScaledBitmap(it, 50, 50, false)
                     canvas.drawBitmap(scaled, 135f, y + 5f, null)
                 }
-            } catch (_: Exception) {}
+            }
             y += 60f
             canvas.drawText("CAPITAL EXPRESS", 160f, y, paintTitle)
             y += 25f
 
-            // helpers de multilínea
             fun wrapText(texto: String, paint: Paint, anchoMax: Float) = wrap(texto, anchoMax)
-            fun drawMultiline(texto: String, x: Float, yStart: Float, paint: Paint, anchoMax: Float): Float {
+
+            fun drawMultiline(
+                texto: String,
+                x: Float,
+                yStart: Float,
+                paint: Paint,
+                anchoMax: Float
+            ): Float {
                 val lines = wrapText(texto, paint, anchoMax)
                 var yCur = yStart
                 lines.forEachIndexed { i, l ->
                     canvas.drawText(l, x, yCur, paint)
-                    if (i < lines.lastIndex) yCur += (espacioLinea - 3f)
+                    if (i < lines.lastIndex) yCur += (lineSpacing - 3f)
                 }
                 return yCur
             }
 
-            // Lugar + fecha
+            // Lugar (multilínea) + fecha (alineada a la derecha en la primera línea)
             paintLabel.textAlign = Paint.Align.LEFT
-            val yLugarFin = drawMultiline("📍 $lugar", margenIzq, y, paintLabel, margenDer - margenIzq - 100f)
+            val yLugarFin = drawMultiline(
+                "📍 $lugar",
+                margenIzq,
+                y,
+                paintLabel,
+                margenDer - margenIzq - 100f
+            )
+
             paintLabel.textAlign = Paint.Align.RIGHT
             canvas.drawText("📅 $fecha", margenDer, y, paintLabel)
             paintLabel.textAlign = Paint.Align.LEFT
+
             y = maxOf(yLugarFin, y) + espacioSeccion
 
+            // Línea separadora
             canvas.drawLine(10f, y, 310f, y, paintLine)
             y += espacioSeccion
+
+            // Título del recibo
             canvas.drawText("RECIBO DE PAGO", 160f, y, paintSubtitle)
             y += espacioSeccion
 
-            // Campo multilinea con X del valor calculada por ancho real de la etiqueta
-            fun dibujarCampoMultilinea(etiqueta: String, valor: String, yPos: Float): Float {
+            fun dibujarCampoMultilinea(
+                etiqueta: String,
+                valor: String,
+                yPos: Float
+            ): Float {
                 val xLabel = margenIzq
-                val minGap = 125f // columna mínima para el valor
-                val xValue = xLabel + max(minGap, paintLabel.measureText(etiqueta) + 10f)
-                val anchoDisp = margenDer - xValue - 10f
+                val minGap = 125f
+                val gap = paintLabel.measureText(etiqueta) + 10f
+                val xValue = xLabel + max(minGap, gap)
 
+                val anchoDisp = (margenDer - xValue - 10f).coerceAtLeast(60f)
+
+                // etiqueta
+                paintLabel.textAlign = Paint.Align.LEFT
                 canvas.drawText(etiqueta, xLabel, yPos, paintLabel)
 
-                val lineas = wrapText(valor, paintValue, anchoDisp)
+                // valor multilínea
+                val lineas = wrapText(valor.ifBlank { "—" }, paintValue, anchoDisp)
+
                 var yCur = yPos
                 lineas.forEachIndexed { idx, linea ->
-                    if (idx > 0) yCur += (espacioLinea - 3f)
+                    if (idx > 0) yCur += (lineSpacing - 3f)
                     canvas.drawText(linea, xValue, yCur, paintValue)
                 }
-                return yCur + espacioLinea
+
+                // espacio extra entre bloques
+                return yCur + lineSpacing + extraBlockSpacing
             }
 
-            // Caja gris “cliente / cobrador / cuota”
+            // Caja gris con datos básicos
             canvas.drawRect(10f, y, 310f, y + 55f, paintBackground)
             y += 15f
-            y = dibujarCampoMultilinea("👤 Cliente:", cliente, y)
-            y = dibujarCampoMultilinea("👨‍💼 Cobrador:", cobrador, y)
-            y = dibujarCampoMultilinea("🔢 Cuota No.:", cuota, y)
+            y = dibujarCampoMultilinea("👤 Cliente:", clientePrintable, y)
+            y = dibujarCampoMultilinea("👨‍💼 Cobrador:", cobradorPrintable, y)
+            y = dibujarCampoMultilinea("🔢 Cuota No.:", cuotaPrintable, y)
 
+            // Título detalles del pago
             paintSubtitle.textAlign = Paint.Align.LEFT
             canvas.drawText("DETALLES DEL PAGO", margenIzq, y, paintSubtitle)
             paintSubtitle.textAlign = Paint.Align.CENTER
             y += espacioSeccion
 
-            fun dibujarMonto(etiqueta: String, monto: Double, p: Paint = paintMoney): Float {
+            fun dibujarMonto(
+                etiqueta: String,
+                monto: Double,
+                p: Paint = paintMoney
+            ): Float {
+                paintLabel.textAlign = Paint.Align.LEFT
                 canvas.drawText(etiqueta, margenIzq, y, paintLabel)
+
                 canvas.drawText(fmt(monto), margenDer, y, p)
-                return y + espacioLinea
+                y += lineSpacing
+                return y
             }
 
-            y = dibujarMonto("💰 Monto abonado:", pagoAplicado)
-            if (mora > 0.0) y = dibujarMonto("⚠️ Incluye mora:", mora, paintMoraPaint)
+            // Monto abonado
+            y = dibujarMonto("💰 Monto abonado:", pagoIngresado)
 
-            y += 5f; canvas.drawLine(margenIzq, y, margenDer, y, paintLine); y += 12f
+            // Mora si aplica
+            if (mora > 0.0) {
+                y = dibujarMonto("⚠️ Incluye mora:", mora, paintMoraPaint)
+            }
+
+            // Línea interna
+            y += 5f
+            canvas.drawLine(margenIzq, y, margenDer, y, paintLine)
+            y += 12f
+
+            // Saldos
             y = dibujarMonto("💵 Saldo anterior:", saldoPrevio)
             y = dibujarMonto("💳 Saldo nuevo:", nuevoSaldo)
-            y += 4f
 
-            // SIEMPRE mostramos Próximo pago (si viene vacío -> "—")
-            y = dibujarCampoMultilinea("📆 Próximo pago:", proximoPrintable, y)
-            y += (espacioLinea * 0.35f) // aire extra entre ambos campos
+            // Próximo pago - CON COLOR ESPECIAL SI ESTÁ SALDADO
+            val paintProximoPago = if (estaSaldado) {
+                Paint().apply {
+                    isAntiAlias = true
+                    color = colorSecundario  // Verde para saldado
+                    textAlign = Paint.Align.LEFT
+                    textSize = 11f
+                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                }
+            } else {
+                paintValue
+            }
+
+            paintLabel.textAlign = Paint.Align.LEFT
+            canvas.drawText("📆 Próximo pago:", margenIzq, y, paintLabel)
+
+            val xValue = margenIzq + 125f
+            val anchoDisp = (margenDer - xValue - 10f).coerceAtLeast(60f)
+            val lineasProximo = wrapText(proximoPrintable, paintProximoPago, anchoDisp)
+
+            var yCur = y
+            lineasProximo.forEachIndexed { idx, linea ->
+                if (idx > 0) yCur += (lineSpacing - 3f)
+                canvas.drawText(linea, xValue, yCur, paintProximoPago)
+            }
+
+            y = yCur + lineSpacing + extraBlockSpacing
+
+            // Línea separadora entre Próximo pago y Método de pago
+            canvas.drawLine(margenIzq, y - (extraBlockSpacing + 4f), margenDer, y - (extraBlockSpacing + 4f), paintLine)
 
             // Método de pago
-            y = dibujarCampoMultilinea("💳 Método de pago:", tipoPago, y)
-            y += (espacioLinea * 0.20f)
+            y = dibujarCampoMultilinea("💳 Método de pago:", tipoPagoPrintable, y)
 
+            // Bloque autorización / firma
             canvas.drawLine(10f, y, 310f, y, paintLine)
             y += espacioSeccion
+
             canvas.drawRect(10f, y, 310f, y + 55f, paintBackground)
             y += 15f
+
             paintSubtitle.textAlign = Paint.Align.LEFT
             canvas.drawText("AUTORIZACIÓN", margenIzq, y, paintSubtitle)
+            paintSubtitle.textAlign = Paint.Align.CENTER
             y += espacioSeccion
+
+            // Firma cliente
+            paintLabel.textAlign = Paint.Align.LEFT
             canvas.drawText("✍️ Firma del cliente:", margenIzq, y, paintLabel)
-            y += espacioLinea
+            y += lineSpacing
+
             paintLine.strokeWidth = 1f
             canvas.drawLine(margenIzq, y, margenDer - 50f, y, paintLine)
             paintLine.strokeWidth = 1.5f
+
             y += 10f
-            if (firma.isNotBlank()) {
+            if (firmaPrintable != "—") {
                 paintValue.textSize = 10f
-                canvas.drawText(firma, margenIzq, y, paintValue)
+                canvas.drawText(firmaPrintable, margenIzq, y, paintValue)
                 paintValue.textSize = 11f
             }
             y += espacioSeccion
 
+            // Mensaje final
             canvas.drawLine(10f, y, 310f, y, paintLine)
             y += 15f
+
             paintTitle.textSize = 12f
             paintTitle.color = colorSecundario
             canvas.drawText("🌟 ¡Gracias por su pago! 🌟", 160f, y, paintTitle)
             y += 15f
+
             paintLabel.textAlign = Paint.Align.CENTER
             paintLabel.textSize = 10f
             canvas.drawText("Su confianza es nuestro compromiso", 160f, y, paintLabel)
+            paintLabel.textAlign = Paint.Align.LEFT
 
+            // ===== GUARDAR PDF =====
             pdfDocument.finishPage(page)
 
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
@@ -1692,7 +2509,10 @@ object ReciboHelper {
             val file = File(outputDir, fileName)
             FileOutputStream(file).use { pdfDocument.writeTo(it) }
             pdfDocument.close()
+
+            Log.d("ReciboPDF", "✅ PDF generado exitosamente: ${file.absolutePath}")
             file
+
         } catch (e: Exception) {
             Log.e("ReciboPDF", "❌ Error al generar PDF", e)
             Toast.makeText(context, "Error al generar PDF: ${e.message}", Toast.LENGTH_LONG).show()
@@ -1705,25 +2525,132 @@ object ReciboHelper {
         clientes: List<ClienteModel>,
         prestamosPorCliente: Map<String, List<Prestamo>>,
         filtroEstado: EstadoClienteFiltro,           // TODOS | ACTIVOS | SALDADOS
-        filtroCobrador: String?,
-        // Opcional: si ya tienes el mapa id->nombre puedes pasarlo; si no, lo cargamos de Firestore
-        nombresCobradores: Map<String, String> = emptyMap()
+        filtroCobrador: String?,                    // uid normalizado del filtro (o null = todos)
+        nombresCobradores: Map<String, String> = emptyMap(),
+        cobradoresPorClienteFromPagos: Map<String, Set<String>> = emptyMap()
     ): File? {
 
         fun asDateOrNull(any: Any?): Date? = when (any) {
             is Timestamp -> any.toDate()
             is Date -> any
-            is String -> try { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).parse(any) } catch (_: Exception) { null }
+            is String -> try {
+                SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).parse(any)
+            } catch (_: Exception) {
+                null
+            }
             else -> null
+        }
+
+        // misma lógica que la pantalla
+        fun normalizarUidCobrador(raw: String?): String {
+            if (raw.isNullOrBlank()) return ""
+            val limpio = raw.trim()
+
+            val basura = listOf(
+                "Sin asignar", "Sin_asignar",
+                "COBRADOR", "Cobrador",
+                "Desconocido",
+                "N/A",
+                "No asignado", "No_asignado",
+                "No asignar", "Sin asignar."
+            )
+
+            if (basura.any { basuraVal ->
+                    limpio.equals(basuraVal, ignoreCase = true)
+                }
+            ) {
+                return ""
+            }
+
+            return limpio
+        }
+
+        fun totales(clienteId: String): Triple<Double, Double, Double> {
+            val prs = prestamosPorCliente[clienteId].orEmpty()
+            var prestado = 0.0
+            var abonado = 0.0
+            var pendiente = 0.0
+
+            prs.forEach { p ->
+                val totalPagar = if ((p.totalPagar ?: 0.0) > 0) {
+                    p.totalPagar!!
+                } else {
+                    p.monto + (p.interesTotal ?: p.interes)
+                }
+
+                prestado += totalPagar
+                abonado += (p.montoPagado ?: 0.0)
+                pendiente += kotlin.math.max(
+                    0.0,
+                    totalPagar - (p.montoPagado ?: 0.0)
+                )
+            }
+
+            return Triple(prestado, abonado, pendiente)
+        }
+
+        fun estadoEfectivo(c: ClienteModel): String {
+            val prs = prestamosPorCliente[c.id].orEmpty()
+            val todosSaldados = prs.isNotEmpty() && prs.all { p ->
+                val total = (p.totalPagar ?: 0.0).takeIf { it > 0 }
+                    ?: (p.monto + (p.interesTotal ?: p.interes))
+
+                val pagado = p.montoPagado ?: 0.0
+
+                (total - pagado) <= 0.01 ||
+                        p.estado.equals("saldado", true) ||
+                        p.estado.equals("completado", true)
+            }
+
+            return if (todosSaldados || c.estado.equals("saldado", true)) {
+                "saldado"
+            } else {
+                "activo"
+            }
+        }
+
+        fun proximoPagoCliente(clienteId: String): Date? {
+            val hoy = Date()
+            val fechas = prestamosPorCliente[clienteId].orEmpty()
+                .filter { (it.saldo ?: 0.0) > 0.01 && it.proximoPago != null }
+                .mapNotNull { asDateOrNull(it.proximoPago) }
+
+            val futuras = fechas.filter { !it.before(hoy) }
+            return futuras.minOrNull() ?: fechas.minOrNull()
+        }
+
+        // 🔥 misma regla que en la pantalla
+        fun pasaCobradorParaCliente(c: ClienteModel, filtroUid: String?): Boolean {
+            if (filtroUid.isNullOrBlank()) return true
+
+            val uidClienteNorm = normalizarUidCobrador(c.cobradorAsignado)
+
+            val matchCliente = uidClienteNorm == filtroUid
+
+            val matchPrestamo = prestamosPorCliente[c.id]
+                .orEmpty()
+                .any { p ->
+                    normalizarUidCobrador(p.cobradorAsignado) == filtroUid
+                }
+
+            val matchPago = cobradoresPorClienteFromPagos[c.id]
+                ?.any { uidPago -> uidPago == filtroUid }
+                ?: false
+
+            return matchCliente || matchPrestamo || matchPago
         }
 
         return try {
             if (clientes.isEmpty()) {
-                Toast.makeText(context, "No hay clientes para exportar", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    context,
+                    "No hay clientes para exportar",
+                    Toast.LENGTH_SHORT
+                ).show()
                 return null
             }
 
-            // === 1) Asegurar mapa id -> nombre de cobradores ===
+            // === 1) Asegurar mapa id -> nombre bonito de cobradores ===
             val nombresPorId: Map<String, String> =
                 if (nombresCobradores.isNotEmpty()) {
                     nombresCobradores
@@ -1736,73 +2663,48 @@ object ReciboHelper {
 
                         snap.documents
                             .filter {
-                                val rol = it.getString("rol")?.lowercase(Locale.getDefault())
+                                val rol = it.getString("rol")
+                                    ?.lowercase(Locale.getDefault())
                                 rol == "cobrador" || rol == "admin"
                             }
                             .associate { it.id to (it.getString("nombre") ?: it.id) }
                     } catch (e: Exception) {
-                        Log.w("ReporteClientesPDF", "No se pudo cargar 'usuarios': ${e.message}")
+                        Log.w(
+                            "ReporteClientesPDF",
+                            "No se pudo cargar 'usuarios': ${e.message}"
+                        )
                         emptyMap()
                     }
                 }
 
             // Helper: resolver nombre del cobrador a partir del id
-            fun nombreCobrador(id: String?): String =
-                if (id.isNullOrBlank()) "No asignado" else (nombresPorId[id] ?: id)
-
-            // === 2) Helpers de cálculo ===
-            fun totales(clienteId: String): Triple<Double, Double, Double> {
-                val prs = prestamosPorCliente[clienteId].orEmpty()
-                var prestado = 0.0; var abonado = 0.0; var pendiente = 0.0
-                prs.forEach { p ->
-                    val totalPagar = if ((p.totalPagar ?: 0.0) > 0) p.totalPagar!!
-                    else p.monto + (p.interesTotal ?: p.interes)
-                    prestado += totalPagar
-                    abonado += (p.montoPagado ?: 0.0)
-                    pendiente += kotlin.math.max(0.0, totalPagar - (p.montoPagado ?: 0.0))
-                }
-                return Triple(prestado, abonado, pendiente)
-            }
-
-            fun estadoEfectivo(c: ClienteModel): String {
-                val prs = prestamosPorCliente[c.id].orEmpty()
-                val todosSaldados = prs.isNotEmpty() && prs.all { p ->
-                    val total = (p.totalPagar ?: 0.0).takeIf { it > 0 }
-                        ?: (p.monto + (p.interesTotal ?: p.interes))
-                    val pagado = p.montoPagado ?: 0.0
-                    (total - pagado) <= 0.01 ||
-                            p.estado.equals("saldado", true) ||
-                            p.estado.equals("completado", true)
-                }
-                return if (todosSaldados || c.estado.equals("saldado", true)) "saldado" else "activo"
-            }
-
-            fun proximoPagoCliente(clienteId: String): Date? {
-                val hoy = Date()
-                val fechas = prestamosPorCliente[clienteId].orEmpty()
-                    .filter { (it.saldo ?: 0.0) > 0.01 && it.proximoPago != null }
-                    .mapNotNull { asDateOrNull(it.proximoPago) }
-
-                val futuras = fechas.filter { !it.before(hoy) }
-                return futuras.minOrNull() ?: fechas.minOrNull()
+            fun nombreCobrador(id: String?): String {
+                if (id.isNullOrBlank()) return "No asignado"
+                return nombresPorId[id] ?: id
             }
 
             val sdfCab = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
             val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
 
-            // === 3) Aplicar filtros de pantalla ===
+            // === 2) Aplicar filtros EXACTAMENTE igual que en pantalla ===
             val base = clientes.filter { c ->
-                val pasaCobrador = filtroCobrador.isNullOrBlank() || c.cobradorAsignado == filtroCobrador
-                val estado = estadoEfectivo(c)
-                val pasaEstado = when (filtroEstado) {
+                val cobOk = pasaCobradorParaCliente(c, filtroCobrador)
+
+                val estadoOk = when (filtroEstado) {
                     EstadoClienteFiltro.TODOS -> true
-                    EstadoClienteFiltro.ACTIVOS -> estado == "activo"
-                    EstadoClienteFiltro.SALDADOS -> estado == "saldado"
+                    EstadoClienteFiltro.ACTIVOS -> estadoEfectivo(c) == "activo"
+                    EstadoClienteFiltro.SALDADOS -> estadoEfectivo(c) == "saldado"
                 }
-                pasaCobrador && pasaEstado
+
+                cobOk && estadoOk
             }.sortedBy { it.nombre.lowercase(Locale.getDefault()) }
 
-            val file = File(context.getExternalFilesDir(null), "Reporte_Clientes_${System.currentTimeMillis()}.pdf")
+            // === 3) Crear archivo PDF ===
+            val file = File(
+                context.getExternalFilesDir(null),
+                "Reporte_Clientes_${System.currentTimeMillis()}.pdf"
+            )
+
             val document = Document(PageSize.LETTER, 36f, 36f, 36f, 36f)
             PdfWriter.getInstance(document, FileOutputStream(file))
             document.open()
@@ -1813,7 +2715,13 @@ object ReciboHelper {
 
             // === 4) Encabezado ===
             document.add(Paragraph("Capital Express", titleFont))
-            document.add(Paragraph("Reporte de Clientes — ${sdfCab.format(Date())}", normalFont))
+            document.add(
+                Paragraph(
+                    "Reporte de Clientes — ${sdfCab.format(Date())}",
+                    normalFont
+                )
+            )
+
             val filtrosTxt = buildString {
                 append("Filtros: ")
                 append(
@@ -1824,22 +2732,50 @@ object ReciboHelper {
                     }
                 )
                 append(" | Cobrador: ")
-                append(if (filtroCobrador.isNullOrBlank()) "Todos" else nombreCobrador(filtroCobrador))
+                append(
+                    if (filtroCobrador.isNullOrBlank()) {
+                        "Todos"
+                    } else {
+                        nombreCobrador(filtroCobrador)
+                    }
+                )
             }
+
             document.add(Paragraph(filtrosTxt, normalFont))
             document.add(Paragraph(" "))
 
-            // === 5) Agrupar por cobrador (clave = id) ===
-            val porCobrador: Map<String?, List<ClienteModel>> = base.groupBy { it.cobradorAsignado }
+            // === 5) Agrupar por cobrador ASIGNADO al cliente (cobradorAsignado),
+            // para secciones tipo "COBRADOR: Fulano"
+            val porCobrador: Map<String?, List<ClienteModel>> =
+                base.groupBy { c -> c.cobradorAsignado }
 
-            // Tabla helper
+            // Ordenar manualmente los cobradores (compatible con API 23)
+            val cobradoresOrdenados = porCobrador.keys
+                .sortedWith(compareBy(
+                    { it == null },  // Los null primero
+                    { it }           // Luego ordenar alfabéticamente
+                ))
+
             fun tablaClientes(items: List<ClienteModel>): PdfPTable {
                 val table = PdfPTable(8)
                 table.widthPercentage = 100f
-                table.setWidths(floatArrayOf(3.0f, 2.0f, 3.0f, 1.2f, 1.2f, 1.2f, 1.4f, 1.6f))
+                table.setWidths(
+                    floatArrayOf(
+                        3.0f, // Cliente
+                        2.0f, // Teléfono
+                        3.0f, // Dirección
+                        1.2f, // Prestado
+                        1.2f, // Abonado
+                        1.2f, // Pendiente
+                        1.4f, // Estado
+                        1.6f  // Próximo pago
+                    )
+                )
 
                 fun header(text: String) {
-                    val cell = PdfPCell(Paragraph(text, headerFont)).apply {
+                    val cell = PdfPCell(
+                        Paragraph(text, headerFont)
+                    ).apply {
                         horizontalAlignment = Element.ALIGN_CENTER
                         backgroundColor = BaseColor(0xE3, 0xF2, 0xFD)
                     }
@@ -1857,95 +2793,492 @@ object ReciboHelper {
 
                 items.forEach { c ->
                     val (pres, abo, pen) = totales(c.id)
-                    val estado = estadoEfectivo(c).uppercase()
-                    val prox = proximoPagoCliente(c.id)?.let { sdf.format(it) } ?: "—"
+                    val estadoTxt =
+                        estadoEfectivo(c).uppercase(Locale.getDefault())
+                    val proxTxt =
+                        proximoPagoCliente(c.id)?.let { sdf.format(it) } ?: "—"
 
                     table.addCell(Paragraph(c.nombre, normalFont))
-                    table.addCell(Paragraph(c.telefono.ifBlank { "N/D" }, normalFont))
-                    table.addCell(Paragraph(c.direccionCasa.ifBlank { c.direccionNegocio }, normalFont))
-                    table.addCell(Paragraph("L. ${"%.2f".format(pres)}", normalFont))
-                    table.addCell(Paragraph("L. ${"%.2f".format(abo)}", normalFont))
-                    table.addCell(Paragraph("L. ${"%.2f".format(pen)}", normalFont))
-                    table.addCell(Paragraph(estado, normalFont))
-                    table.addCell(Paragraph(prox, normalFont))
+                    table.addCell(
+                        Paragraph(
+                            c.telefono.ifBlank { "N/D" },
+                            normalFont
+                        )
+                    )
+                    table.addCell(
+                        Paragraph(
+                            c.direccionCasa.ifBlank { c.direccionNegocio },
+                            normalFont
+                        )
+                    )
+                    table.addCell(
+                        Paragraph("L. ${"%.2f".format(pres)}", normalFont)
+                    )
+                    table.addCell(
+                        Paragraph("L. ${"%.2f".format(abo)}", normalFont)
+                    )
+                    table.addCell(
+                        Paragraph("L. ${"%.2f".format(pen)}", normalFont)
+                    )
+                    table.addCell(Paragraph(estadoTxt, normalFont))
+                    table.addCell(Paragraph(proxTxt, normalFont))
                 }
+
                 return table
             }
 
-            // === 6) Bloques por cobrador + subtotales (ordenando por nombre o null primero) ===
-            val orden: java.util.Comparator<String?> =
-                java.util.Comparator.nullsFirst(java.util.Comparator.naturalOrder<String>())
+            // Usar cobradoresOrdenados en lugar de porCobrador.toSortedMap(orden)
+            cobradoresOrdenados.forEach { cobradorId ->
+                val lista = porCobrador[cobradorId] ?: return@forEach
 
-            porCobrador.toSortedMap(orden).forEach { (cobradorId, lista) ->
-                document.add(Paragraph("COBRADOR: ${nombreCobrador(cobradorId)}", headerFont)) // <-- NOMBRE, no ID
-                document.add(Paragraph("Clientes: ${lista.size}", normalFont))
+                document.add(
+                    Paragraph(
+                        "COBRADOR: ${nombreCobrador(cobradorId)}",
+                        headerFont
+                    )
+                )
+                document.add(
+                    Paragraph("Clientes: ${lista.size}", normalFont)
+                )
                 document.add(Paragraph(" "))
                 document.add(tablaClientes(lista))
                 document.add(Paragraph(" "))
 
-                var subPres = 0.0; var subAbo = 0.0; var subPen = 0.0
-                var subAct = 0; var subSal = 0
+                var subPres = 0.0
+                var subAbo = 0.0
+                var subPen = 0.0
+                var subAct = 0
+                var subSal = 0
+
                 lista.forEach { c ->
                     val (a, b, d) = totales(c.id)
-                    subPres += a; subAbo += b; subPen += d
-                    if (estadoEfectivo(c) == "saldado") subSal++ else subAct++
+                    subPres += a
+                    subAbo += b
+                    subPen += d
+
+                    if (estadoEfectivo(c) == "saldado") {
+                        subSal++
+                    } else {
+                        subAct++
+                    }
                 }
+
                 val subt = PdfPTable(5).apply {
                     widthPercentage = 100f
-                    setWidths(floatArrayOf(1.2f, 1.2f, 1.2f, 1f, 1f))
+                    setWidths(
+                        floatArrayOf(
+                            1.2f,
+                            1.2f,
+                            1.2f,
+                            1f,
+                            1f
+                        )
+                    )
+
                     fun cell(label: String) =
-                        addCell(PdfPCell(Paragraph(label, normalFont)).apply { horizontalAlignment = Element.ALIGN_CENTER })
+                        addCell(
+                            PdfPCell(
+                                Paragraph(label, normalFont)
+                            ).apply {
+                                horizontalAlignment = Element.ALIGN_CENTER
+                            }
+                        )
+
                     cell("Prestado: L. ${"%.2f".format(subPres)}")
                     cell("Abonado: L. ${"%.2f".format(subAbo)}")
                     cell("Pendiente: L. ${"%.2f".format(subPen)}")
                     cell("Activos: $subAct")
                     cell("Saldados: $subSal")
                 }
+
                 document.add(subt)
                 document.add(Paragraph(" "))
             }
 
-            // === 7) Listados globales ===
+            // === 7) Bloques globales por estado
             fun bloqueEstado(titulo: String, filtro: (ClienteModel) -> Boolean) {
                 val items = base.filter(filtro)
                 if (items.isNotEmpty()) {
                     document.add(Paragraph(titulo, headerFont))
-                    document.add(Paragraph("Total: ${items.size}", normalFont))
+                    document.add(
+                        Paragraph(
+                            "Total: ${items.size}",
+                            normalFont
+                        )
+                    )
                     document.add(Paragraph(" "))
                     document.add(tablaClientes(items))
                     document.add(Paragraph(" "))
                 }
             }
+
             bloqueEstado("CLIENTES ACTIVOS") { estadoEfectivo(it) == "activo" }
             bloqueEstado("CLIENTES SALDADOS") { estadoEfectivo(it) == "saldado" }
 
-            // === 8) Resumen general ===
-            var gPres = 0.0; var gAbo = 0.0; var gPen = 0.0
-            var gAct = 0; var gSal = 0
+            // === 8) Resumen general final
+            var gPres = 0.0
+            var gAbo = 0.0
+            var gPen = 0.0
+            var gAct = 0
+            var gSal = 0
+
             base.forEach { c ->
                 val (a, b, d) = totales(c.id)
-                gPres += a; gAbo += b; gPen += d
-                if (estadoEfectivo(c) == "saldado") gSal++ else gAct++
+                gPres += a
+                gAbo += b
+                gPen += d
+
+                if (estadoEfectivo(c) == "saldado") {
+                    gSal++
+                } else {
+                    gAct++
+                }
             }
+
             document.add(Paragraph("RESUMEN GENERAL", headerFont))
+
             val resumen = PdfPTable(5).apply {
                 widthPercentage = 100f
-                setWidths(floatArrayOf(1.2f, 1.2f, 1.2f, 1f, 1f))
+                setWidths(
+                    floatArrayOf(
+                        1.2f,
+                        1.2f,
+                        1.2f,
+                        1f,
+                        1f
+                    )
+                )
+
                 fun cell(label: String) =
-                    addCell(PdfPCell(Paragraph(label, normalFont)).apply { horizontalAlignment = Element.ALIGN_CENTER })
+                    addCell(
+                        PdfPCell(
+                            Paragraph(label, normalFont)
+                        ).apply {
+                            horizontalAlignment = Element.ALIGN_CENTER
+                        }
+                    )
+
                 cell("Prestado: L. ${"%.2f".format(gPres)}")
                 cell("Abonado: L. ${"%.2f".format(gAbo)}")
                 cell("Pendiente: L. ${"%.2f".format(gPen)}")
                 cell("Activos: $gAct")
                 cell("Saldados: $gSal")
             }
+
             document.add(resumen)
 
             document.close()
             file
         } catch (e: Exception) {
             Log.e("ReporteClientesPDF", "Error: ${e.message}", e)
-            Toast.makeText(context, "Error al generar PDF: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(
+                context,
+                "Error al generar PDF: ${e.message}",
+                Toast.LENGTH_LONG
+            ).show()
+            null
+        }
+    }
+
+    // Agregar esta función a la clase ReciboHelper
+
+    fun generarResumenCuotasPendientesPDF(
+        context: Context,
+        cuotasPorCliente: List<Pair<String, List<CuotaPendiente>>>,
+        filtroCliente: String = "",
+        filtroCobradorNombre: String = ""
+    ): File? {
+        return try {
+            val pdfDocument = PdfDocument()
+            val paint = Paint()
+            val titlePaint = Paint().apply {
+                textSize = 20f
+                isFakeBoldText = true
+                color = Color.parseColor("#0061A7")
+                textAlign = Paint.Align.CENTER
+            }
+            val headerPaint = Paint().apply {
+                textSize = 14f
+                isFakeBoldText = true
+                color = Color.parseColor("#0061A7")
+            }
+            val normalPaint = Paint().apply {
+                textSize = 11f
+                color = Color.BLACK
+            }
+            val smallPaint = Paint().apply {
+                textSize = 9f
+                color = Color.GRAY
+            }
+            val totalPaint = Paint().apply {
+                textSize = 12f
+                isFakeBoldText = true
+                color = Color.parseColor("#D32F2F")
+            }
+
+            val pageWidth = 595 // A4
+            val pageHeight = 842
+            val margin = 40f
+            val contentWidth = pageWidth - (2 * margin)
+
+            var pageNumber = 1
+            var pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create()
+            var page = pdfDocument.startPage(pageInfo)
+            var canvas = page.canvas
+            var yPos = margin
+
+            // Función para crear nueva página
+            fun nuevaPagina() {
+                pdfDocument.finishPage(page)
+                pageNumber++
+                pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create()
+                page = pdfDocument.startPage(pageInfo)
+                canvas = page.canvas
+                yPos = margin
+            }
+
+            // ENCABEZADO
+            canvas.drawText("CAPITAL EXPRESS", pageWidth / 2f, yPos, titlePaint)
+            yPos += 25f
+
+            paint.textSize = 14f
+            paint.textAlign = Paint.Align.CENTER
+            paint.isFakeBoldText = false
+            canvas.drawText("Reporte de Cuotas Pendientes", pageWidth / 2f, yPos, paint)
+            yPos += 20f
+
+            // Fecha del reporte
+            val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+            paint.textSize = 10f
+            paint.color = Color.GRAY
+            canvas.drawText("Generado: ${dateFormat.format(Date())}", pageWidth / 2f, yPos, paint)
+            yPos += 15f
+
+            // Filtros aplicados
+            if (filtroCliente.isNotEmpty() || filtroCobradorNombre.isNotEmpty()) {
+                paint.textAlign = Paint.Align.LEFT
+                paint.textSize = 9f
+                yPos += 5f
+                if (filtroCliente.isNotEmpty()) {
+                    canvas.drawText("Filtro Cliente: $filtroCliente", margin, yPos, paint)
+                    yPos += 12f
+                }
+                if (filtroCobradorNombre.isNotEmpty()) {
+                    canvas.drawText("Filtro Cobrador: $filtroCobradorNombre", margin, yPos, paint)
+                    yPos += 12f
+                }
+            }
+
+            yPos += 10f
+            paint.color = Color.LTGRAY
+            canvas.drawRect(margin, yPos, pageWidth - margin, yPos + 1, paint)
+            yPos += 20f
+
+            // RESUMEN GENERAL
+            var totalCuotasPendientes = 0
+            var totalMontoPendiente = 0.0
+            var totalClientesConPendientes = cuotasPorCliente.size
+
+            cuotasPorCliente.forEach { (_, cuotas) ->
+                totalCuotasPendientes += cuotas.size
+                totalMontoPendiente += cuotas.sumOf { it.montoPendiente }
+            }
+
+            // Caja de resumen
+            val boxPaint = Paint().apply {
+                color = Color.parseColor("#E3F2FD")
+                style = Paint.Style.FILL
+            }
+            val boxHeight = 60f
+            canvas.drawRoundRect(
+                RectF(margin, yPos, pageWidth - margin, yPos + boxHeight),
+                8f, 8f, boxPaint
+            )
+
+            // Contenido del resumen
+            paint.textAlign = Paint.Align.LEFT
+            paint.color = Color.parseColor("#0061A7")
+            paint.textSize = 11f
+            paint.isFakeBoldText = true
+
+            val col1X = margin + 15f
+            val col2X = pageWidth / 2f + 15f
+            var summaryY = yPos + 20f
+
+            canvas.drawText("Clientes con pendientes:", col1X, summaryY, paint)
+            paint.isFakeBoldText = false
+            canvas.drawText(totalClientesConPendientes.toString(), col1X + 150f, summaryY, paint)
+
+            canvas.drawText("Total cuotas pendientes:", col2X, summaryY, paint)
+            canvas.drawText(totalCuotasPendientes.toString(), col2X + 140f, summaryY, paint)
+
+            summaryY += 20f
+            paint.isFakeBoldText = true
+            canvas.drawText("Monto total pendiente:", col1X, summaryY, paint)
+            paint.color = Color.parseColor("#D32F2F")
+            paint.textSize = 13f
+            canvas.drawText("L. ${String.format("%.2f", totalMontoPendiente)}", col1X + 150f, summaryY, paint)
+
+            yPos += boxHeight + 25f
+
+            // Verificar espacio para continuar
+            if (yPos > pageHeight - 100) {
+                nuevaPagina()
+            }
+
+            // DETALLE POR CLIENTE
+            cuotasPorCliente.forEachIndexed { index, (clienteNombre, cuotas) ->
+                // Verificar si necesitamos nueva página para el cliente
+                if (yPos > pageHeight - 150) {
+                    nuevaPagina()
+                }
+
+                // Nombre del cliente
+                headerPaint.textAlign = Paint.Align.LEFT
+                canvas.drawText("$clienteNombre", margin, yPos, headerPaint)
+                yPos += 18f
+
+                // Total de cuotas y monto del cliente
+                val totalCuotasCliente = cuotas.size
+                val totalMontoCliente = cuotas.sumOf { it.montoPendiente }
+
+                smallPaint.color = Color.GRAY
+                canvas.drawText(
+                    "$totalCuotasCliente cuota(s) pendiente(s) - Total: L. ${String.format("%.2f", totalMontoCliente)}",
+                    margin,
+                    yPos,
+                    smallPaint
+                )
+                yPos += 15f
+
+                // Línea separadora
+                paint.color = Color.LTGRAY
+                canvas.drawRect(margin, yPos, pageWidth - margin, yPos + 0.5f, paint)
+                yPos += 10f
+
+                // Encabezados de columnas
+                smallPaint.color = Color.DKGRAY
+                smallPaint.isFakeBoldText = true
+
+                val colCuota = margin + 10f
+                val colFecha = margin + 80f
+                val colEstado = margin + 180f
+                val colPagado = margin + 280f
+                val colPendiente = margin + 380f
+
+                canvas.drawText("Cuota", colCuota, yPos, smallPaint)
+                canvas.drawText("Fecha Prog.", colFecha, yPos, smallPaint)
+                canvas.drawText("Estado", colEstado, yPos, smallPaint)
+                canvas.drawText("Pagado", colPagado, yPos, smallPaint)
+                canvas.drawText("Pendiente", colPendiente, yPos, smallPaint)
+                yPos += 12f
+
+                smallPaint.isFakeBoldText = false
+
+                // Línea debajo de encabezados
+                paint.color = Color.LTGRAY
+                canvas.drawRect(margin, yPos, pageWidth - margin, yPos + 0.5f, paint)
+                yPos += 8f
+
+                // Listar cuotas
+                cuotas.forEach { cuota ->
+                    // Verificar espacio antes de cada cuota
+                    if (yPos > pageHeight - 80) {
+                        nuevaPagina()
+
+                        // Repetir encabezado en nueva página
+                        headerPaint.textAlign = Paint.Align.LEFT
+                        canvas.drawText("$clienteNombre (continuación)", margin, yPos, headerPaint)
+                        yPos += 25f
+                    }
+
+                    normalPaint.color = Color.BLACK
+                    canvas.drawText("#${cuota.numeroCuota}", colCuota, yPos, normalPaint)
+                    canvas.drawText(cuota.fechaProgramada, colFecha, yPos, normalPaint)
+
+                    // Estado con color
+                    val estadoTexto = when {
+                        cuota.esProxima && !cuota.esVencida -> "PRÓXIMA"
+                        cuota.esVencida && cuota.diasAtraso > 7 -> "VENCIDA (${cuota.diasAtraso}d)"
+                        cuota.esVencida -> "Vencida (${cuota.diasAtraso}d)"
+                        cuota.montoPagado > 0 -> "Parcial"
+                        else -> "Pendiente"
+                    }
+
+                    val estadoColor = when {
+                        cuota.esProxima && !cuota.esVencida -> Color.parseColor("#FBC02D")
+                        cuota.esVencida && cuota.diasAtraso > 7 -> Color.parseColor("#D32F2F")
+                        cuota.esVencida -> Color.parseColor("#FF9800")
+                        cuota.montoPagado > 0 -> Color.parseColor("#4CAF50")
+                        else -> Color.GRAY
+                    }
+
+                    smallPaint.color = estadoColor
+                    smallPaint.isFakeBoldText = true
+                    canvas.drawText(estadoTexto, colEstado, yPos, smallPaint)
+                    smallPaint.isFakeBoldText = false
+
+                    // Monto pagado
+                    if (cuota.montoPagado > 0) {
+                        normalPaint.color = Color.parseColor("#4CAF50")
+                        canvas.drawText("L. ${String.format("%.2f", cuota.montoPagado)}", colPagado, yPos, normalPaint)
+                    } else {
+                        normalPaint.color = Color.GRAY
+                        canvas.drawText("-", colPagado, yPos, normalPaint)
+                    }
+
+                    // Monto pendiente
+                    totalPaint.color = Color.parseColor("#D32F2F")
+                    canvas.drawText("L. ${String.format("%.2f", cuota.montoPendiente)}", colPendiente, yPos, totalPaint)
+
+                    yPos += 15f
+
+                    // Línea separadora suave entre cuotas
+                    if (cuota != cuotas.last()) {
+                        paint.color = Color.parseColor("#F0F0F0")
+                        canvas.drawRect(margin + 5f, yPos, pageWidth - margin - 5f, yPos + 0.5f, paint)
+                        yPos += 5f
+                    }
+                }
+
+                yPos += 15f
+
+                // Línea separadora entre clientes
+                if (index < cuotasPorCliente.size - 1) {
+                    paint.color = Color.LTGRAY
+                    canvas.drawRect(margin, yPos, pageWidth - margin, yPos + 1f, paint)
+                    yPos += 20f
+                }
+            }
+
+            // PIE DE PÁGINA
+            yPos = pageHeight - 30f
+            paint.color = Color.LTGRAY
+            canvas.drawRect(margin, yPos - 10, pageWidth - margin, yPos - 9, paint)
+
+            smallPaint.color = Color.GRAY
+            smallPaint.textAlign = Paint.Align.CENTER
+            canvas.drawText("Página $pageNumber", pageWidth / 2f, yPos, smallPaint)
+
+            smallPaint.textAlign = Paint.Align.RIGHT
+            canvas.drawText("Capital Express - Sistema de Préstamos", pageWidth - margin, yPos, smallPaint)
+
+            pdfDocument.finishPage(page)
+
+            // Guardar archivo
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val fileName = "Cuotas_Pendientes_$timestamp.pdf"
+            val file = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), fileName)
+
+            FileOutputStream(file).use { outputStream ->
+                pdfDocument.writeTo(outputStream)
+            }
+
+            pdfDocument.close()
+            file
+
+        } catch (e: Exception) {
+            Log.e("GenerarPDFPendientes", "Error: ${e.message}", e)
             null
         }
     }

@@ -28,7 +28,7 @@ data class Prestamo(
     val observaciones: String? = null,
     val fechaCreacion: com.google.firebase.Timestamp? = null,
     val fechaUltimaActualizacion: com.google.firebase.Timestamp? = null,
+    val fechaCancelacion: com.google.firebase.Timestamp? = null, // ⭐ NUEVO CAMPO
     val fotos: List<String>? = emptyList(),
-    val proximoPago: Any? = null // Aquí clave por Timestamp/String mixto
+    val proximoPago: Any? = null
 )
-

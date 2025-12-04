@@ -28,6 +28,7 @@ import java.util.*
 
 data class PrestamoDetalle(
     val id: String,
+    val numeroPrestamo: String?,
     val clienteId: String,
     val cliente: String,
     val monto: Double,
@@ -49,7 +50,8 @@ data class PrestamoDetalle(
     val direccion: String?,
     val cedula: String?,
     val fechaCreacion: String,
-    val ultimaActualizacion: String?
+    val ultimaActualizacion: String?,
+    val fechaCancelacion: String? = null  // ⭐ NUEVO CAMPO
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -94,13 +96,13 @@ fun VerPrestamoScreen(
                 val estadoOriginal = (data["estado"] as? String ?: "activo").lowercase()
 
                 val cliente       = data["cliente"] as? String ?: "Cliente desconocido"
+                val numeroPrestamo = data["numeroPrestamo"] as? String // ⭐ CAMPO EXISTENTE
                 val monto         = (data["monto"] as? Number)?.toDouble() ?: 0.0
                 val interesTotal  = (data["interesTotal"] as? Number)?.toDouble()
                     ?: (data["interes"] as? Number)?.toDouble() ?: 0.0
                 val totalPagarRaw = (data["totalPagar"] as? Number)?.toDouble()
                 val totalPagar    = totalPagarRaw ?: (monto + interesTotal)
 
-                val montoPagado   = (data["montoPagado"] as? Number)?.toDouble() ?: 0.0
                 val cuota         = (data["cuota"] as? Number)?.toDouble() ?: 0.0
                 val cuotas        = (data["cuotas"] as? Number)?.toInt() ?: 0
                 val plazo         = data["plazo"] as? String ?: "No especificado"
@@ -142,30 +144,60 @@ fun VerPrestamoScreen(
                     else         -> null
                 }
 
+                // ⭐⭐⭐ LEER FECHA DE CANCELACIÓN ⭐⭐⭐
+                val fechaCancelacion = when (val fc = data["fechaCancelacion"]) {
+                    is Timestamp -> formatter.format(fc.toDate())
+                    is String    -> fc
+                    else         -> null
+                }
+
+                // ✅✅✅ RECALCULAR MONTO PAGADO DESDE LA COLECCIÓN DE PAGOS ✅✅✅
+                val moraActual = (data["mora"] as? Number)?.toDouble() ?: 0.0
+                val totalConMora = totalPagar + moraActual
+
+                val pagosSnapshot = db.collection("pagos")
+                    .whereEqualTo("prestamoId", prestamoId)
+                    .get().await()
+
+                var montoPagadoReal = 0.0
+                for (pago in pagosSnapshot.documents) {
+                    val montoPago = pago.getDouble("monto") ?: 0.0
+                    val moraPago = pago.getDouble("mora") ?: 0.0
+                    montoPagadoReal += montoPago + moraPago
+                }
+
+                Log.d("VerPrestamoScreen", """
+                    💰 RECÁLCULO DE SALDO DESDE PAGOS:
+                    - Total a pagar (base): L. $totalPagar
+                    - Mora aplicada: L. $moraActual
+                    - Total con mora: L. $totalConMora
+                    - Monto REAL pagado (desde pagos): L. $montoPagadoReal
+                """.trimIndent())
+
                 // ====== NORMALIZACIÓN CRÍTICA ======
                 val epsilon = 0.01
-                // Calcular saldo pendiente
-                val saldoPendienteCalculado = totalPagar - montoPagado
+                // Calcular saldo pendiente usando el monto REAL pagado
+                val saldoPendienteCalculado = totalConMora - montoPagadoReal
                 val saldoPendiente = if (saldoPendienteCalculado <= epsilon) 0.0 else saldoPendienteCalculado
 
                 Log.d("VerPrestamoScreen", """
                     === CÁLCULO DE ESTADO ===
                     Préstamo ID: $prestamoId
-                    Total a pagar: $totalPagar
-                    Monto pagado: $montoPagado
-                    Saldo calculado: $saldoPendienteCalculado
-                    Saldo final: $saldoPendiente
+                    Total con mora: L. $totalConMora
+                    Monto REAL pagado: L. $montoPagadoReal
+                    Saldo calculado: L. $saldoPendienteCalculado
+                    Saldo final: L. $saldoPendiente
                     Estado original: $estadoOriginal
                     Eliminado: $eliminado
                 """.trimIndent())
 
-                // Determinar el estado efectivo basado en el saldo
+                // Determinar el estado efectivo basado en el saldo REAL
                 val estadoEfectivo = when {
                     eliminado -> "eliminado"
                     // Si el saldo es 0 o negativo, SIEMPRE es saldado
                     saldoPendiente <= epsilon -> "saldado"
                     saldoPendienteCalculado <= epsilon -> "saldado"
-                    montoPagado >= totalPagar -> "saldado"
+                    montoPagadoReal >= totalConMora -> "saldado"
                     estadoOriginal == "saldado" -> "saldado"
                     estadoOriginal == "completado" -> "saldado"
                     else -> estadoOriginal
@@ -178,11 +210,12 @@ fun VerPrestamoScreen(
 
                 prestamo = PrestamoDetalle(
                     id = prestamoId,
+                    numeroPrestamo = numeroPrestamo,
                     clienteId = clienteId,
                     cliente = cliente,
                     monto = monto,
-                    totalPagar = totalPagar,
-                    montoPagado = montoPagado,
+                    totalPagar = totalConMora,
+                    montoPagado = montoPagadoReal,
                     saldoPendiente = saldoPendiente,
                     cuota = cuota,
                     cuotas = cuotas,
@@ -199,10 +232,12 @@ fun VerPrestamoScreen(
                     direccion = direccion,
                     cedula = cedula,
                     fechaCreacion = fechaCreacion,
-                    ultimaActualizacion = ultimaActualizacion
+                    ultimaActualizacion = ultimaActualizacion,
+                    fechaCancelacion = fechaCancelacion  // ⭐ NUEVO CAMPO
                 )
 
                 // Corregir el documento en Firestore si está inconsistente
+                val montoPagadoDoc = (data["montoPagado"] as? Number)?.toDouble()
                 val saldoDoc = (data["saldo"] as? Number)?.toDouble()
                 val estadoDoc = data["estado"] as? String ?: "activo"
 
@@ -210,18 +245,34 @@ fun VerPrestamoScreen(
                     (estadoEfectivo == "saldado" && estadoDoc != "saldado") ||
                             (estadoEfectivo != estadoOriginal && estadoEfectivo != "eliminado") ||
                             (saldoDoc == null || kotlin.math.abs(saldoDoc - saldoPendiente) > epsilon) ||
-                            (totalPagarRaw == null)
+                            (montoPagadoDoc == null || kotlin.math.abs(montoPagadoDoc - montoPagadoReal) > epsilon) ||
+                            (totalPagarRaw == null) ||
+                            // ⭐ NUEVO: Agregar fecha de cancelación a préstamos saldados sin fecha
+                            (estadoEfectivo == "saldado" && data["fechaCancelacion"] == null)
 
                 if (debeActualizar) {
                     try {
                         val updates = mutableMapOf<String, Any>(
                             "estado" to estadoEfectivo,
                             "saldo" to saldoPendiente,
+                            "montoPagado" to montoPagadoReal,
                             "ultimaActualizacion" to Timestamp.now()
                         )
                         if (totalPagarRaw == null) updates["totalPagar"] = totalPagar
 
-                        Log.d("VerPrestamoScreen", "🔧 Actualizando préstamo $prestamoId: estado=$estadoEfectivo, saldo=$saldoPendiente")
+                        // ⭐ NUEVO: Si está saldado y no tiene fecha de cancelación, agregarla
+                        if (estadoEfectivo == "saldado" && data["fechaCancelacion"] == null) {
+                            updates["fechaCancelacion"] = Timestamp.now()
+                            Log.d("VerPrestamoScreen", "⭐ Agregando fechaCancelacion a préstamo saldado antiguo")
+                        }
+
+                        Log.d("VerPrestamoScreen", """
+                            🔧 Actualizando préstamo $prestamoId:
+                            - estado: $estadoEfectivo
+                            - saldo: L. $saldoPendiente
+                            - montoPagado: L. $montoPagadoReal
+                        """.trimIndent())
+
                         docRef.update(updates).await()
                         Log.d("VerPrestamoScreen", "✅ Préstamo actualizado correctamente en Firestore")
                     } catch (e: Exception) {
@@ -475,11 +526,23 @@ fun VerPrestamoScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        "Detalle del Préstamo",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Column {
+                        Text(
+                            "Detalle del Préstamo",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                        // ⭐⭐⭐ MOSTRAR NÚMERO DE PRÉSTAMO EN EL TOPBAR ⭐⭐⭐
+                        prestamo?.numeroPrestamo?.let {
+                            Text(
+                                it,
+                                color = Color.White.copy(alpha = 0.9f),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Normal
+                            )
+                        }
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0061A7)),
                 navigationIcon = {
@@ -553,6 +616,49 @@ fun VerPrestamoScreen(
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
+                    // ⭐⭐⭐ CARD DEL NÚMERO DE PRÉSTAMO (DESTACADO) ⭐⭐⭐
+                    p.numeroPrestamo?.let { numero ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = Color(0xFF1565C0)
+                            ),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        "Número de Préstamo",
+                                        fontSize = 12.sp,
+                                        color = Color.White.copy(alpha = 0.8f),
+                                        fontWeight = FontWeight.Normal
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        numero,
+                                        fontSize = 24.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+                                Icon(
+                                    Icons.Default.Tag,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(40.dp),
+                                    tint = Color.White.copy(alpha = 0.8f)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                    }
+
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(
@@ -677,6 +783,24 @@ fun VerPrestamoScreen(
                         p.ultimaActualizacion?.let {
                             InfoRow("Última actualización", it)
                         }
+
+                        // ⭐⭐⭐ MOSTRAR FECHA DE CANCELACIÓN SI EXISTE ⭐⭐⭐
+                        if (p.estado.lowercase() == "saldado" || p.estado.lowercase() == "completado") {
+                            p.fechaCancelacion?.let {
+                                InfoRow(
+                                    "Fecha de cancelación",
+                                    it,
+                                    valueColor = Color(0xFF4CAF50)  // Verde para destacar
+                                )
+                            } ?: run {
+                                // Si está saldado pero no tiene fecha, mostrar advertencia
+                                InfoRow(
+                                    "Fecha de cancelación",
+                                    "No registrada",
+                                    valueColor = Color(0xFFFF9800)  // Naranja para advertencia
+                                )
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -685,6 +809,12 @@ fun VerPrestamoScreen(
                         title = "Información Adicional",
                         icon = Icons.Default.Info
                     ) {
+                        // ⭐ MOSTRAR NÚMERO DE PRÉSTAMO AQUÍ SOLO SI NO EXISTE
+                        if (p.numeroPrestamo != null) {
+                            InfoRow("Número de préstamo", p.numeroPrestamo)
+                        } else {
+                            InfoRow("Número de préstamo", "No asignado (préstamo antiguo)")
+                        }
                         InfoRow("ID del préstamo", p.id)
                         InfoRow("Cobrador asignado", p.cobrador)
                         p.observaciones?.let {

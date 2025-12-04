@@ -4,13 +4,14 @@ import android.app.DatePickerDialog
 import android.content.Context
 import android.util.Log
 import android.widget.Toast
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -26,20 +27,35 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.example.capitalexpressapp.util.ReciboHelper
 import com.example.capitalexpressapp.util.NetworkUtils.isInternetAvailable
+import com.example.minifinancieraapp.ui.models.PagoItem
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.gson.Gson
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
-import com.example.minifinancieraapp.ui.models.PagoItem
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.*
 
-// ===== NUEVO: Filtro por estado =====
 enum class EstadoFiltro { TODOS, ACTIVOS, SALDADOS }
 
-// ViewModel para gestionar el estado global de los préstamos
+data class CuotaPendiente(
+    val numeroCuota: Int,
+    val fechaProgramada: String,
+    val montoPendiente: Double,
+    val montoPagado: Double,
+    val porcentajePagado: Double,
+    val esVencida: Boolean,
+    val diasAtraso: Int,
+    val esProxima: Boolean = false
+)
+
+data class UsuarioItem(
+    val id: String,
+    val nombre: String,
+    val rol: String
+)
+
 class PrestamoStateManager {
     companion object {
         private val _prestamoUpdates = mutableMapOf<String, MutableState<Double>>()
@@ -70,12 +86,589 @@ class PrestamoStateManager {
     }
 }
 
-// Modelo de datos para usuarios
-data class UsuarioItem(
-    val id: String,
-    val nombre: String,
-    val rol: String
-)
+private fun calcularFechaCuotaPendiente(fechaInicio: Date, plazo: String, numeroCuota: Int): String {
+    val calendar = Calendar.getInstance().apply { time = fechaInicio }
+    val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+
+    when (plazo.lowercase()) {
+        "diario" -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota)
+        "lunes a sábado" -> {
+            repeat(numeroCuota) {
+                do {
+                    calendar.add(Calendar.DAY_OF_YEAR, 1)
+                } while (calendar.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY)
+            }
+        }
+        "semanal" -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 7)
+        "quincenal" -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 15)
+        "mensual" -> calendar.add(Calendar.MONTH, numeroCuota)
+        "bimestral" -> calendar.add(Calendar.MONTH, numeroCuota * 2)
+        else -> calendar.add(Calendar.MONTH, numeroCuota)
+    }
+
+    return dateFormat.format(calendar.time)
+}
+
+private fun calcularDiasAtraso(fechaProgramada: Date, fechaActual: Date): Int {
+    val diffMillis = fechaActual.time - fechaProgramada.time
+    val dias = (diffMillis / (1000 * 60 * 60 * 24)).toInt()
+    return dias.coerceAtLeast(0)
+}
+
+private suspend fun obtenerCuotasPendientes(
+    db: FirebaseFirestore,
+    prestamoId: String
+): List<CuotaPendiente> {
+    return try {
+        val prestamoDoc = db.collection("prestamos").document(prestamoId).get().await()
+
+        val cuotasTotales = prestamoDoc.getLong("cuotas")?.toInt() ?: 0
+        val cuotaMonto = prestamoDoc.getDouble("cuota") ?: 0.0
+        val plazo = prestamoDoc.getString("plazo") ?: "semanal"
+        val fechaInicio = prestamoDoc.getTimestamp("fecha")?.toDate() ?: Date()
+        val estado = prestamoDoc.getString("estado") ?: "activo"
+        val proximoPagoStr = prestamoDoc.getString("proximoPago")
+
+        if (estado.lowercase() == "saldado" || proximoPagoStr == "saldado") {
+            return emptyList()
+        }
+
+        val pagosSnapshot = db.collection("pagos")
+            .whereEqualTo("prestamoId", prestamoId)
+            .get().await()
+
+        val cuotasPagadas = mutableMapOf<Int, Double>()
+
+        for (pago in pagosSnapshot.documents) {
+            val cuotasCubiertas = pago.get("cuotasCubiertas") as? List<*>
+
+            if (cuotasCubiertas != null && cuotasCubiertas.isNotEmpty()) {
+                cuotasCubiertas.forEach { cuotaData ->
+                    if (cuotaData is Map<*, *>) {
+                        val numeroCuota = (cuotaData["numeroCuota"] as? Number)?.toInt() ?: 0
+                        val montoAplicado = (cuotaData["montoAplicado"] as? Number)?.toDouble() ?: 0.0
+
+                        if (numeroCuota > 0) {
+                            cuotasPagadas[numeroCuota] =
+                                (cuotasPagadas[numeroCuota] ?: 0.0) + montoAplicado
+                        }
+                    }
+                }
+            } else {
+                val numeroCuota = when {
+                    pago.contains("numeroCuota") -> pago.getLong("numeroCuota")?.toInt() ?: 1
+                    pago.contains("cuota") -> {
+                        val cuotaStr = pago.getString("cuota") ?: "1"
+                        cuotaStr.toIntOrNull() ?: 1
+                    }
+                    else -> 1
+                }
+                val montoPago = pago.getDouble("monto") ?: 0.0
+                val moraPago = pago.getDouble("mora") ?: 0.0
+                val montoTotal = montoPago + moraPago
+
+                cuotasPagadas[numeroCuota] =
+                    (cuotasPagadas[numeroCuota] ?: 0.0) + montoTotal
+            }
+        }
+
+        val cuotasPendientes = mutableListOf<CuotaPendiente>()
+        val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+        val hoy = Date()
+
+        var proximaCuotaNumero: Int? = null
+        for (i in 1..cuotasTotales) {
+            val montoPagado = cuotasPagadas[i] ?: 0.0
+            val montoPendiente = (cuotaMonto - montoPagado).coerceAtLeast(0.0)
+
+            if (montoPendiente > 0.01) {
+                proximaCuotaNumero = i
+                break
+            }
+        }
+
+        for (i in 1..cuotasTotales) {
+            val montoPagado = cuotasPagadas[i] ?: 0.0
+            val montoPendiente = (cuotaMonto - montoPagado).coerceAtLeast(0.0)
+
+            if (montoPendiente > 0.01) {
+                val fechaProgramada = calcularFechaCuotaPendiente(fechaInicio, plazo, i)
+                val fechaDate = try {
+                    dateFormat.parse(fechaProgramada) ?: Date()
+                } catch (e: Exception) {
+                    Date()
+                }
+
+                val diasAtraso = calcularDiasAtraso(fechaDate, hoy)
+                val esVencida = diasAtraso > 0
+                val esProxima = i == proximaCuotaNumero
+
+                cuotasPendientes.add(
+                    CuotaPendiente(
+                        numeroCuota = i,
+                        fechaProgramada = fechaProgramada,
+                        montoPendiente = montoPendiente,
+                        montoPagado = montoPagado,
+                        porcentajePagado = if (cuotaMonto > 0) (montoPagado / cuotaMonto) * 100 else 0.0,
+                        esVencida = esVencida,
+                        diasAtraso = diasAtraso,
+                        esProxima = esProxima
+                    )
+                )
+            }
+        }
+
+        cuotasPendientes
+
+    } catch (e: Exception) {
+        Log.e("CuotasPendientes", "Error: ${e.message}", e)
+        emptyList()
+    }
+}
+
+private suspend fun obtenerTodasLasCuotasPendientes(
+    db: FirebaseFirestore,
+    filtroCliente: String = "",
+    filtroCobradorId: String = ""
+): List<Pair<String, List<CuotaPendiente>>> {
+    return try {
+        val prestamosSnapshot = db.collection("prestamos")
+            .whereEqualTo("estado", "activo")
+            .get().await()
+
+        val resultado = mutableListOf<Pair<String, List<CuotaPendiente>>>()
+
+        for (prestamoDoc in prestamosSnapshot.documents) {
+            val prestamoId = prestamoDoc.id
+            val clienteNombre = prestamoDoc.getString("cliente") ?: continue
+            val cobradorAsignadoId = prestamoDoc.getString("cobrador") ?: ""
+
+            // Aplicar filtro de cliente
+            val cumpleFiltroCliente = filtroCliente.isBlank() ||
+                    clienteNombre.contains(filtroCliente, ignoreCase = true)
+
+            if (!cumpleFiltroCliente) continue
+
+            // Comparar el cobradorId del préstamo con el filtro
+            val cumpleFiltroCobrador = if (filtroCobradorId.isBlank()) {
+                true
+            } else {
+                cobradorAsignadoId == filtroCobradorId
+            }
+
+            if (!cumpleFiltroCobrador) continue
+
+            // Obtener cuotas pendientes del préstamo
+            val cuotasPendientes = obtenerCuotasPendientes(db, prestamoId)
+
+            if (cuotasPendientes.isNotEmpty()) {
+                resultado.add(Pair(clienteNombre, cuotasPendientes))
+            }
+        }
+
+        resultado
+
+    } catch (e: Exception) {
+        Log.e("TodasCuotasPendientes", "Error: ${e.message}", e)
+        emptyList()
+    }
+}
+
+fun formatearLempiras(valor: Double): String {
+    return "L. ${String.format("%.2f", valor)}"
+}
+
+private fun procesarDocumentoPagoMejorado(
+    doc: com.google.firebase.firestore.DocumentSnapshot,
+    usuariosMap: Map<String, String>,
+    prestamos: Map<String, Map<String, Any?>>,
+    formatter: SimpleDateFormat
+): PagoItem? {
+    try {
+        val prestamoId = doc.getString("prestamoId") ?: return null
+        val prestamo = prestamos[prestamoId] ?: return null
+        val clienteNombre = prestamo["cliente"] as? String ?: "Cliente Desconocido"
+
+        // 🔥 SOLUCIÓN CORRECTA: El campo se llama "nombreCobrador", no "cobrador"
+        val cobradorDelPago = doc.getString("nombreCobrador") ?: doc.getString("cobrador") ?: ""
+        val cobradorDelPrestamo = prestamo["cobrador"] as? String ?: prestamo["nombreCobrador"] as? String ?: ""
+
+        // Usar el del PAGO primero, si no existe usar el del préstamo
+        val cobradorValor = cobradorDelPago.ifEmpty { cobradorDelPrestamo }
+
+        // Determinar si es un ID o un nombre
+        val esUnId = cobradorValor.contains("-") && cobradorValor.length > 30
+
+        val cobradorId: String
+        val cobradorNombre: String
+
+        if (cobradorValor.isEmpty()) {
+            cobradorId = ""
+            cobradorNombre = "Sin asignar"
+        } else if (esUnId) {
+            // Es un ID, buscar el nombre
+            cobradorId = cobradorValor
+            cobradorNombre = usuariosMap[cobradorId] ?: cobradorValor
+        } else {
+            // Es un nombre, buscar el ID
+            val idEncontrado = usuariosMap.entries.find {
+                it.value.equals(cobradorValor, ignoreCase = true)
+            }?.key
+
+            cobradorId = idEncontrado ?: cobradorValor
+            cobradorNombre = cobradorValor
+        }
+
+        val saldoActual = when (val saldoVal = prestamo["saldo"]) {
+            is Double -> saldoVal
+            is Long -> saldoVal.toDouble()
+            is String -> saldoVal.toDoubleOrNull() ?: 0.0
+            else -> 0.0
+        }
+
+        // 🔥 CORRECCIÓN CRÍTICA: El campo puede llamarse "fechaPago" o "fecha"
+        // Intentar primero "fechaPago", luego "fecha" como fallback
+        val timestamp = doc.getTimestamp("fechaPago")
+            ?: doc.getTimestamp("fecha")
+            ?: run {
+                Log.w("ProcesarPago", "⚠️ Pago ${doc.id} no tiene campo 'fechaPago' ni 'fecha', usando fecha actual")
+                Timestamp.now()
+            }
+
+        val fechaDate = timestamp.toDate()
+        val fechaStr = formatter.format(fechaDate)
+        val horaFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
+        val horaStr = horaFormat.format(fechaDate)
+        val fechaCompleta = "$fechaStr $horaStr"
+
+        // 🔥 LOG DE DEBUGGING (descomentar si necesitas verificar)
+        /*
+        Log.d("ProcesarPago", """
+            📋 Pago procesado:
+            • ID: ${doc.id}
+            • Cliente: $clienteNombre
+            • Fecha original (Timestamp): $timestamp
+            • Fecha formateada: $fechaCompleta
+            • Cobrador: $cobradorNombre
+        """.trimIndent())
+        */
+
+        val numeroCuotaVal = try {
+            when {
+                doc.contains("numeroCuota") -> {
+                    when (val valor = doc.get("numeroCuota")) {
+                        is Long -> valor.toInt()
+                        is Int -> valor
+                        is Double -> valor.toInt()
+                        is String -> valor.toIntOrNull()
+                        else -> null
+                    }
+                }
+                doc.contains("cuota") -> {
+                    when (val valor = doc.get("cuota")) {
+                        is Long -> valor.toInt()
+                        is Int -> valor
+                        is Double -> valor.toInt()
+                        is String -> valor.toIntOrNull()
+                        else -> null
+                    }
+                }
+                else -> null
+            }
+        } catch (e: Exception) {
+            null
+        }
+
+        val metodoPagoStr = doc.getString("metodoPago") ?: doc.getString("tipoPago") ?: "Efectivo"
+
+        val numeroPrestamoStr = try {
+            when (val valor = doc.get("numeroPrestamo") ?: prestamo["numeroPrestamo"]) {
+                is String -> valor
+                is Long -> valor.toString()
+                is Int -> valor.toString()
+                is Double -> valor.toInt().toString()
+                null -> ""
+                else -> valor.toString()
+            }
+        } catch (e: Exception) {
+            ""
+        }
+
+        // 🔥 OBTENER EL MONTO (puede estar en "monto" o en otro campo)
+        val monto = doc.getDouble("monto") ?: run {
+            Log.w("ProcesarPago", "⚠️ Pago ${doc.id} no tiene campo 'monto'")
+            0.0
+        }
+
+        return PagoItem(
+            docId = doc.id,
+            cliente = clienteNombre,
+            cobrador = cobradorNombre,
+            cobradorId = cobradorId,
+            monto = monto,
+            mora = doc.getDouble("mora") ?: 0.0,
+            fecha = fechaCompleta,
+            prestamoId = prestamoId,
+            numeroCuota = numeroCuotaVal,
+            cuota = numeroCuotaVal?.toString() ?: "",
+            metodoPago = metodoPagoStr,
+            tipoPago = metodoPagoStr,
+            notas = doc.getString("notas"),
+            timestamp = timestamp,
+            saldoRestante = saldoActual,
+            numeroPrestamo = numeroPrestamoStr
+        )
+    } catch (e: Exception) {
+        Log.e("ProcesarPago", "❌ Error procesando pago ${doc.id}: ${e.message}", e)
+        return null
+    }
+}
+
+private suspend fun eliminarPagoCorregido(
+    context: Context,
+    db: FirebaseFirestore,
+    pago: PagoItem,
+    onSuccess: () -> Unit
+) {
+    try {
+        if (!isInternetAvailable(context)) {
+            Toast.makeText(context, "No hay conexión a internet", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        Log.d("EliminarPago", """
+            🗑️ Iniciando eliminación de pago:
+            • Cliente: ${pago.cliente}
+            • Préstamo ID: ${pago.prestamoId}
+            • Pago ID: ${pago.docId}
+            • Monto: L. ${pago.monto}
+            • Mora: L. ${pago.mora}
+        """.trimIndent())
+
+        val prestamoRef = db.collection("prestamos").document(pago.prestamoId)
+        val pagoRef = db.collection("pagos").document(pago.docId)
+
+        // 🔥 CORRECCIÓN CRÍTICA: Obtener TODOS los pagos ANTES de la transacción
+        val todosLosPagosSnapshot = db.collection("pagos")
+            .whereEqualTo("prestamoId", pago.prestamoId)
+            .get()
+            .await() // ✅ AWAIT aquí, FUERA de la transacción
+
+        Log.d("EliminarPago", "📦 Total pagos del préstamo: ${todosLosPagosSnapshot.size()}")
+
+        // Ahora sí, ejecutar la transacción
+        db.runTransaction { transaction ->
+            // 1. Obtener documentos actuales
+            val prestamoSnapshot = transaction.get(prestamoRef)
+            val pagoSnapshot = transaction.get(pagoRef)
+
+            if (!prestamoSnapshot.exists()) {
+                throw Exception("Préstamo no encontrado")
+            }
+            if (!pagoSnapshot.exists()) {
+                throw Exception("Pago no encontrado")
+            }
+
+            Log.d("EliminarPago", "✅ Documentos encontrados en Firestore")
+
+            // 2. Calcular el nuevo saldo
+            val montoTotal = pago.monto + pago.mora
+            val saldoActual = prestamoSnapshot.getDouble("saldo") ?: 0.0
+            val nuevoSaldo = saldoActual + montoTotal
+
+            Log.d("EliminarPago", """
+                💰 Cálculo de saldo:
+                • Saldo actual: L. $saldoActual
+                • Monto a devolver: L. $montoTotal (${pago.monto} + ${pago.mora})
+                • Nuevo saldo: L. $nuevoSaldo
+            """.trimIndent())
+
+            // 3. Obtener cuotas cubiertas por este pago
+            val cuotasCubiertas = pagoSnapshot.get("cuotasCubiertas") as? List<*>
+            val cuotasPagadasMap = mutableMapOf<Int, Double>()
+
+            if (cuotasCubiertas != null && cuotasCubiertas.isNotEmpty()) {
+                Log.d("EliminarPago", "📋 Procesando ${cuotasCubiertas.size} cuotas cubiertas...")
+
+                cuotasCubiertas.forEach { cuotaData ->
+                    if (cuotaData is Map<*, *>) {
+                        val numeroCuota = (cuotaData["numeroCuota"] as? Number)?.toInt() ?: 0
+                        val montoAplicado = (cuotaData["montoAplicado"] as? Number)?.toDouble() ?: 0.0
+                        if (numeroCuota > 0) {
+                            cuotasPagadasMap[numeroCuota] = montoAplicado
+                            Log.d("EliminarPago", "  • Cuota #$numeroCuota: L. $montoAplicado")
+                        }
+                    }
+                }
+            } else {
+                // Pago antiguo sin cuotasCubiertas
+                val numeroCuota = pago.numeroCuota ?: 1
+                cuotasPagadasMap[numeroCuota] = montoTotal
+                Log.d("EliminarPago", "📋 Pago sin cuotasCubiertas, usando cuota #$numeroCuota")
+            }
+
+            // 4. Calcular próxima cuota pendiente
+            val cuotaMonto = prestamoSnapshot.getDouble("cuota") ?: 0.0
+            val cuotasTotales = prestamoSnapshot.getLong("cuotas")?.toInt() ?: 0
+
+            Log.d("EliminarPago", """
+                🔢 Información de cuotas:
+                • Cuota monto: L. $cuotaMonto
+                • Cuotas totales: $cuotasTotales
+            """.trimIndent())
+
+            // 🔥 Calcular cuotas pagadas SIN el pago que vamos a eliminar
+            val cuotasPagadasTotales = mutableMapOf<Int, Double>()
+
+            // Usar el snapshot que obtuvimos ANTES de la transacción
+            todosLosPagosSnapshot.documents.forEach { docPago ->
+                if (docPago.id != pago.docId) { // ✅ Excluir el pago que vamos a eliminar
+                    val cuotasCubiertasOtroPago = docPago.get("cuotasCubiertas") as? List<*>
+
+                    if (cuotasCubiertasOtroPago != null && cuotasCubiertasOtroPago.isNotEmpty()) {
+                        cuotasCubiertasOtroPago.forEach { cuotaData ->
+                            if (cuotaData is Map<*, *>) {
+                                val num = (cuotaData["numeroCuota"] as? Number)?.toInt() ?: 0
+                                val monto = (cuotaData["montoAplicado"] as? Number)?.toDouble() ?: 0.0
+                                if (num > 0) {
+                                    cuotasPagadasTotales[num] = (cuotasPagadasTotales[num] ?: 0.0) + monto
+                                }
+                            }
+                        }
+                    } else {
+                        // Pago antiguo sin cuotasCubiertas
+                        val num = when {
+                            docPago.contains("numeroCuota") -> docPago.getLong("numeroCuota")?.toInt() ?: 1
+                            docPago.contains("cuota") -> {
+                                val cuotaStr = docPago.getString("cuota") ?: "1"
+                                cuotaStr.toIntOrNull() ?: 1
+                            }
+                            else -> 1
+                        }
+                        val monto = (docPago.getDouble("monto") ?: 0.0) + (docPago.getDouble("mora") ?: 0.0)
+                        cuotasPagadasTotales[num] = (cuotasPagadasTotales[num] ?: 0.0) + monto
+                    }
+                }
+            }
+
+            Log.d("EliminarPago", "📊 Cuotas pagadas (sin este pago): ${cuotasPagadasTotales.size}")
+
+            // 5. Encontrar la primera cuota pendiente
+            var proximaCuota = 1
+            for (i in 1..cuotasTotales) {
+                val pagadoTotal = cuotasPagadasTotales[i] ?: 0.0
+                if (pagadoTotal < cuotaMonto - 0.01) {
+                    proximaCuota = i
+                    break
+                }
+            }
+
+            Log.d("EliminarPago", "🎯 Próxima cuota pendiente: #$proximaCuota")
+
+            // 6. Determinar estado del préstamo
+            val estadoNuevo = if (nuevoSaldo > 0.01) "activo" else "saldado"
+            val proximoPagoStr = if (nuevoSaldo > 0.01) proximaCuota.toString() else "saldado"
+
+            Log.d("EliminarPago", """
+                📝 Actualizando préstamo:
+                • Estado: $estadoNuevo
+                • Próximo pago: $proximoPagoStr
+                • Nuevo saldo: L. $nuevoSaldo
+            """.trimIndent())
+
+            // 7. Actualizar préstamo
+            transaction.update(prestamoRef, mapOf(
+                "saldo" to nuevoSaldo,
+                "estado" to estadoNuevo,
+                "proximoPago" to proximoPagoStr
+            ))
+
+            // 8. Eliminar pago
+            transaction.delete(pagoRef)
+
+            Log.d("EliminarPago", "✅ Transacción completada exitosamente")
+
+        }.await() // ✅ AWAIT en la transacción
+
+        // 9. Notificar actualización del estado
+        PrestamoStateManager.notifyPrestamoUpdate(pago.prestamoId, db, context)
+
+        Log.d("EliminarPago", "🎉 Pago eliminado correctamente")
+        Toast.makeText(context, "Pago eliminado correctamente", Toast.LENGTH_SHORT).show()
+        onSuccess()
+
+    } catch (e: Exception) {
+        Log.e("EliminarPago", "❌ Error al eliminar pago", e)
+        Toast.makeText(
+            context,
+            "Error al eliminar: ${e.message}",
+            Toast.LENGTH_LONG
+        ).show()
+    }
+}
+
+private suspend fun reimprimirRecibo(context: Context, pago: PagoItem) {
+    try {
+        val db = FirebaseFirestore.getInstance()
+        val prestamoDoc = db.collection("prestamos").document(pago.prestamoId).get().await()
+
+        val cliente = prestamoDoc.getString("cliente") ?: ""
+
+        val numeroPrestamoStr = pago.numeroPrestamo.ifEmpty {
+            prestamoDoc.getString("numeroPrestamo")
+                ?: prestamoDoc.getLong("numeroPrestamo")?.toString()
+                ?: ""
+        }
+
+        val prestamoIdParaPDF = if (numeroPrestamoStr.isNotEmpty()) {
+            "Préstamo N° $numeroPrestamoStr"
+        } else {
+            "Préstamo"
+        }
+
+        val fecha = pago.fecha
+        val montoPagado = pago.monto.toString()
+        val saldoAnterior = (pago.saldoRestante ?: 0.0) + pago.monto + pago.mora
+        val proximoPago = prestamoDoc.getString("proximoPago") ?: ""
+        val cuota = pago.numeroCuota?.toString() ?: pago.cuota.ifEmpty { "1" }
+        val cobrador = pago.cobrador
+        val lugar = pago.lugar.ifEmpty { "Capital Express" }
+        val firma = pago.firma.ifEmpty { "" }
+        val tipoPago = pago.metodoPago.ifEmpty { pago.tipoPago }
+        val mora = pago.mora
+        val saldoNuevoFijo = pago.saldoRestante
+
+        val archivo = ReciboHelper.generarReciboPDF(
+            context = context,
+            cliente = cliente,
+            prestamoId = prestamoIdParaPDF,
+            fecha = fecha,
+            montoPagado = montoPagado,
+            saldoAnterior = saldoAnterior,
+            proximoPago = proximoPago,
+            cuota = cuota,
+            cobrador = cobrador,
+            lugar = lugar,
+            firma = firma,
+            tipoPago = tipoPago,
+            mora = mora,
+            saldoNuevoFijo = saldoNuevoFijo
+        )
+
+        if (archivo != null && archivo.exists()) {
+            val printed = ReciboHelper.imprimirPDF(context, archivo)
+            if (!printed) {
+                ReciboHelper.compartirReciboPDF(context, archivo)
+            }
+            Toast.makeText(context, "Recibo generado", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "No se pudo generar el recibo", Toast.LENGTH_LONG).show()
+        }
+    } catch (e: Exception) {
+        Log.e("ReimprimirRecibo", "Error: ${e.message}", e)
+        Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -83,10 +676,12 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
     val context = LocalContext.current
     val db = FirebaseFirestore.getInstance()
     val scope = rememberCoroutineScope()
-    val gson = remember { Gson() }
 
     var pagos by remember { mutableStateOf(listOf<PagoItem>()) }
     var pagosFiltrados by remember { mutableStateOf(listOf<PagoItem>()) }
+    var cuotasPendientesPorCliente by remember { mutableStateOf(listOf<Pair<String, List<CuotaPendiente>>>()) }
+    var mostrandoPendientes by remember { mutableStateOf(false) }
+    var cargandoPendientes by remember { mutableStateOf(false) }
     var usuarios by remember { mutableStateOf(listOf<UsuarioItem>()) }
     var filtroCliente by remember { mutableStateOf("") }
     var filtroCobradorId by remember { mutableStateOf("") }
@@ -96,11 +691,7 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
     var cargando by remember { mutableStateOf(true) }
     var mostrarFiltros by remember { mutableStateOf(false) }
     var pagoAEliminar by remember { mutableStateOf<PagoItem?>(null) }
-
-    // ===== NUEVO: estado del filtro Activos/Saldados =====
     var estadoFiltro by remember { mutableStateOf(EstadoFiltro.TODOS) }
-
-    // ===== NUEVO: estado para Vista Previa =====
     var mostrarPreview by remember { mutableStateOf(false) }
     var previewPagos by remember { mutableStateOf<List<PagoItem>>(emptyList()) }
     var previewPeriodo by remember { mutableStateOf("Todos los registros") }
@@ -109,57 +700,154 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
 
     val formatter = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
 
-    // FUNCIÓN PARA APLICAR FILTROS
     fun aplicarFiltros() {
         pagosFiltrados = pagos.filter { pago ->
+            // FILTRO CLIENTE
             val cumpleFiltroCliente = filtroCliente.isBlank() ||
                     pago.cliente.contains(filtroCliente, ignoreCase = true)
 
-            val cumpleFiltroCobrador = filtroCobradorId.isBlank() || run {
-                val cobradorDelPago = usuarios.find { it.nombre == pago.cobrador }?.id ?: pago.cobrador
-                cobradorDelPago == filtroCobradorId
+            // FILTRO COBRADOR
+            val cumpleFiltroCobrador = if (filtroCobradorId.isBlank() && filtroCobradorNombre.isBlank()) {
+                true
+            } else {
+                pago.cobradorId == filtroCobradorId ||
+                        pago.cobradorId.equals(filtroCobradorNombre, ignoreCase = true) ||
+                        pago.cobrador.equals(filtroCobradorNombre, ignoreCase = true) ||
+                        pago.cobrador.contains(filtroCobradorNombre, ignoreCase = true) ||
+                        pago.cobradorId.contains(filtroCobradorId, ignoreCase = true)
             }
 
+            // 🔥 FILTRO FECHA - VERSIÓN COMPLETAMENTE CORREGIDA Y SIMPLIFICADA
             val cumpleFiltroFecha = if (fechaInicio == null || fechaFin == null) {
                 true
             } else {
                 try {
-                    val fechaStr = pago.fecha.split(" ")[0]
-                    val fechaPago = formatter.parse(fechaStr)
-                    if (fechaPago != null) {
+                    // Extraer SOLO la parte de fecha del string "01/12/2024 02:30 PM"
+                    val partes = pago.fecha.trim().split(" ")
+                    val fechaStr = if (partes.isNotEmpty()) partes[0] else pago.fecha
+
+                    // Parsear la fecha del pago
+                    val fechaPagoDate = formatter.parse(fechaStr)
+
+                    if (fechaPagoDate != null) {
+                        // 🔥 SOLUCIÓN: Normalizar TODAS las fechas a medianoche (00:00:00.000)
                         val calPago = Calendar.getInstance().apply {
-                            time = fechaPago
-                            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+                            time = fechaPagoDate
+                            set(Calendar.HOUR_OF_DAY, 0)
+                            set(Calendar.MINUTE, 0)
+                            set(Calendar.SECOND, 0)
+                            set(Calendar.MILLISECOND, 0)
                         }
+
                         val calInicio = Calendar.getInstance().apply {
                             time = fechaInicio!!
-                            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+                            set(Calendar.HOUR_OF_DAY, 0)  // ✅ Medianoche
+                            set(Calendar.MINUTE, 0)
+                            set(Calendar.SECOND, 0)
+                            set(Calendar.MILLISECOND, 0)
                         }
+
+                        // 🔥 CAMBIO CRÍTICO: fechaFin también a medianoche
                         val calFin = Calendar.getInstance().apply {
                             time = fechaFin!!
-                            set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999)
+                            set(Calendar.HOUR_OF_DAY, 0)  // ✅ CAMBIO: antes era 23
+                            set(Calendar.MINUTE, 0)        // ✅ CAMBIO: antes era 59
+                            set(Calendar.SECOND, 0)        // ✅ CAMBIO: antes era 59
+                            set(Calendar.MILLISECOND, 0)   // ✅ CAMBIO: antes era 999
                         }
-                        calPago.timeInMillis >= calInicio.timeInMillis && calPago.timeInMillis <= calFin.timeInMillis
-                    } else true
+
+                        // Obtener tiempos en milisegundos
+                        val fechaPago = calPago.time
+                        val fechaIni = calInicio.time
+                        val fechaFn = calFin.time
+
+                        // 🔥 Comparación exacta: fechaPago >= fechaInicio Y fechaPago <= fechaFin
+                        val resultado = fechaPago >= fechaIni && fechaPago <= fechaFn
+
+                        // 🔥 LOG DE DEBUGGING MEJORADO (descomentar para diagnosticar)
+                        /*
+                        if (!resultado) {
+                            Log.d("FiltroFechaDetalle", """
+                                ❌ EXCLUIDO:
+                                Cliente: ${pago.cliente}
+                                Fecha original: "${pago.fecha}"
+                                Fecha extraída: "$fechaStr"
+                                Fecha parseada: ${formatter.format(fechaPago)}
+                                Rango filtro: ${formatter.format(fechaIni)} a ${formatter.format(fechaFn)}
+                                Millis - Pago: ${fechaPago.time}, Inicio: ${fechaIni.time}, Fin: ${fechaFn.time}
+                                Comparación: ${fechaPago.time} >= ${fechaIni.time} = ${fechaPago >= fechaIni}
+                                Comparación: ${fechaPago.time} <= ${fechaFn.time} = ${fechaPago <= fechaFn}
+                            """.trimIndent())
+                        }
+                        */
+
+                        resultado
+                    } else {
+                        Log.w("FiltroFecha", "⚠️ No se pudo parsear fecha: '$fechaStr' del pago: ${pago.cliente}")
+                        false // Excluir si no se puede parsear
+                    }
                 } catch (e: Exception) {
-                    Log.e("FiltroFecha", "Error parseando fecha: ${pago.fecha}", e)
-                    true
+                    Log.e("FiltroFecha", "❌ Error parseando fecha del pago ${pago.cliente}: ${e.message}")
+                    false // Excluir en caso de error
                 }
             }
 
-            // ===== NUEVO: Filtro por estado usando saldoRestante =====
+            // FILTRO ESTADO
             val cumpleEstado = when (estadoFiltro) {
                 EstadoFiltro.TODOS -> true
                 EstadoFiltro.ACTIVOS -> (pago.saldoRestante ?: 0.0) > 0.01
                 EstadoFiltro.SALDADOS -> (pago.saldoRestante ?: 0.0) <= 0.01
             }
 
+            // Resultado final del filtro
             cumpleFiltroCliente && cumpleFiltroCobrador && cumpleFiltroFecha && cumpleEstado
         }
-        Log.d("Filtros", "Filtros aplicados: ${pagosFiltrados.size} de ${pagos.size} pagos")
+
+        // 🔥 LOG DE RESUMEN (mantener activo para verificar)
+        Log.d("AplicarFiltros", """
+        ═══════════════════════════════════════════════════
+        📊 RESULTADO DE FILTROS:
+        ───────────────────────────────────────────────────
+        • Total pagos disponibles: ${pagos.size}
+        • Pagos después de filtrar: ${pagosFiltrados.size}
+        • Filtro de fechas: ${if (fechaInicio != null && fechaFin != null)
+            "ACTIVO (${formatter.format(fechaInicio)} → ${formatter.format(fechaFin)})"
+        else "INACTIVO"}
+        • Filtro de cliente: ${if (filtroCliente.isNotBlank()) "\"$filtroCliente\"" else "NINGUNO"}
+        • Filtro de cobrador: ${if (filtroCobradorNombre.isNotBlank()) "\"$filtroCobradorNombre\"" else "NINGUNO"}
+        • Estado: $estadoFiltro
+        ═══════════════════════════════════════════════════
+    """.trimIndent())
+
+        // 🔥 VERIFICACIÓN: Mostrar primeros 3 pagos incluidos
+        if (pagosFiltrados.isNotEmpty() && fechaInicio != null && fechaFin != null) {
+            Log.d("AplicarFiltros", """
+            ✅ PRIMEROS PAGOS INCLUIDOS:
+            ${pagosFiltrados.take(3).joinToString("\n") { pago ->
+                val fechaStr = pago.fecha.split(" ")[0]
+                "   • ${pago.cliente} - $fechaStr - ${formatearLempiras(pago.monto)}"
+            }}
+        """.trimIndent())
+        }
+
+        // 🔥 VERIFICACIÓN: Mostrar pagos excluidos si hay filtro de fecha activo
+        if (fechaInicio != null && fechaFin != null && pagosFiltrados.size < pagos.size) {
+            val excluidos = pagos.filter { pago ->
+                !pagosFiltrados.contains(pago)
+            }.take(3)
+
+            if (excluidos.isNotEmpty()) {
+                Log.d("AplicarFiltros", """
+                ⚠️ EJEMPLOS DE PAGOS EXCLUIDOS:
+                ${excluidos.joinToString("\n") { pago ->
+                    val fechaStr = pago.fecha.split(" ")[0]
+                    "   • ${pago.cliente} - $fechaStr - ${formatearLempiras(pago.monto)}"
+                }}
+            """.trimIndent())
+            }
+        }
     }
 
-    // FUNCIÓN PARA LIMPIAR FILTROS
     fun limpiarFiltros() {
         filtroCliente = ""
         filtroCobradorId = ""
@@ -168,10 +856,8 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
         fechaFin = null
         estadoFiltro = EstadoFiltro.TODOS
         pagosFiltrados = pagos
-        Log.d("Filtros", "Filtros limpiados")
     }
 
-    // Función para cargar usuarios
     fun cargarUsuarios() {
         scope.launch {
             try {
@@ -184,6 +870,14 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                             UsuarioItem(id = doc.id, nombre = nombre, rol = rolUsuario)
                         } else null
                     }.sortedBy { it.nombre }
+
+                    // 🔥 LOG DE USUARIOS CARGADOS
+                    Log.d("CargarUsuarios", """
+                    👥 USUARIOS CARGADOS:
+                    ${usuarios.joinToString("\n") { usuario ->
+                        "  • ${usuario.nombre} -> ${usuario.id.take(12)}..."
+                    }}
+                """.trimIndent())
                 }
             } catch (e: Exception) {
                 Log.e("CargarUsuarios", "Error: ${e.message}")
@@ -191,7 +885,6 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
         }
     }
 
-    // Función para cargar pagos
     fun cargarPagos() {
         scope.launch {
             try {
@@ -199,27 +892,113 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                 val prefs = context.getSharedPreferences("offline_data", Context.MODE_PRIVATE)
 
                 if (isInternetAvailable(context)) {
+                    Log.d("CargarPagos", "🔵 Iniciando carga...")
+
                     val usuariosDeferred = async {
                         db.collection("usuarios").get().await()
                             .associateBy({ it.id }, { it.getString("nombre") ?: it.id })
                     }
+
                     val prestamosDeferred = async {
                         db.collection("prestamos").get().await()
                             .associateBy({ it.id }, { it.data })
                     }
-                    val pagosDeferred = async { db.collection("pagos").get().await() }
+
+                    val pagosDeferred = async {
+                        val todosPagos = mutableListOf<com.google.firebase.firestore.DocumentSnapshot>()
+                        var lastDoc: com.google.firebase.firestore.DocumentSnapshot? = null
+                        val batchSize = 500L
+                        var hasMore = true
+
+                        while (hasMore) {
+                            val query = if (lastDoc == null) {
+                                db.collection("pagos").limit(batchSize)
+                            } else {
+                                db.collection("pagos").startAfter(lastDoc).limit(batchSize)
+                            }
+
+                            val snapshot = query.get().await()
+
+                            if (snapshot.documents.isEmpty()) {
+                                hasMore = false
+                            } else {
+                                todosPagos.addAll(snapshot.documents)
+                                lastDoc = snapshot.documents.lastOrNull()
+
+                                if (snapshot.documents.size < batchSize) {
+                                    hasMore = false
+                                }
+                            }
+                        }
+                        todosPagos
+                    }
 
                     val usuariosMap = usuariosDeferred.await()
                     val prestamos = prestamosDeferred.await()
-                    val snapshot = pagosDeferred.await()
+                    val todosLosDocs = pagosDeferred.await()
 
-                    Log.d("HistorialPagos", "Documentos encontrados: ${snapshot.documents.size}")
+                    Log.d("CargarPagos", """
+                    📊 DATOS CARGADOS:
+                    - Usuarios: ${usuariosMap.size}
+                    - Préstamos: ${prestamos.size}
+                    - Pagos: ${todosLosDocs.size}
+                """.trimIndent())
 
-                    pagos = snapshot.documents.mapNotNull { doc ->
+                    // 🔥 DIAGNÓSTICO: Analizar el campo "nombreCobrador" en TODOS los pagos
+                    val valoresCobradorEnPagos = todosLosDocs
+                        .mapNotNull { it.getString("nombreCobrador") ?: it.getString("cobrador") }
+                        .filter { it.isNotEmpty() }
+                        .groupBy { it }
+                        .mapValues { it.value.size }
+                        .toList()
+                        .sortedByDescending { it.second }
+
+                    Log.d("CargarPagos", """
+                    🔍 VALORES DE 'nombreCobrador' EN PAGOS:
+                    ${if (valoresCobradorEnPagos.isEmpty()) {
+                        "¡CAMPO 'nombreCobrador' VACÍO O NO EXISTE EN TODOS LOS PAGOS!"
+                    } else {
+                        valoresCobradorEnPagos.take(10).joinToString("\n") { (cobrador, cantidad) ->
+                            "  • '$cobrador' -> $cantidad pagos"
+                        }
+                    }}
+                """.trimIndent())
+
+                    // 🔥 Buscar específicamente pagos con "Figueroa"
+                    val pagosFigueroaDirectos = todosLosDocs.filter { doc ->
+                        val cobrador = doc.getString("nombreCobrador") ?: doc.getString("cobrador") ?: ""
+                        cobrador.contains("Figueroa", ignoreCase = true)
+                    }
+
+                    Log.d("CargarPagos", """
+                    💰 PAGOS CON "FIGUEROA" EN nombreCobrador:
+                    - Total encontrados: ${pagosFigueroaDirectos.size}
+                    ${pagosFigueroaDirectos.take(3).joinToString("\n") { doc ->
+                        val prestamoId = doc.getString("prestamoId") ?: ""
+                        val cliente = prestamos[prestamoId]?.get("cliente") as? String ?: "Sin cliente"
+                        val nombreCobrador = doc.getString("nombreCobrador") ?: ""
+                        val monto = doc.getDouble("monto") ?: 0.0
+                        "  • Cliente: $cliente | Monto: L$monto | nombreCobrador: '$nombreCobrador'"
+                    }}
+                """.trimIndent())
+
+                    // 🔥 DIAGNÓSTICO: Buscar préstamos de José Figueroa
+                    val prestamosFigueroa = prestamos.filter { (_, data) ->
+                        val cobrador = data?.get("cobrador") as? String ?: ""
+                        cobrador.contains("Figueroa", ignoreCase = true) ||
+                                cobrador.contains("993c0dff", ignoreCase = true)
+                    }
+
+                    Log.d("CargarPagos", """
+                    🏦 PRÉSTAMOS CON FIGUEROA ASIGNADO:
+                    - Total préstamos: ${prestamosFigueroa.size}
+                """.trimIndent())
+
+                    pagos = todosLosDocs.mapNotNull { doc ->
                         try {
-                            procesarDocumentoPagoMejorado(doc, usuariosMap, prestamos, rol, formatter)
+                            procesarDocumentoPagoMejorado(doc, usuariosMap, prestamos, formatter)
                         } catch (e: Exception) {
-                            Log.e("HistorialPagos", "Error procesando ${doc.id}: ${e.message}")
+                            Log.e("CargarPagos", "Error procesando: ${e.message}")
                             null
                         }
                     }.sortedByDescending {
@@ -228,7 +1007,23 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                         } catch (_: Exception) { 0L }
                     }
 
-                    Log.d("HistorialPagos", "Total procesados: ${pagos.size}")
+                    Log.d("CargarPagos", """
+                    ✅ PROCESAMIENTO COMPLETO:
+                    - Total pagos procesados: ${pagos.size}
+                    - Pagos de Figueroa: ${pagos.count {
+                        it.cobrador.contains("Figueroa", ignoreCase = true) ||
+                                it.cobradorId.contains("993c0dff", ignoreCase = true)
+                    }}
+                    
+                    Primeros 3 pagos de Figueroa:
+                    ${pagos.filter { it.cobrador.contains("Figueroa", ignoreCase = true) }
+                        .take(3)
+                        .joinToString("\n") { pago ->
+                            "  • Cliente: ${pago.cliente} | Cobrador: ${pago.cobrador} | ID: ${pago.cobradorId.take(12)}..."
+                        }
+                    }
+                """.trimIndent())
+
                     prefs.edit().putString("historial_pagos", Gson().toJson(pagos)).apply()
                 } else {
                     val json = prefs.getString("historial_pagos", "[]") ?: "[]"
@@ -239,10 +1034,35 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                 }
 
                 pagosFiltrados = pagos
+
             } catch (e: Exception) {
-                Log.e("HistorialPagos", "Error: ${e.message}")
-                Toast.makeText(context, "Error cargando pagos: ${e.message}", Toast.LENGTH_LONG).show()
-            } finally { cargando = false }
+                Log.e("CargarPagos", "ERROR: ${e.message}", e)
+                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                cargando = false
+            }
+        }
+    }
+
+    fun cargarCuotasPendientes() {
+        scope.launch {
+            try {
+                cargandoPendientes = true
+
+                if (isInternetAvailable(context)) {
+                    cuotasPendientesPorCliente = obtenerTodasLasCuotasPendientes(
+                        db = db,
+                        filtroCliente = filtroCliente,
+                        filtroCobradorId = filtroCobradorId
+                    )
+                } else {
+                    Toast.makeText(context, "Requiere conexión para ver pendientes", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                cargandoPendientes = false
+            }
         }
     }
 
@@ -263,7 +1083,13 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                     IconButton(onClick = { mostrarFiltros = !mostrarFiltros }) {
                         Icon(Icons.Default.FilterList, contentDescription = "Filtros", tint = Color.White)
                     }
-                    IconButton(onClick = { cargarPagos() }) {
+                    IconButton(onClick = {
+                        if (mostrandoPendientes) {
+                            cargarCuotasPendientes()
+                        } else {
+                            cargarPagos()
+                        }
+                    }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Actualizar", tint = Color.White)
                     }
                 }
@@ -271,7 +1097,20 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
         }
     ) { padding ->
         if (cargando) {
-            LoadingScreen(padding)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    CircularProgressIndicator(color = Color(0xFF0061A7), strokeWidth = 3.dp)
+                    Text("Cargando historial...", color = Color.Gray, fontSize = 14.sp)
+                }
+            }
         } else {
             LazyColumn(
                 modifier = Modifier
@@ -280,6 +1119,38 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(16.dp)
             ) {
+                item {
+                    OutlinedTextField(
+                        value = filtroCliente,
+                        onValueChange = {
+                            filtroCliente = it
+                            aplicarFiltros()
+                        },
+                        label = { Text("Buscar cliente...") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Search, contentDescription = null)
+                        },
+                        trailingIcon = {
+                            if (filtroCliente.isNotEmpty()) {
+                                IconButton(onClick = {
+                                    filtroCliente = ""
+                                    aplicarFiltros()
+                                }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "Limpiar")
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF0061A7),
+                            focusedLabelColor = Color(0xFF0061A7),
+                            focusedLeadingIconColor = Color(0xFF0061A7)
+                        )
+                    )
+                }
+
                 if (mostrarFiltros) {
                     item {
                         FiltrosCard(
@@ -290,6 +1161,7 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                             onCobradorChange = { id, nombre ->
                                 filtroCobradorId = id
                                 filtroCobradorNombre = nombre
+                                Log.d("CambioCobradorFiltro", "Nuevo cobrador: $nombre (ID: $id)")
                                 aplicarFiltros()
                             },
                             fechaInicio = fechaInicio,
@@ -320,22 +1192,187 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                     }
                 }
 
-                if (pagosFiltrados.isNotEmpty()) {
-                    item { StatsCard(pagosFiltrados) }
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            FilterChip(
+                                selected = !mostrandoPendientes,
+                                onClick = { mostrandoPendientes = false },
+                                label = { Text("Pagos Realizados (${pagosFiltrados.size})") },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Color(0xFF4CAF50).copy(alpha = 0.18f),
+                                    selectedLabelColor = Color(0xFF2E7D32),
+                                    selectedLeadingIconColor = Color(0xFF2E7D32)
+                                ),
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            FilterChip(
+                                selected = mostrandoPendientes,
+                                onClick = {
+                                    mostrandoPendientes = true
+                                    if (cuotasPendientesPorCliente.isEmpty()) {
+                                        cargarCuotasPendientes()
+                                    }
+                                },
+                                label = { Text("Pagos Pendientes") },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Schedule,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Color(0xFFFF9800).copy(alpha = 0.18f),
+                                    selectedLabelColor = Color(0xFFE65100),
+                                    selectedLeadingIconColor = Color(0xFFE65100)
+                                ),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
                 }
 
-                if (pagosFiltrados.isEmpty()) {
-                    item { EmptyStateCard() }
-                } else {
-                    items(items = pagosFiltrados, key = { it.docId }) { pago ->
-                        PagoCard(
-                            pago = pago,
-                            rol = rol,
-                            onEliminar = { pagoAEliminar = pago },
-                            onReimprimir = {
-                                scope.launch { reimprimirRecibo(context, pago) }
+                if (mostrandoPendientes) {
+                    item {
+                        Button(
+                            onClick = {
+                                if (cuotasPendientesPorCliente.isEmpty()) {
+                                    Toast.makeText(context, "No hay pagos pendientes para exportar", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+                                scope.launch {
+                                    try {
+                                        val archivo = ReciboHelper.generarResumenCuotasPendientesPDF(
+                                            context = context,
+                                            cuotasPorCliente = cuotasPendientesPorCliente,
+                                            filtroCliente = filtroCliente,
+                                            filtroCobradorNombre = filtroCobradorNombre
+                                        )
+                                        if (archivo != null && archivo.exists()) {
+                                            val printed = ReciboHelper.imprimirPDF(context, archivo)
+                                            if (!printed) ReciboHelper.compartirReciboPDF(context, archivo)
+                                            Toast.makeText(context, "PDF de pendientes generado", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(context, "No se pudo generar el PDF", Toast.LENGTH_LONG).show()
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e("ExportarPendientes", "Error: ${e.message}", e)
+                                        Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFFF9800)
+                            )
+                        ) {
+                            Icon(
+                                Icons.Default.PictureAsPdf,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Exportar Pendientes a PDF")
+                        }
+                    }
+
+                    if (cargandoPendientes) {
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = Color.White)
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(40.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    CircularProgressIndicator(color = Color(0xFF0061A7))
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text("Cargando cuotas pendientes...", color = Color.Gray)
+                                }
                             }
-                        )
+                        }
+                    } else if (cuotasPendientesPorCliente.isEmpty()) {
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E8))
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(40.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text("✅", fontSize = 48.sp)
+                                    Text(
+                                        "¡No hay pagos pendientes!",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 18.sp,
+                                        color = Color(0xFF2E7D32)
+                                    )
+                                    Text(
+                                        "Todos los préstamos están al día",
+                                        fontSize = 14.sp,
+                                        color = Color.Gray
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        cuotasPendientesPorCliente.forEach { (cliente, cuotas) ->
+                            item {
+                                Text(
+                                    cliente,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0061A7),
+                                    modifier = Modifier.padding(vertical = 8.dp)
+                                )
+                            }
+
+                            items(cuotas) { cuota ->
+                                CuotaPendienteCard(cuota)
+                            }
+                        }
+                    }
+                } else {
+                    if (pagosFiltrados.isNotEmpty()) {
+                        item { StatsCard(pagosFiltrados) }
+                    }
+
+                    if (pagosFiltrados.isEmpty()) {
+                        item { EmptyStateCard() }
+                    } else {
+                        items(items = pagosFiltrados, key = { it.docId }) { pago ->
+                            PagoCard(
+                                pago = pago,
+                                rol = rol,
+                                onEliminar = { pagoAEliminar = pago },
+                                onReimprimir = {
+                                    scope.launch { reimprimirRecibo(context, pago) }
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -358,33 +1395,47 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
             )
         }
 
-        // ===== NUEVO: VISTA PREVIA (no crea pantalla nueva; bottom sheet con scroll)
         if (mostrarPreview) {
             ReportePagosPreview(
                 pagos = previewPagos,
                 periodo = previewPeriodo,
                 fechaInicio = previewFechaInicio,
                 fechaFin = previewFechaFin,
+                esSaldados = estadoFiltro == EstadoFiltro.SALDADOS,
                 onCerrar = { mostrarPreview = false },
-                onExportar = { pagosAExportar, fi, ff, periodoStr ->
+                onExportar = { pagosAExportar, fi, ff, periodoStr, esSaldados ->
                     scope.launch {
                         try {
-                            val archivo = ReciboHelper.generarResumenPagosPDF(
-                                context = context,
-                                pagos = pagosAExportar,
-                                fechaInicio = fi ?: Date(0),
-                                fechaFin = ff ?: Date(),
-                                periodo = periodoStr
-                            )
+                            val archivo = if (esSaldados) {
+                                // PDF para préstamos saldados
+                                ReciboHelper.generarResumenPrestamosSaldadosPDF(
+                                    context = context,
+                                    pagos = pagosAExportar,
+                                    fechaInicio = fi,
+                                    fechaFin = ff,
+                                    periodo = periodoStr
+                                )
+                            } else {
+                                // PDF normal de pagos
+                                ReciboHelper.generarResumenPagosPDF(
+                                    context = context,
+                                    pagos = pagosAExportar,
+                                    fechaInicio = fi ?: Date(0),
+                                    fechaFin = ff ?: Date(),
+                                    periodo = periodoStr
+                                )
+                            }
+
                             if (archivo != null && archivo.exists()) {
                                 val printed = ReciboHelper.imprimirPDF(context, archivo)
                                 if (!printed) ReciboHelper.compartirReciboPDF(context, archivo)
-                                Toast.makeText(context, "PDF generado", Toast.LENGTH_SHORT).show()
+                                val mensaje = if (esSaldados) "PDF de préstamos saldados generado" else "PDF generado"
+                                Toast.makeText(context, mensaje, Toast.LENGTH_SHORT).show()
                             } else {
                                 Toast.makeText(context, "No se pudo generar el PDF", Toast.LENGTH_LONG).show()
                             }
                         } catch (e: Exception) {
-                            Log.e("PreviewExport", "Error: ${e.message}", e)
+                            Log.e("ExportarPDF", "Error: ${e.message}", e)
                             Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
                         }
                     }
@@ -394,545 +1445,180 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
     }
 }
 
-// ===== FUNCIÓN FORMATEAR LEMPIRAS =====
-fun formatearLempiras(valor: Double): String {
-    return "L. %, .2f".format(Locale("es", "HN"), valor).replace(", .", ",")
-}
+// ============================================================================
+// PARTE 2: COMPOSABLES - Añadir al final del archivo HistorialPagosScreen.kt
+// ============================================================================
 
-// ===== FUNCIÓN MEJORADA PARA PROCESAR PAGOS CON CUOTAS MÚLTIPLES =====
-private fun procesarDocumentoPagoMejorado(
-    doc: com.google.firebase.firestore.DocumentSnapshot,
-    usuarios: Map<String, String>,
-    prestamos: Map<String, Map<String, Any>>,
-    rol: String,
-    formatter: SimpleDateFormat
-): PagoItem? {
-    try {
-        val clienteNombre = doc.getString("clienteNombre") ?: doc.getString("cliente") ?: return null
-        val monto = doc.getDouble("monto") ?: doc.getDouble("montoPagado") ?: return null
-        val mora = doc.getDouble("mora") ?: 0.0
-        val interesTotal = doc.getDouble("interesTotal") ?: doc.getDouble("interes") ?: 0.0
-        val prestamoId = doc.getString("prestamoId") ?: return null
-        val cobradorId = doc.getString("registradoPor") ?: doc.getString("cobrador") ?: "Desconocido"
-
-        val metodoPago = doc.getString("metodoPago") ?: doc.getString("tipoPago") ?: "Efectivo"
-        val esAbonoParcial = doc.getBoolean("esAbonoParcial") ?: false
-
-        val tipoPagoFinal = when {
-            esAbonoParcial -> "Abono Parcial"
-            metodoPago == "Manual (Admin)" -> "Manual (Admin)"
-            else -> metodoPago
-        }
-
-        // ===== PROCESAMIENTO DE CUOTAS MEJORADO =====
-        val cuotasCubiertas = doc.get("cuotasCubiertas") as? List<*>
-        val cuotaDescripcion = if (cuotasCubiertas != null && cuotasCubiertas.isNotEmpty()) {
-            try {
-                data class CuotaDetalle(val numero: Int, val completada: Boolean)
-                val cuotasDetalle = mutableListOf<CuotaDetalle>()
-                cuotasCubiertas.forEach { cuotaData ->
-                    if (cuotaData is Map<*, *>) {
-                        val numeroCuota = (cuotaData["numeroCuota"] as? Number)?.toInt() ?: 0
-                        val completada = cuotaData["completada"] as? Boolean ?: false
-                        if (numeroCuota > 0) cuotasDetalle.add(CuotaDetalle(numeroCuota, completada))
-                    }
-                }
-                cuotasDetalle.sortBy { it.numero }
-                when {
-                    cuotasDetalle.isEmpty() -> "Sin cuotas"
-                    cuotasDetalle.size == 1 -> {
-                        val c = cuotasDetalle.first()
-                        if (c.completada) "#${c.numero}" else "#${c.numero} parcial"
-                    }
-                    cuotasDetalle.size == 2 -> {
-                        val c1 = cuotasDetalle[0]; val c2 = cuotasDetalle[1]
-                        buildString {
-                            append("#${c1.numero}"); if (!c1.completada) append(" parcial")
-                            append(", #${c2.numero}"); if (!c2.completada) append(" parcial")
-                        }
-                    }
-                    cuotasDetalle.size == 3 -> {
-                        buildString {
-                            cuotasDetalle.forEachIndexed { i, c ->
-                                if (i > 0) append(", ")
-                                append("#${c.numero}"); if (!c.completada) append(" parcial")
-                            }
-                        }
-                    }
-                    else -> {
-                        val nums = cuotasDetalle.map { it.numero }
-                        val todas = cuotasDetalle.all { it.completada }
-                        if (sonConsecutivas(nums) && todas) {
-                            "#${nums.first()} a #${nums.last()}"
-                        } else {
-                            val c1 = cuotasDetalle[0]; val c2 = cuotasDetalle[1]; val u = cuotasDetalle.last()
-                            buildString {
-                                append("#${c1.numero}"); if (!c1.completada) append(" parcial")
-                                append(", #${c2.numero}"); if (!c2.completada) append(" parcial")
-                                append("...#${u.numero}"); if (!u.completada) append(" parcial")
-                            }
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("ProcesarPago", "Error cuotasCubiertas: ${e.message}", e)
-                "Múltiples cuotas"
-            }
-        } else {
-            doc.getString("descripcionCuotas")
-                ?: doc.get("numeroCuota")?.toString()
-                ?: doc.get("cuota")?.toString()
-                ?: "1"
-        }
-
-        val lugar = doc.getString("lugar") ?: ""
-        val firma = doc.getString("firma") ?: ""
-
-        val saldoRestante = if (esAbonoParcial) {
-            val montoRestanteAntes = doc.getDouble("montoRestanteAntes") ?: 0.0
-            (montoRestanteAntes - monto).coerceAtLeast(0.0)
-        } else {
-            doc.getDouble("saldoRestante") ?: 0.0
-        }
-
-        val fecha = try {
-            when (val f = doc.get("fechaPago") ?: doc.get("fecha") ?: doc.get("fechaCreacion")) {
-                is Timestamp -> formatter.format(f.toDate())
-                is String -> {
-                    if (f.matches(Regex("\\d{2}/\\d{2}/\\d{4}"))) f
-                    else {
-                        try {
-                            val input = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-                            input.parse(f)?.let { formatter.format(it) } ?: f
-                        } catch (_: Exception) { f }
-                    }
-                }
-                else -> formatter.format(Date())
-            }
-        } catch (_: Exception) { formatter.format(Date()) }
-
-        val nombreCobrador = usuarios[cobradorId] ?: cobradorId
-        if (rol != "admin" && cobradorId != rol) return null
-
-        val datosPrestamoInt = prestamos[prestamoId]
-        val numeroPrestamo = (datosPrestamoInt?.get("numeroPrestamo") as? Long ?: 0L).toInt()
-
-        val cuotasCubiertasSize = doc.get("cuotasCubiertas") as? List<*>
-        if (cuotasCubiertasSize != null && cuotasCubiertasSize.size > 1) {
-            Log.d("HistorialPagos", "MÚLTIPLES CUOTAS: $clienteNombre - $cuotaDescripcion - L.${String.format("%.2f", monto)}")
-        }
-
-        return PagoItem(
-            docId = doc.id,
-            cliente = clienteNombre,
-            prestamoId = prestamoId,
-            fecha = fecha,
-            monto = monto,
-            mora = mora,
-            interesTotal = interesTotal,
-            cuota = cuotaDescripcion,
-            cobrador = nombreCobrador,
-            lugar = lugar,
-            firma = firma,
-            tipoPago = tipoPagoFinal,
-            saldoRestante = saldoRestante,
-            numeroPrestamo = numeroPrestamo
-        )
-    } catch (e: Exception) {
-        Log.e("ProcesarPago", "Error: ${e.message}", e)
-        return null
-    }
-}
-
-// ===== FUNCIÓN AUXILIAR =====
-private fun sonConsecutivas(numeros: List<Int>): Boolean {
-    if (numeros.size <= 1) return true
-    val ord = numeros.sorted()
-    for (i in 0 until ord.size - 1) if (ord[i + 1] - ord[i] != 1) return false
-    return true
-}
-
-// ===== FUNCIÓN DE REIMPRESIÓN =====
-private suspend fun reimprimirRecibo(context: Context, pago: PagoItem) {
-    try {
-        Toast.makeText(context, "Generando recibo...", Toast.LENGTH_SHORT).show()
-        val db = FirebaseFirestore.getInstance()
-
-        // Traer datos del préstamo para conocer proximoPago y saldo (estado actual)
-        val prestamoDoc = db.collection("prestamos")
-            .document(pago.prestamoId)
-            .get()
-            .await()
-
-        // Parse de fecha flexible
-        fun parseFecha(any: Any?): String? {
-            val out = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-            return when (any) {
-                is com.google.firebase.Timestamp -> out.format(any.toDate())
-                is Date -> out.format(any)
-                is String -> {
-                    runCatching { out.format(SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).parse(any)!!) }
-                        .getOrElse {
-                            runCatching { out.format(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(any)!!) }
-                                .getOrNull()
-                        }
-                }
-                else -> null
-            }
-        }
-
-        // Acepta varios nombres de campo por si varía en Firestore
-        val proxRaw =
-            prestamoDoc.get("proximoPago")
-                ?: prestamoDoc.get("proxPago")
-                ?: prestamoDoc.get("proximo_pago")
-                ?: prestamoDoc.get("fechaProximoPago")
-
-        val saldoPrestamoActual = prestamoDoc.getDouble("saldo") ?: (pago.saldoRestante ?: 0.0)
-
-        // Qué imprimir en el campo "Próximo pago"
-        val proximoPagoStr = if (saldoPrestamoActual <= 0.01) {
-            "SALDADO"
-        } else {
-            parseFecha(proxRaw) ?: "—"
-        }
-
-        // Saldos para el PDF (mostramos el antes y el nuevo saldo según el pago reimpreso)
-        val saldoAnterior = (pago.saldoRestante ?: 0.0) + pago.monto
-        val nuevoSaldo = pago.saldoRestante ?: saldoPrestamoActual
-
-        // Texto de cuota para el recibo
-        val cuotaParaRecibo = when {
-            pago.cuota.contains(" a ") -> "Cuotas ${pago.cuota}"
-            pago.cuota.contains(",") -> "Cuotas ${pago.cuota}"
-            pago.cuota.contains("parcial", ignoreCase = true) -> "Cuota ${pago.cuota}"
-            pago.cuota.startsWith("#") -> "Cuota ${pago.cuota}"
-            else -> "Cuota #${pago.cuota}"
-        }
-
-        val file = ReciboHelper.generarReciboPDF(
-            context = context,
-            cliente = pago.cliente,
-            prestamoId = if (pago.numeroPrestamo > 0) "Préstamo Nº ${pago.numeroPrestamo}" else pago.prestamoId,
-            fecha = pago.fecha,
-            montoPagado = pago.monto.toString(),
-            saldoAnterior = saldoAnterior,
-            proximoPago = proximoPagoStr,   // ← fecha o “SALDADO”/“—”
-            cuota = cuotaParaRecibo,
-            cobrador = pago.cobrador,
-            lugar = pago.lugar,
-            firma = pago.firma,
-            tipoPago = pago.tipoPago,
-            mora = pago.mora,
-            saldoNuevoFijo = nuevoSaldo
-        )
-
-        if (file != null && file.exists()) {
-            val printed = ReciboHelper.imprimirPDF(context, file)
-            if (!printed) ReciboHelper.compartirReciboPDF(context, file)
-            Toast.makeText(context, "Recibo generado", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(context, "Error al generar PDF", Toast.LENGTH_LONG).show()
-        }
-    } catch (e: Exception) {
-        Log.e("REIMPRIMIR", "Error: ${e.message}", e)
-        Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
-    }
-}
-
-// ===== ELIMINAR PAGO =====
-private suspend fun eliminarPagoCorregido(
-    context: Context,
-    db: FirebaseFirestore,
-    pago: PagoItem,
-    onComplete: () -> Unit
-) {
-    try {
-        db.collection("pagos").document(pago.docId).delete().await()
-
-        val pagosRestantes = db.collection("pagos")
-            .whereEqualTo("prestamoId", pago.prestamoId)
-            .get().await().documents
-
-        val nuevoMontoPagado = pagosRestantes.sumOf { it.getDouble("monto") ?: 0.0 }
-
-        val prestamoRef = db.collection("prestamos").document(pago.prestamoId)
-        val prestamoDoc = prestamoRef.get().await()
-        val montoPrestado = prestamoDoc.getDouble("monto") ?: 0.0
-        val interesTotal = prestamoDoc.getDouble("interesTotal") ?: prestamoDoc.getDouble("interes") ?: 0.0
-        val totalPagar = montoPrestado + interesTotal
-        val nuevoSaldo = (totalPagar - nuevoMontoPagado).coerceAtLeast(0.0)
-        val nuevoEstado = if (nuevoSaldo <= 0.01) "saldado" else "activo"
-
-        prestamoRef.update(
-            mapOf(
-                "saldo" to nuevoSaldo,
-                "estado" to nuevoEstado,
-                "pagos" to nuevoMontoPagado,
-                "montoPagado" to nuevoMontoPagado
-            )
-        ).await()
-
-        PrestamoStateManager.updateSaldo(pago.prestamoId, nuevoSaldo)
-        PrestamoStateManager.notifyPrestamoUpdate(pago.prestamoId, db, context)
-
-        Toast.makeText(context, "Pago eliminado", Toast.LENGTH_SHORT).show()
-        onComplete()
-    } catch (e: Exception) {
-        Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
-    }
-}
-
-// ===== COMPONENTES UI =====
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun FiltrosCard(
-    filtroCliente: String,
-    onFiltroClienteChange: (String) -> Unit,
-    usuarios: List<UsuarioItem>,
-    filtroCobradorNombre: String,
-    onCobradorChange: (String, String) -> Unit,
-    fechaInicio: Date?,
-    fechaFin: Date?,
-    onFechasChange: (Date?, Date?) -> Unit,
-    // ===== NUEVO: props estado =====
-    estadoFiltro: EstadoFiltro,
-    onEstadoChange: (EstadoFiltro) -> Unit,
-    onLimpiar: () -> Unit,
-    pagosFiltrados: List<PagoItem>,
-    formatter: SimpleDateFormat,
-    context: Context,
-    scope: kotlinx.coroutines.CoroutineScope,
-    // ===== NUEVO: callback vista previa =====
-    onPreview: (List<PagoItem>, Date?, Date?, String) -> Unit
-) {
+fun StatsCard(pagos: List<PagoItem>) {
+    val totalRecaudado = pagos.sumOf { it.monto }
+    val totalMora = pagos.sumOf { it.mora }
+    val totalGeneral = totalRecaudado + totalMora
+    val cantidadPagos = pagos.size
+    val prestamosUnicos = pagos.distinctBy { it.prestamoId }.size
+    val pagosActivos = pagos.count { (it.saldoRestante ?: 0.0) > 0.01 }
+    val pagosSaldados = pagos.count { (it.saldoRestante ?: 0.0) <= 0.01 }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF8F9FA)),
-        shape = RoundedCornerShape(16.dp)
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0061A7)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(
-                "Filtros de búsqueda",
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp,
-                color = Color(0xFF0061A7)
-            )
-
-            OutlinedTextField(
-                value = filtroCliente,
-                onValueChange = onFiltroClienteChange,
-                label = { Text("Buscar cliente") },
-                placeholder = { Text("Nombre del cliente...") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp)
-            )
-
-            // ===== NUEVO: Botones de estado (Todos / Activos / Saldados)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                EstadoChip(
-                    text = "Todos",
-                    selected = estadoFiltro == EstadoFiltro.TODOS,
-                    onClick = { onEstadoChange(EstadoFiltro.TODOS) },
-                    color = Color(0xFF607D8B),
-                    icon = Icons.Default.ViewList
+                Icon(
+                    Icons.Default.Assessment,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
                 )
-                EstadoChip(
-                    text = "Activos",
-                    selected = estadoFiltro == EstadoFiltro.ACTIVOS,
-                    onClick = { onEstadoChange(EstadoFiltro.ACTIVOS) },
-                    color = Color(0xFF2E7D32),
-                    icon = Icons.Default.Task
-                )
-                EstadoChip(
-                    text = "Saldados",
-                    selected = estadoFiltro == EstadoFiltro.SALDADOS,
-                    onClick = { onEstadoChange(EstadoFiltro.SALDADOS) },
-                    color = Color(0xFF1565C0),
-                    icon = Icons.Default.CheckCircle
+                Text(
+                    "Resumen de Pagos",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
                 )
             }
 
-            CobradorDropdown(
-                usuarios = usuarios,
-                filtroCobradorNombre = filtroCobradorNombre,
-                onCobradorChange = onCobradorChange
-            )
+            HorizontalDivider(color = Color.White.copy(alpha = 0.3f))
 
-            FechaSelectorMejorado(
-                fechaInicio = fechaInicio,
-                fechaFin = fechaFin,
-                onFechasChange = onFechasChange
-            )
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color.White.copy(alpha = 0.15f),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "TOTAL RECAUDADO",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.9f)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        formatearLempiras(totalGeneral),
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Button(
-                    onClick = onLimpiar,
+                Column(
                     modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6C757D)),
-                    shape = RoundedCornerShape(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Limpiar", fontSize = 13.sp)
+                    StatItem(
+                        label = "Capital",
+                        value = formatearLempiras(totalRecaudado),
+                        icon = Icons.Default.Money
+                    )
+                    StatItem(
+                        label = "Mora",
+                        value = formatearLempiras(totalMora),
+                        icon = Icons.Default.Warning,
+                        valueColor = Color(0xFFFFB74D)
+                    )
                 }
 
-                // ===== NUEVO: VISTA PREVIA (no exporta aún, solo abre la vista con scroll)
-                Button(
-                    onClick = {
-                        if (pagosFiltrados.isEmpty()) {
-                            Toast.makeText(context, "No hay pagos para previsualizar", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-
-                        val fechaInicioReporte = fechaInicio ?: run {
-                            pagosFiltrados.minByOrNull { pago ->
-                                try { formatter.parse(pago.fecha.split(" ")[0])?.time ?: Long.MAX_VALUE }
-                                catch (_: Exception) { Long.MAX_VALUE }
-                            }?.let { pago -> formatter.parse(pago.fecha.split(" ")[0]) } ?: Date(0)
-                        }
-
-                        val fechaFinReporte = fechaFin ?: run {
-                            pagosFiltrados.maxByOrNull { pago ->
-                                try { formatter.parse(pago.fecha.split(" ")[0])?.time ?: 0L }
-                                catch (_: Exception) { 0L }
-                            }?.let { pago -> formatter.parse(pago.fecha.split(" ")[0]) } ?: Date()
-                        }
-
-                        val periodo = buildString {
-                            val filtrosAplicados = mutableListOf<String>()
-                            if (estadoFiltro != EstadoFiltro.TODOS) {
-                                filtrosAplicados.add("Estado: ${when (estadoFiltro) {
-                                    EstadoFiltro.ACTIVOS -> "Activos"
-                                    EstadoFiltro.SALDADOS -> "Saldados"
-                                    else -> "Todos"
-                                }}")
-                            }
-                            if (filtroCliente.isNotBlank()) filtrosAplicados.add("Cliente: $filtroCliente")
-                            if (filtroCobradorNombre.isNotBlank()) filtrosAplicados.add("Cobrador: $filtroCobradorNombre")
-                            if (fechaInicio != null && fechaFin != null) {
-                                filtrosAplicados.add("Fechas: ${formatter.format(fechaInicio)} - ${formatter.format(fechaFin)}")
-                            }
-                            if (filtrosAplicados.isNotEmpty()) append(filtrosAplicados.joinToString(" | "))
-                            else append("Todos los registros")
-                        }
-
-                        onPreview(pagosFiltrados, fechaInicioReporte, fechaFinReporte, periodo)
-                    },
+                Column(
                     modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0)),
-                    shape = RoundedCornerShape(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Vista previa (${pagosFiltrados.size})", fontSize = 12.sp)
-                }
-
-                // ===== Botón PDF directo (opcional, lo dejamos)
-                Button(
-                    onClick = {
-                        if (pagosFiltrados.isEmpty()) {
-                            Toast.makeText(context, "No hay pagos para exportar", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-
-                        scope.launch {
-                            try {
-                                val fechaInicioReporte = fechaInicio ?: run {
-                                    pagosFiltrados.minByOrNull { pago ->
-                                        try { formatter.parse(pago.fecha.split(" ")[0])?.time ?: Long.MAX_VALUE }
-                                        catch (_: Exception) { Long.MAX_VALUE }
-                                    }?.let { pago -> formatter.parse(pago.fecha.split(" ")[0]) } ?: Date(0)
-                                }
-
-                                val fechaFinReporte = fechaFin ?: run {
-                                    pagosFiltrados.maxByOrNull { pago ->
-                                        try { formatter.parse(pago.fecha.split(" ")[0])?.time ?: 0L }
-                                        catch (_: Exception) { 0L }
-                                    }?.let { pago -> formatter.parse(pago.fecha.split(" ")[0]) } ?: Date()
-                                }
-
-                                val periodo = buildString {
-                                    val filtrosAplicados = mutableListOf<String>()
-                                    if (estadoFiltro != EstadoFiltro.TODOS) {
-                                        filtrosAplicados.add("Estado: ${when (estadoFiltro) {
-                                            EstadoFiltro.ACTIVOS -> "Activos"
-                                            EstadoFiltro.SALDADOS -> "Saldados"
-                                            else -> "Todos"
-                                        }}")
-                                    }
-                                    if (filtroCliente.isNotBlank()) filtrosAplicados.add("Cliente: $filtroCliente")
-                                    if (filtroCobradorNombre.isNotBlank()) filtrosAplicados.add("Cobrador: $filtroCobradorNombre")
-                                    if (fechaInicio != null && fechaFin != null) {
-                                        filtrosAplicados.add("Fechas: ${formatter.format(fechaInicio)} - ${formatter.format(fechaFin)}")
-                                    }
-                                    if (filtrosAplicados.isNotEmpty()) append(filtrosAplicados.joinToString(" | "))
-                                    else append("Todos los registros")
-                                }
-
-                                val archivoPDF = ReciboHelper.generarResumenPagosPDF(
-                                    context = context,
-                                    pagos = pagosFiltrados,
-                                    fechaInicio = fechaInicioReporte,
-                                    fechaFin = fechaFinReporte,
-                                    periodo = periodo
-                                )
-
-                                if (archivoPDF != null && archivoPDF.exists()) {
-                                    val printed = ReciboHelper.imprimirPDF(context, archivoPDF)
-                                    if (!printed) ReciboHelper.compartirReciboPDF(context, archivoPDF)
-                                    Toast.makeText(
-                                        context,
-                                        "PDF generado: ${pagosFiltrados.size} registros",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                } else {
-                                    Toast.makeText(context, "Error al generar PDF", Toast.LENGTH_SHORT).show()
-                                }
-                            } catch (e: Exception) {
-                                Log.e("ExportarPDF", "Error: ${e.message}", e)
-                                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Default.Print, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("PDF (${pagosFiltrados.size})", fontSize = 12.sp)
+                    StatItem(
+                        label = "Total Pagos",
+                        value = cantidadPagos.toString(),
+                        icon = Icons.Default.Receipt
+                    )
+                    StatItem(
+                        label = "Préstamos",
+                        value = prestamosUnicos.toString(),
+                        icon = Icons.Default.CreditCard
+                    )
                 }
             }
 
-            if (filtroCliente.isNotBlank() || filtroCobradorNombre.isNotBlank() || fechaInicio != null || estadoFiltro != EstadoFiltro.TODOS) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD)),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    color = Color(0xFF4CAF50).copy(alpha = 0.3f),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Filtros aplicados:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1565C0))
-                        Text("• Estado: ${when (estadoFiltro) {
-                            EstadoFiltro.TODOS -> "Todos"
-                            EstadoFiltro.ACTIVOS -> "Activos"
-                            EstadoFiltro.SALDADOS -> "Saldados"
-                        }}", fontSize = 11.sp, color = Color(0xFF1976D2))
-                        if (filtroCliente.isNotBlank()) Text("• Cliente: $filtroCliente", fontSize = 11.sp, color = Color(0xFF1976D2))
-                        if (filtroCobradorNombre.isNotBlank()) Text("• Cobrador: $filtroCobradorNombre", fontSize = 11.sp, color = Color(0xFF1976D2))
-                        if (fechaInicio != null && fechaFin != null) Text("• Fechas: ${formatter.format(fechaInicio)} - ${formatter.format(fechaFin)}", fontSize = 11.sp, color = Color(0xFF1976D2))
-                        Text("Mostrando ${pagosFiltrados.size} registro(s)", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color(0xFF2E7D32))
+                    Row(
+                        modifier = Modifier.padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF81C784),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Column {
+                            Text(
+                                pagosSaldados.toString(),
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                "Saldados",
+                                fontSize = 10.sp,
+                                color = Color.White.copy(alpha = 0.9f)
+                            )
+                        }
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    color = Color(0xFFFF9800).copy(alpha = 0.3f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.TrendingUp,
+                            contentDescription = null,
+                            tint = Color(0xFFFFB74D),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Column {
+                            Text(
+                                pagosActivos.toString(),
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                "Activos",
+                                fontSize = 10.sp,
+                                color = Color.White.copy(alpha = 0.9f)
+                            )
+                        }
                     }
                 }
             }
@@ -941,73 +1627,40 @@ private fun FiltrosCard(
 }
 
 @Composable
-private fun EstadoChip(
-    text: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    color: Color,
-    icon: androidx.compose.ui.graphics.vector.ImageVector
+fun StatItem(
+    label: String,
+    value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    valueColor: Color = Color.White
 ) {
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        label = { Text(text) },
-        leadingIcon = { Icon(icon, contentDescription = null) },
-        colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = color.copy(alpha = 0.18f),
-            selectedLabelColor = color,
-            selectedLeadingIconColor = color
-        )
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun CobradorDropdown(
-    usuarios: List<UsuarioItem>,
-    filtroCobradorNombre: String,
-    onCobradorChange: (String, String) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-
-    Box {
-        OutlinedTextField(
-            value = filtroCobradorNombre.ifBlank { "Todos los cobradores" },
-            onValueChange = { },
-            readOnly = true,
-            label = { Text("Cobrador") },
-            leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
-            trailingIcon = {
-                Icon(
-                    Icons.Default.ArrowDropDown,
-                    contentDescription = null,
-                    modifier = Modifier.clickable { expanded = !expanded }
-                )
-            },
+    Surface(
+        color = Color.White.copy(alpha = 0.1f),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { expanded = !expanded },
-            shape = RoundedCornerShape(8.dp)
-        )
-
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
+                .padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            DropdownMenuItem(
-                text = { Text("Todos los cobradores") },
-                onClick = {
-                    onCobradorChange("", "")
-                    expanded = false
-                }
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.8f),
+                modifier = Modifier.size(20.dp)
             )
-            usuarios.forEach { usuario ->
-                DropdownMenuItem(
-                    text = { Text("${if (usuario.rol == "admin") "👑" else "👨‍💼"} ${usuario.nombre}") },
-                    onClick = {
-                        onCobradorChange(usuario.id, usuario.nombre)
-                        expanded = false
-                    }
+            Column {
+                Text(
+                    label,
+                    fontSize = 10.sp,
+                    color = Color.White.copy(alpha = 0.8f)
+                )
+                Text(
+                    value,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = valueColor
                 )
             }
         }
@@ -1015,228 +1668,74 @@ private fun CobradorDropdown(
 }
 
 @Composable
-private fun FechaSelectorMejorado(
-    fechaInicio: Date?,
-    fechaFin: Date?,
-    onFechasChange: (Date?, Date?) -> Unit
-) {
-    val context = LocalContext.current
-    val formatter = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-    val calendar = Calendar.getInstance()
-
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Filtrar por fechas", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color(0xFF1976D2))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+fun EmptyStateCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(48.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Card(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable {
-                        val datePickerDialog = DatePickerDialog(
-                            context,
-                            { _, year, month, dayOfMonth ->
-                                val selectedDate = Calendar.getInstance().apply {
-                                    set(year, month, dayOfMonth)
-                                }.time
-                                onFechasChange(selectedDate, fechaFin)
-                            },
-                            calendar.get(Calendar.YEAR),
-                            calendar.get(Calendar.MONTH),
-                            calendar.get(Calendar.DAY_OF_MONTH)
-                        )
-                        datePickerDialog.show()
-                    }
-                    .height(60.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (fechaInicio != null) Color(0xFFE3F2FD) else Color(0xFFF5F5F5)
-                ),
-                shape = RoundedCornerShape(12.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            Icon(
+                Icons.Default.SearchOff,
+                contentDescription = null,
+                modifier = Modifier.size(80.dp),
+                tint = Color.Gray.copy(alpha = 0.4f)
+            )
+
+            Text(
+                "No se encontraron pagos",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.Gray,
+                textAlign = TextAlign.Center
+            )
+
+            Text(
+                "Intenta ajustar los filtros de búsqueda\no verifica que existan pagos registrados",
+                fontSize = 14.sp,
+                color = Color.Gray.copy(alpha = 0.7f),
+                textAlign = TextAlign.Center,
+                lineHeight = 20.sp
+            )
+
+            Surface(
+                color = Color(0xFFE3F2FD),
+                shape = RoundedCornerShape(12.dp)
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.CalendarToday, contentDescription = null, tint = Color(0xFF1976D2), modifier = Modifier.size(20.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Desde", fontSize = 11.sp, color = Color.Gray)
-                        Text(
-                            fechaInicio?.let { formatter.format(it) } ?: "Seleccionar",
-                            fontSize = 13.sp,
-                            fontWeight = if (fechaInicio != null) FontWeight.Bold else FontWeight.Normal,
-                            color = if (fechaInicio != null) Color(0xFF1976D2) else Color.Gray
-                        )
-                    }
-                    if (fechaInicio != null) {
-                        IconButton(onClick = { onFechasChange(null, fechaFin) }, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Default.Clear, contentDescription = "Limpiar", tint = Color.Gray, modifier = Modifier.size(16.dp))
-                        }
-                    }
-                }
-            }
-
-            Card(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable {
-                        val datePickerDialog = DatePickerDialog(
-                            context,
-                            { _, year, month, dayOfMonth ->
-                                val selectedDate = Calendar.getInstance().apply {
-                                    set(year, month, dayOfMonth)
-                                }.time
-                                onFechasChange(fechaInicio, selectedDate)
-                            },
-                            calendar.get(Calendar.YEAR),
-                            calendar.get(Calendar.MONTH),
-                            calendar.get(Calendar.DAY_OF_MONTH)
-                        )
-                        datePickerDialog.show()
-                    }
-                    .height(60.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (fechaFin != null) Color(0xFFE3F2FD) else Color(0xFFF5F5F5)
-                ),
-                shape = RoundedCornerShape(12.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(Icons.Default.CalendarToday, contentDescription = null, tint = Color(0xFF1976D2), modifier = Modifier.size(20.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Hasta", fontSize = 11.sp, color = Color.Gray)
-                        Text(
-                            fechaFin?.let { formatter.format(it) } ?: "Seleccionar",
-                            fontSize = 13.sp,
-                            fontWeight = if (fechaFin != null) FontWeight.Bold else FontWeight.Normal,
-                            color = if (fechaFin != null) Color(0xFF1976D2) else Color.Gray
-                        )
-                    }
-                    if (fechaFin != null) {
-                        IconButton(onClick = { onFechasChange(fechaInicio, null) }, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Default.Clear, contentDescription = "Limpiar", tint = Color.Gray, modifier = Modifier.size(16.dp))
-                        }
-                    }
-                }
-            }
-        }
-
-        if (fechaInicio != null && fechaFin != null) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E8)),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(Icons.Default.DateRange, contentDescription = null, tint = Color(0xFF2E7D32), modifier = Modifier.size(16.dp))
-                    Text(
-                        "Rango: ${formatter.format(fechaInicio)} - ${formatter.format(fechaFin)}",
-                        fontSize = 12.sp,
-                        color = Color(0xFF2E7D32),
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.weight(1f))
-                    IconButton(onClick = { onFechasChange(null, null) }, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = "Limpiar rango", tint = Color(0xFF2E7D32), modifier = Modifier.size(16.dp))
-                    }
-                }
-            }
-        }
-
-        if (fechaInicio == null && fechaFin == null) {
-            val calendarQuick = Calendar.getInstance()
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(horizontal = 4.dp)
-            ) {
-                item {
-                    Card(
-                        modifier = Modifier
-                            .clickable {
-                                val hoy = Date()
-                                onFechasChange(hoy, hoy)
-                            }
-                            .height(40.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1976D2)),
-                        shape = RoundedCornerShape(20.dp)
+                    Row(
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(Icons.Default.Today, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                            Text("Hoy", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Medium)
-                        }
-                    }
-                }
-
-                item {
-                    Card(
-                        modifier = Modifier
-                            .clickable {
-                                calendarQuick.time = Date()
-                                calendarQuick.add(Calendar.DAY_OF_MONTH, -7)
-                                val inicioSemana = calendarQuick.time
-                                val finSemana = Date()
-                                onFechasChange(inicioSemana, finSemana)
-                            }
-                            .height(40.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF2E7D32)),
-                        shape = RoundedCornerShape(20.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(Icons.Default.CalendarViewWeek, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                            Text("Última semana", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Medium)
-                        }
-                    }
-                }
-
-                item {
-                    Card(
-                        modifier = Modifier
-                            .clickable {
-                                calendarQuick.time = Date()
-                                calendarQuick.add(Calendar.DAY_OF_MONTH, -30)
-                                val inicioMes = calendarQuick.time
-                                val finMes = Date()
-                                onFechasChange(inicioMes, finMes)
-                            }
-                            .height(40.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF6A1B9A)),
-                        shape = RoundedCornerShape(20.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                            Text("Último mes", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Medium)
+                        Icon(
+                            Icons.Default.Info,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint = Color(0xFF0061A7)
+                        )
+                        Column {
+                            Text(
+                                "Sugerencias:",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0061A7)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "• Limpia los filtros activos\n• Amplía el rango de fechas\n• Verifica el cobrador seleccionado",
+                                fontSize = 12.sp,
+                                color = Color(0xFF424242),
+                                lineHeight = 18.sp
+                            )
                         }
                     }
                 }
@@ -1252,23 +1751,482 @@ fun PagoCard(
     onEliminar: () -> Unit,
     onReimprimir: () -> Unit
 ) {
-    val esAbonoParcial = pago.tipoPago == "Abono Parcial"
-    val esManual = pago.tipoPago == "Manual (Admin)"
+    var mostrarOpciones by remember { mutableStateOf(false) }
+    val esSaldado = (pago.saldoRestante ?: 0.0) <= 0.01
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { mostrarOpciones = !mostrarOpciones },
+        colors = CardDefaults.cardColors(
+            containerColor = if (esSaldado) Color(0xFFE8F5E9) else Color.White
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        pago.cliente,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0061A7)
+                    )
+
+                    if (pago.numeroPrestamo.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Tag,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = Color.Gray
+                            )
+                            Text(
+                                "Préstamo N° ${pago.numeroPrestamo}",
+                                fontSize = 12.sp,
+                                color = Color.Gray,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Person,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = Color.Gray
+                        )
+                        Text(
+                            pago.cobrador,
+                            fontSize = 12.sp,
+                            color = Color.Gray
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.CalendarToday,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = Color.Gray
+                        )
+                        Text(
+                            pago.fecha,
+                            fontSize = 12.sp,
+                            color = Color.Gray
+                        )
+                    }
+
+                    pago.numeroCuota?.let { cuota ->
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Numbers,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = Color.Gray
+                            )
+                            Text(
+                                "Cuota #$cuota",
+                                fontSize = 12.sp,
+                                color = Color.Gray
+                            )
+                        }
+                    }
+                }
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        formatearLempiras(pago.monto),
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF4CAF50)
+                    )
+                    if (pago.mora > 0) {
+                        Text(
+                            "+ ${formatearLempiras(pago.mora)} mora",
+                            fontSize = 12.sp,
+                            color = Color(0xFFFF5722)
+                        )
+                    }
+                    if (esSaldado) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            color = Color(0xFF4CAF50),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(
+                                "SALDADO",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    } else {
+                        pago.saldoRestante?.let { saldo ->
+                            if (saldo > 0.01) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    "Saldo: ${formatearLempiras(saldo)}",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFFFF9800),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!pago.notas.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(color = Color.LightGray.copy(alpha = 0.3f))
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Notes,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = Color.Gray
+                    )
+                    Text(
+                        pago.notas,
+                        fontSize = 12.sp,
+                        color = Color.Gray,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            if (mostrarOpciones) {
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = Color.LightGray.copy(alpha = 0.3f))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onReimprimir,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = Color(0xFF0061A7)
+                        )
+                    ) {
+                        Icon(
+                            Icons.Default.Print,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Reimprimir", fontSize = 13.sp)
+                    }
+
+                    if (rol == "admin") {
+                        OutlinedButton(
+                            onClick = onEliminar,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = Color(0xFFD32F2F)
+                            )
+                        ) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Eliminar", fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CuotaPendienteCard(cuota: CuotaPendiente) {
+    val backgroundColor = when {
+        cuota.esProxima && !cuota.esVencida -> Color(0xFFFFF3E0)
+        cuota.esVencida && cuota.diasAtraso > 7 -> Color(0xFFFFEBEE)
+        cuota.esVencida -> Color(0xFFFFF8E1)
+        cuota.montoPagado > 0 -> Color(0xFFE8F5E8)
+        else -> Color.White
+    }
+
+    val badgeColor = when {
+        cuota.esProxima && !cuota.esVencida -> Color(0xFFFBC02D)
+        cuota.esVencida && cuota.diasAtraso > 7 -> Color(0xFFD32F2F)
+        cuota.esVencida -> Color(0xFFFF9800)
+        cuota.montoPagado > 0 -> Color(0xFF4CAF50)
+        else -> Color(0xFF757575)
+    }
+
+    val badgeText = when {
+        cuota.esProxima && !cuota.esVencida -> "PRÓXIMA"
+        cuota.esVencida && cuota.diasAtraso > 7 -> "VENCIDA (${cuota.diasAtraso}d)"
+        cuota.esVencida -> "Vencida (${cuota.diasAtraso}d)"
+        cuota.montoPagado > 0 -> "Parcial"
+        else -> "Pendiente"
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = when {
-                esAbonoParcial -> Color(0xFFFFF3E0)
-                esManual -> Color(0xFFE8EAF6)
-                else -> Color.White
+        colors = CardDefaults.cardColors(containerColor = backgroundColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            "Cuota #${cuota.numeroCuota}",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0061A7)
+                        )
+                        Surface(
+                            color = badgeColor,
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(
+                                badgeText,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.CalendarToday,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = Color.Gray
+                        )
+                        Text(
+                            "Vence: ${cuota.fechaProgramada}",
+                            fontSize = 12.sp,
+                            color = Color.Gray
+                        )
+                    }
+                }
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        formatearLempiras(cuota.montoPendiente),
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFD32F2F)
+                    )
+                    if (cuota.montoPagado > 0) {
+                        Text(
+                            "Pagado: ${formatearLempiras(cuota.montoPagado)}",
+                            fontSize = 11.sp,
+                            color = Color(0xFF4CAF50),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
             }
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
-        shape = RoundedCornerShape(16.dp)
+
+            if (cuota.montoPagado > 0) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "Progreso",
+                            fontSize = 11.sp,
+                            color = Color.Gray
+                        )
+                        Text(
+                            "${String.format("%.1f", cuota.porcentajePagado)}%",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF4CAF50)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    LinearProgressIndicator(
+                        progress = { (cuota.porcentajePagado / 100).toFloat().coerceIn(0f, 1f) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp),
+                        color = Color(0xFF4CAF50),
+                        trackColor = Color(0xFFE0E0E0),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ConfirmDeleteDialog(
+    pago: PagoItem,
+    db: FirebaseFirestore,
+    context: Context,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                Icons.Default.Warning,
+                contentDescription = null,
+                tint = Color(0xFFFF9800),
+                modifier = Modifier.size(48.dp)
+            )
+        },
+        title = {
+            Text(
+                "Confirmar Eliminación",
+                fontWeight = FontWeight.Bold,
+                fontSize = 20.sp
+            )
+        },
+        text = {
+            Column {
+                Text(
+                    "¿Estás seguro de eliminar este pago?",
+                    fontSize = 14.sp
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0))
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        InfoRow("Cliente", pago.cliente)
+                        InfoRow("Monto", formatearLempiras(pago.monto + pago.mora))
+                        InfoRow("Fecha", pago.fecha)
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    "⚠️ Esta acción no se puede deshacer y afectará el saldo del préstamo.",
+                    fontSize = 12.sp,
+                    color = Color(0xFFD32F2F),
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFD32F2F)
+                )
+            ) {
+                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Eliminar")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar", color = Color.Gray)
+            }
+        }
+    )
+}
+
+@Composable
+fun InfoRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            label,
+            fontSize = 12.sp,
+            color = Color.Gray,
+            fontWeight = FontWeight.Medium
+        )
+        Text(
+            value,
+            fontSize = 12.sp,
+            color = Color(0xFF0061A7),
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FiltrosCard(
+    filtroCliente: String,
+    onFiltroClienteChange: (String) -> Unit,
+    usuarios: List<UsuarioItem>,
+    filtroCobradorNombre: String,
+    onCobradorChange: (String, String) -> Unit,
+    fechaInicio: Date?,
+    fechaFin: Date?,
+    onFechasChange: (Date?, Date?) -> Unit,
+    estadoFiltro: EstadoFiltro,
+    onEstadoChange: (EstadoFiltro) -> Unit,
+    onLimpiar: () -> Unit,
+    pagosFiltrados: List<PagoItem>,
+    formatter: SimpleDateFormat,
+    context: Context,
+    scope: kotlinx.coroutines.CoroutineScope,
+    onPreview: (List<PagoItem>, Date?, Date?, String) -> Unit
+) {
+    var expandedCobrador by remember { mutableStateOf(false) }
+    var mostrarDatePicker by remember { mutableStateOf(false) }
+    var seleccionandoFechaInicio by remember { mutableStateOf(true) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(
@@ -1276,612 +2234,655 @@ fun PagoCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(pago.cliente, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFF1A1A1A))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text("Cuota: ${pago.cuota}", fontSize = 14.sp, color = Color.Gray)
-
-                        if (esAbonoParcial) {
-                            Surface(color = Color(0xFFFF9800), shape = RoundedCornerShape(12.dp)) {
-                                Text("ABONO", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
-                            }
-                        }
-
-                        if (esManual) {
-                            Surface(color = Color(0xFF673AB7), shape = RoundedCornerShape(12.dp)) {
-                                Text("MANUAL", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
-                            }
-                        }
-                    }
-                }
-
-                if (pago.numeroPrestamo > 0) {
-                    Surface(color = Color(0xFF0061A7), shape = RoundedCornerShape(8.dp)) {
-                        Text("#${pago.numeroPrestamo}", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
-                    }
+                Text(
+                    "Filtros de Búsqueda",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0061A7)
+                )
+                IconButton(
+                    onClick = onLimpiar,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Clear,
+                        contentDescription = "Limpiar filtros",
+                        tint = Color(0xFFFF5722)
+                    )
                 }
             }
 
-            HorizontalDivider(color = Color(0xFFE0E0E0))
+            HorizontalDivider(color = Color.LightGray.copy(alpha = 0.3f))
 
-            Row(
+            OutlinedTextField(
+                value = filtroCliente,
+                onValueChange = onFiltroClienteChange,
+                label = { Text("Buscar por cliente") },
+                leadingIcon = {
+                    Icon(Icons.Default.Search, contentDescription = null)
+                },
+                trailingIcon = {
+                    if (filtroCliente.isNotEmpty()) {
+                        IconButton(onClick = { onFiltroClienteChange("") }) {
+                            Icon(Icons.Default.Clear, contentDescription = "Limpiar")
+                        }
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Color(0xFF0061A7),
+                    focusedLabelColor = Color(0xFF0061A7)
+                )
+            )
+
+            ExposedDropdownMenuBox(
+                expanded = expandedCobrador,
+                onExpandedChange = { expandedCobrador = it }
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        if (esAbonoParcial) "Abono realizado" else "Total pagado",
-                        fontSize = 12.sp,
-                        color = Color.Gray
+                OutlinedTextField(
+                    value = filtroCobradorNombre,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Filtrar por cobrador") },
+                    leadingIcon = {
+                        Icon(Icons.Default.Person, contentDescription = null)
+                    },
+                    trailingIcon = {
+                        Row {
+                            if (filtroCobradorNombre.isNotEmpty()) {
+                                IconButton(onClick = { onCobradorChange("", "") }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "Limpiar")
+                                }
+                            }
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedCobrador)
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .menuAnchor(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF0061A7),
+                        focusedLabelColor = Color(0xFF0061A7)
                     )
-                    Text(
-                        "L. ${String.format("%.2f", pago.monto)}",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 20.sp,
-                        color = when {
-                            esAbonoParcial -> Color(0xFFFF9800)
-                            esManual -> Color(0xFF673AB7)
-                            else -> Color(0xFF2E7D32)
+                )
+
+                ExposedDropdownMenu(
+                    expanded = expandedCobrador,
+                    onDismissRequest = { expandedCobrador = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Todos los cobradores") },
+                        onClick = {
+                            onCobradorChange("", "")
+                            expandedCobrador = false
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Default.Clear, contentDescription = null)
                         }
                     )
-
-                    if (pago.mora > 0) {
-                        Text("Base: L. ${String.format("%.2f", pago.monto - pago.mora)}", fontSize = 12.sp, color = Color.Gray)
-                    }
-
-                    val activo = (pago.saldoRestante ?: 0.0) > 0.01
-                    Spacer(Modifier.height(6.dp))
-                    Surface(
-                        color = if (activo) Color(0xFF2E7D32) else Color(0xFF1565C0),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(
-                            if (activo) "Activo" else "Saldado",
-                            fontSize = 10.sp,
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-
-                Column(horizontalAlignment = Alignment.End) {
-                    Surface(
-                        color = when (pago.tipoPago) {
-                            "Efectivo" -> Color(0xFF4CAF50)
-                            "Abono Parcial" -> Color(0xFFFF9800)
-                            "Manual (Admin)" -> Color(0xFF673AB7)
-                            else -> Color(0xFF2196F3)
-                        },
-                        shape = RoundedCornerShape(20.dp)
-                    ) {
-                        Text(
-                            pago.tipoPago,
-                            fontSize = 12.sp,
-                            color = Color.White,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                    HorizontalDivider()
+                    usuarios.forEach { usuario ->
+                        DropdownMenuItem(
+                            text = { Text(usuario.nombre) },
+                            onClick = {
+                                onCobradorChange(usuario.id, usuario.nombre)
+                                expandedCobrador = false
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Default.Person, contentDescription = null)
+                            }
                         )
                     }
                 }
             }
 
-            if (pago.mora > 0.0 || pago.interesTotal > 0.0) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Rango de fechas",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF0061A7)
+                )
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (pago.mora > 0.0) {
-                        Column {
-                            Text("Mora", fontSize = 12.sp, color = Color.Red)
-                            Text("L. ${String.format("%.2f", pago.mora)}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Red)
-                        }
-                    }
-                    if (pago.interesTotal > 0.0) {
-                        Column {
-                            Text("Interés", fontSize = 12.sp, color = Color(0xFF6A1B9A))
-                            Text("L. ${String.format("%.2f", pago.interesTotal)}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF6A1B9A))
-                        }
-                    }
-                }
-            }
-
-            HorizontalDivider(color = Color(0xFFE0E0E0))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(pago.fecha, fontSize = 13.sp, color = Color(0xFF424242))
-                    Text(pago.cobrador, fontSize = 13.sp, color = Color(0xFF424242))
-                    if (pago.lugar.isNotBlank()) {
-                        Text(pago.lugar, fontSize = 13.sp, color = Color(0xFF424242))
-                    }
-                }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = onReimprimir,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2)),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Default.Print, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Reimprimir", fontSize = 12.sp)
-                }
-
-                if (rol == "admin") {
-                    Button(
-                        onClick = onEliminar,
+                    OutlinedButton(
+                        onClick = {
+                            seleccionandoFechaInicio = true
+                            mostrarDatePicker = true
+                        },
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
-                        shape = RoundedCornerShape(12.dp)
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = if (fechaInicio != null) Color(0xFF0061A7) else Color.Gray
+                        )
                     ) {
-                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Eliminar", fontSize = 12.sp)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatsCard(pagos: List<PagoItem>) {
-    val totalPagos = pagos.size
-    val totalMonto = pagos.sumOf { it.monto }
-    val totalMora = pagos.sumOf { it.mora }
-    val abonosParciales = pagos.count { it.tipoPago == "Abono Parcial" }
-
-    val activos = pagos.count { (it.saldoRestante ?: 0.0) > 0.01 }
-    val saldados = pagos.count { (it.saldoRestante ?: 0.0) <= 0.01 }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF0061A7)),
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text("Estadísticas", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.White)
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                StatItem(title = "Total pagos", value = totalPagos.toString(), icon = "💰")
-                StatItem(title = "Monto total", value = "L. ${String.format("%.2f", totalMonto)}", icon = "💵")
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                if (totalMora > 0) {
-                    StatItem(title = "Total mora", value = "L. ${String.format("%.2f", totalMora)}", icon = "🚨")
-                }
-                if (abonosParciales > 0) {
-                    StatItem(title = "Abonos parciales", value = abonosParciales.toString(), icon = "🧩")
-                }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                StatItem(title = "Activos", value = activos.toString(), icon = "📌")
-                StatItem(title = "Saldados", value = saldados.toString(), icon = "✅")
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatItem(title: String, value: String, icon: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(icon, fontSize = 24.sp)
-        Text(value, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.White, textAlign = TextAlign.Center)
-        Text(title, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f), textAlign = TextAlign.Center)
-    }
-}
-
-@Composable
-private fun EmptyStateCard() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF8F9FA)),
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(40.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text("📋", fontSize = 48.sp)
-            Text("No hay pagos registrados", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFF424242), textAlign = TextAlign.Center)
-            Text("Los pagos registrados aparecerán aquí", fontSize = 14.sp, color = Color.Gray, textAlign = TextAlign.Center)
-        }
-    }
-}
-
-@Composable
-private fun LoadingScreen(padding: PaddingValues) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(padding),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            CircularProgressIndicator(color = Color(0xFF0061A7), strokeWidth = 3.dp)
-            Text("Cargando historial...", color = Color.Gray, fontSize = 14.sp)
-        }
-    }
-}
-
-@Composable
-private fun ConfirmDeleteDialog(
-    pago: PagoItem,
-    db: FirebaseFirestore,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit,
-    context: Context
-) {
-    val scope = rememberCoroutineScope()
-    var nuevoSaldo by remember { mutableStateOf<Double?>(null) }
-    var cargando by remember { mutableStateOf(true) }
-
-    LaunchedEffect(pago) {
-        scope.launch {
-            try {
-                val prestamoDoc = db.collection("prestamos").document(pago.prestamoId).get().await()
-                val montoPrestado = prestamoDoc.getDouble("monto") ?: 0.0
-                val interesTotal = prestamoDoc.getDouble("interesTotal") ?: prestamoDoc.getDouble("interes") ?: 0.0
-                val totalPagar = montoPrestado + interesTotal
-
-                val pagosRestantes = db.collection("pagos")
-                    .whereEqualTo("prestamoId", pago.prestamoId)
-                    .get().await()
-                    .documents
-                    .filter { it.id != pago.docId }
-                    .map { it.getDouble("monto") ?: 0.0 }
-
-                val totalPagadoRestante = pagosRestantes.sum()
-                nuevoSaldo = (totalPagar - totalPagadoRestante).coerceAtLeast(0.0)
-            } catch (_: Exception) {
-                Toast.makeText(context, "Error calculando datos", Toast.LENGTH_SHORT).show()
-            } finally { cargando = false }
-        }
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Confirmar eliminación", fontWeight = FontWeight.Bold) },
-        text = {
-            if (cargando) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = Color(0xFF0061A7))
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Calculando nuevo saldo...", fontSize = 14.sp, color = Color.Gray)
-                }
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("¿Estás seguro de eliminar este pago?", fontSize = 16.sp)
-
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text("Cliente: ${pago.cliente}", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                            Text("Cuotas: ${pago.cuota}", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                            Text("Monto: L. ${String.format("%.2f", pago.monto)}", fontSize = 14.sp)
-                            Text("Fecha: ${pago.fecha}", fontSize = 14.sp)
-                            if (pago.tipoPago == "Abono Parcial") {
-                                Text("Tipo: Abono Parcial", fontSize = 14.sp, color = Color(0xFFFF9800), fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-
-                    nuevoSaldo?.let { saldo ->
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                Icons.Default.DateRange,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
                             Text(
-                                "Nuevo saldo: L. ${String.format("%.2f", saldo)}",
-                                modifier = Modifier.padding(12.dp),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp,
-                                color = Color(0xFF1B5E20)
+                                fechaInicio?.let { formatter.format(it) } ?: "Inicio",
+                                fontSize = 12.sp
                             )
                         }
                     }
 
-                    Text("Esta acción no se puede deshacer", fontSize = 14.sp, color = Color(0xFFD32F2F), fontWeight = FontWeight.Medium)
+                    OutlinedButton(
+                        onClick = {
+                            seleccionandoFechaInicio = false
+                            mostrarDatePicker = true
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = if (fechaFin != null) Color(0xFF0061A7) else Color.Gray
+                        )
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                Icons.Default.DateRange,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                fechaFin?.let { formatter.format(it) } ?: "Fin",
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    item {
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                val hoy = Date()
+                                onFechasChange(hoy, hoy)
+                            },
+                            label = { Text("Hoy", fontSize = 12.sp) }
+                        )
+                    }
+                    item {
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                val cal = Calendar.getInstance()
+                                cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+                                val inicio = cal.time
+                                cal.add(Calendar.DAY_OF_WEEK, 6)
+                                val fin = cal.time
+                                onFechasChange(inicio, fin)
+                            },
+                            label = { Text("Esta semana", fontSize = 12.sp) }
+                        )
+                    }
+                    item {
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                val cal = Calendar.getInstance()
+                                cal.set(Calendar.DAY_OF_MONTH, 1)
+                                val inicio = cal.time
+                                cal.set(Calendar.DAY_OF_MONTH, cal.getActualMaximum(Calendar.DAY_OF_MONTH))
+                                val fin = cal.time
+                                onFechasChange(inicio, fin)
+                            },
+                            label = { Text("Este mes", fontSize = 12.sp) }
+                        )
+                    }
                 }
             }
-        },
-        confirmButton = {
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Estado del préstamo",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF0061A7)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = estadoFiltro == EstadoFiltro.TODOS,
+                        onClick = { onEstadoChange(EstadoFiltro.TODOS) },
+                        label = { Text("Todos", fontSize = 12.sp) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    FilterChip(
+                        selected = estadoFiltro == EstadoFiltro.ACTIVOS,
+                        onClick = { onEstadoChange(EstadoFiltro.ACTIVOS) },
+                        label = { Text("Activos", fontSize = 12.sp) },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.TrendingUp,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFF2196F3).copy(alpha = 0.15f),
+                            selectedLabelColor = Color(0xFF1976D2)
+                        )
+                    )
+                    FilterChip(
+                        selected = estadoFiltro == EstadoFiltro.SALDADOS,
+                        onClick = { onEstadoChange(EstadoFiltro.SALDADOS) },
+                        label = { Text("Saldados", fontSize = 12.sp) },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFF4CAF50).copy(alpha = 0.15f),
+                            selectedLabelColor = Color(0xFF2E7D32)
+                        )
+                    )
+                }
+            }
+
+            HorizontalDivider(color = Color.LightGray.copy(alpha = 0.3f))
+
             Button(
-                onClick = onConfirm,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
-                enabled = !cargando
-            ) { Text("Eliminar", color = Color.White) }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
-        containerColor = Color.White,
-        shape = RoundedCornerShape(16.dp)
-    )
+                onClick = {
+                    if (pagosFiltrados.isEmpty()) {
+                        Toast.makeText(
+                            context,
+                            "No hay pagos para exportar",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        return@Button
+                    }
+                    val periodo = when {
+                        fechaInicio != null && fechaFin != null ->
+                            "${formatter.format(fechaInicio)} - ${formatter.format(fechaFin)}"
+                        else -> "Todos los registros"
+                    }
+
+                    // Siempre usar el preview
+                    onPreview(pagosFiltrados, fechaInicio, fechaFin, periodo)
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (estadoFiltro == EstadoFiltro.SALDADOS) {
+                        Color(0xFF059669)
+                    } else {
+                        Color(0xFF0061A7)
+                    }
+                )
+            ) {
+                Icon(
+                    Icons.Default.PictureAsPdf,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    if (estadoFiltro == EstadoFiltro.SALDADOS) {
+                        "PDF Saldados"
+                    } else {
+                        "Generar PDF"
+                    }
+                )
+            }
+
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color(0xFFF5F5F5),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        Icons.Default.FilterList,
+                        contentDescription = null,
+                        tint = Color(0xFF0061A7),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "${pagosFiltrados.size} registro(s) encontrado(s)",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF0061A7)
+                    )
+                }
+            }
+        }
+    }
+
+    if (mostrarDatePicker) {
+        val calendar = Calendar.getInstance()
+        if (seleccionandoFechaInicio && fechaInicio != null) {
+            calendar.time = fechaInicio
+        } else if (!seleccionandoFechaInicio && fechaFin != null) {
+            calendar.time = fechaFin
+        }
+
+        DatePickerDialog(
+            context,
+            { _, year, month, day ->
+                val cal = Calendar.getInstance()
+                cal.set(year, month, day, 0, 0, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+                val selectedDate = cal.time
+
+                if (seleccionandoFechaInicio) {
+                    onFechasChange(selectedDate, fechaFin)
+                } else {
+                    onFechasChange(fechaInicio, selectedDate)
+                }
+                mostrarDatePicker = false
+            },
+            calendar.get(Calendar.YEAR),
+            calendar.get(Calendar.MONTH),
+            calendar.get(Calendar.DAY_OF_MONTH)
+        ).apply {
+            setOnCancelListener { mostrarDatePicker = false }
+            show()
+        }
+    }
 }
 
-/* =======================
-   NUEVO: VISTA PREVIA
-   ======================= */
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReportePagosPreview(
     pagos: List<PagoItem>,
     periodo: String,
     fechaInicio: Date?,
     fechaFin: Date?,
+    esSaldados: Boolean = false,
     onCerrar: () -> Unit,
-    onExportar: (List<PagoItem>, Date?, Date?, String) -> Unit
+    onExportar: (List<PagoItem>, Date?, Date?, String, Boolean) -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val formatter = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
+    val totalRecaudado = pagos.sumOf { it.monto + it.mora }
+    val totalMora = pagos.sumOf { it.mora }
+    val totalPagos = pagos.size
 
-    val totalMonto = remember(pagos) { pagos.sumOf { it.monto } }
-    val totalMora = remember(pagos) { pagos.sumOf { it.mora } }
-    val abonosParciales = remember(pagos) { pagos.count { it.tipoPago == "Abono Parcial" } }
-    val activos = remember(pagos) { pagos.count { (it.saldoRestante ?: 0.0) > 0.01 } }
-    val saldados = remember(pagos) { pagos.count { (it.saldoRestante ?: 0.0) <= 0.01 } }
-
-    ModalBottomSheet(
+    AlertDialog(
         onDismissRequest = onCerrar,
-        sheetState = sheetState,
-        containerColor = Color.White,
-        dragHandle = { BottomSheetDefaults.DragHandle() }
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-                .navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+        icon = {
+            Icon(
+                Icons.Default.Assessment,
+                contentDescription = null,
+                tint = if (esSaldados) Color(0xFF059669) else Color(0xFF0061A7),
+                modifier = Modifier.size(48.dp)
+            )
+        },
+        title = {
+            Text(
+                if (esSaldados) "Vista Previa - Préstamos Saldados" else "Vista Previa del Reporte",
+                fontWeight = FontWeight.Bold,
+                fontSize = 20.sp
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Column {
-                    Text("Vista previa del reporte", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    Text(
-                        if (fechaInicio != null && fechaFin != null)
-                            "Período: ${formatter.format(fechaInicio)} - ${formatter.format(fechaFin)}"
-                        else
-                            "Período: (automático según registros)",
-                        fontSize = 12.sp,
-                        color = Color.Gray
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            "PERÍODO",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Gray
+                        )
+                        Text(
+                            periodo,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (esSaldados) Color(0xFF059669) else Color(0xFF0061A7)
+                        )
+                    }
+                }
+
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (esSaldados) Color(0xFF059669) else Color(0xFF0061A7)
                     )
-                    if (periodo.isNotBlank()) {
-                        Text(periodo, fontSize = 12.sp, color = Color(0xFF1565C0))
-                    }
-                }
-                IconButton(onClick = onCerrar) {
-                    Icon(Icons.Default.Close, contentDescription = "Cerrar")
-                }
-            }
-
-            // Acciones
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { onExportar(pagos, fechaInicio, fechaFin, periodo) },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Icon(Icons.Default.Print, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Exportar / Imprimir")
-                }
-                OutlinedButton(
-                    onClick = { onExportar(pagos, fechaInicio, fechaFin, periodo) },
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Compartir PDF")
-                }
-            }
-
-            // Resumen
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFF8F9FA)),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        PreviewStat("Registros", pagos.size.toString(), "📋")
-                        PreviewStat("Total monto", formatearLempiras(totalMonto), "💵")
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        if (totalMora > 0) PreviewStat("Total mora", formatearLempiras(totalMora), "🚨")
-                        if (abonosParciales > 0) PreviewStat("Abonos parciales", abonosParciales.toString(), "🧩")
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        PreviewStat("Activos", activos.toString(), "📌")
-                        PreviewStat("Saldados", saldados.toString(), "✅")
-                    }
-                }
-            }
-
-            // Encabezados tabla
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFFE3F2FD), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                PreviewHeader("Cliente", 1.4f)
-                PreviewHeader("Fecha", 1.0f)
-                PreviewHeader("Cuota", 1.0f)
-                PreviewHeader("Tipo", 1.0f)
-                PreviewHeader("Mora", 0.8f, right = true)
-                PreviewHeader("Monto", 1.0f, right = true)
-                PreviewHeader("Saldo", 1.0f, right = true)
-            }
-
-            // Filas
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 120.dp, max = 420.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                contentPadding = PaddingValues(bottom = 8.dp)
-            ) {
-                items(pagos.size, key = { pagos[it].docId }) { idx ->
-                    val p = pagos[idx]
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color(0xFFFDFDFD), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        PreviewCell(p.cliente, 1.4f)
-                        PreviewCell(p.fecha, 1.0f)
-                        PreviewCell(p.cuota, 1.0f)
-                        PreviewBadgeTipo(p.tipoPago, 1.0f)
-                        PreviewCell(formatearLempiras(p.mora), 0.8f, right = true)
-                        PreviewCell(formatearLempiras(p.monto), 1.0f, right = true)
-                        PreviewEstadoSaldo(p.saldoRestante ?: 0.0, 1.0f)
+                        if (esSaldados) {
+                            // Estadísticas para préstamos saldados
+                            val prestamosUnicos = pagos.distinctBy { it.prestamoId }.size
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    "Préstamos Saldados:",
+                                    color = Color.White,
+                                    fontSize = 13.sp
+                                )
+                                Text(
+                                    prestamosUnicos.toString(),
+                                    color = Color.White,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "Total Recaudado:",
+                                color = Color.White,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                formatearLempiras(totalRecaudado),
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "Total Mora:",
+                                color = Color.White,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                formatearLempiras(totalMora),
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "Pagos Registrados:",
+                                color = Color.White,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                totalPagos.toString(),
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
-            }
 
-            // Totales al pie
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E8)),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
                 ) {
-                    Text("Total registros: ${pagos.size}", fontWeight = FontWeight.Medium, color = Color(0xFF2E7D32))
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        if (totalMora > 0)
-                            Text("Mora: ${formatearLempiras(totalMora)}", fontWeight = FontWeight.SemiBold, color = Color(0xFF2E7D32))
-                        Text("Monto: ${formatearLempiras(totalMonto)}", fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            if (esSaldados) "PRÉSTAMOS EN EL REPORTE" else "ÚLTIMOS PAGOS EN EL REPORTE",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+
+                        if (esSaldados) {
+                            // Mostrar préstamos únicos
+                            val prestamosUnicos = pagos.distinctBy { it.prestamoId }
+
+                            prestamosUnicos.take(5).forEach { pago ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            pago.cliente,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = Color(0xFF059669)
+                                        )
+                                        if (pago.numeroPrestamo.isNotEmpty()) {
+                                            Text(
+                                                "Nº ${pago.numeroPrestamo}",
+                                                fontSize = 10.sp,
+                                                color = Color.Gray
+                                            )
+                                        }
+                                    }
+                                    Surface(
+                                        color = Color(0xFF059669),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text(
+                                            "SALDADO",
+                                            modifier = Modifier.padding(
+                                                horizontal = 8.dp,
+                                                vertical = 4.dp
+                                            ),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                                if (pago != prestamosUnicos.take(5).last()) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(vertical = 4.dp),
+                                        color = Color.LightGray.copy(alpha = 0.3f)
+                                    )
+                                }
+                            }
+
+                            if (prestamosUnicos.size > 5) {
+                                Text(
+                                    "... y ${prestamosUnicos.size - 5} préstamos más",
+                                    fontSize = 11.sp,
+                                    color = Color.Gray,
+                                    modifier = Modifier.padding(top = 8.dp),
+                                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                                )
+                            }
+                        } else {
+                            // Mostrar pagos individuales
+                            pagos.take(5).forEach { pago ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            pago.cliente,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = Color(0xFF0061A7)
+                                        )
+                                        Text(
+                                            pago.fecha.split(" ")[0],
+                                            fontSize = 10.sp,
+                                            color = Color.Gray
+                                        )
+                                    }
+                                    Text(
+                                        formatearLempiras(pago.monto + pago.mora),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF4CAF50)
+                                    )
+                                }
+                                if (pago != pagos.take(5).last()) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(vertical = 4.dp),
+                                        color = Color.LightGray.copy(alpha = 0.3f)
+                                    )
+                                }
+                            }
+
+                            if (pagos.size > 5) {
+                                Text(
+                                    "... y ${pagos.size - 5} pagos más",
+                                    fontSize = 11.sp,
+                                    color = Color.Gray,
+                                    modifier = Modifier.padding(top = 8.dp),
+                                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                                )
+                            }
+                        }
                     }
                 }
             }
-
-            Spacer(Modifier.height(8.dp))
+        },
+        confirmButton = {
+            Button(
+                onClick = { onExportar(pagos, fechaInicio, fechaFin, periodo, esSaldados) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (esSaldados) Color(0xFF059669) else Color(0xFF0061A7)
+                )
+            ) {
+                Icon(
+                    Icons.Default.PictureAsPdf,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Exportar PDF")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCerrar) {
+                Text("Cancelar", color = Color.Gray)
+            }
         }
-    }
-}
-
-@Composable
-private fun PreviewStat(title: String, value: String, icon: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(icon, fontSize = 22.sp)
-        Text(value, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        Text(title, fontSize = 12.sp, color = Color.Gray)
-    }
-}
-
-@Composable
-private fun RowScope.PreviewHeader(text: String, weight: Float, right: Boolean = false) {
-    Text(
-        text,
-        modifier = Modifier.weight(weight),
-        fontSize = 12.sp,
-        fontWeight = FontWeight.Bold,
-        color = Color(0xFF0D47A1),
-        textAlign = if (right) TextAlign.End else TextAlign.Start
     )
-}
-
-@Composable
-private fun RowScope.PreviewCell(text: String, weight: Float, right: Boolean = false) {
-    Text(
-        text,
-        modifier = Modifier.weight(weight),
-        fontSize = 12.sp,
-        color = Color(0xFF444444),
-        textAlign = if (right) TextAlign.End else TextAlign.Start,
-        maxLines = 2
-    )
-}
-
-@Composable
-private fun RowScope.PreviewBadgeTipo(tipo: String, weight: Float) {
-    val color = when (tipo) {
-        "Efectivo" -> Color(0xFF4CAF50)
-        "Abono Parcial" -> Color(0xFFFF9800)
-        "Manual (Admin)" -> Color(0xFF673AB7)
-        else -> Color(0xFF2196F3)
-    }
-    Box(
-        modifier = Modifier
-            .weight(weight)
-            .padding(end = 8.dp),
-        contentAlignment = Alignment.CenterStart
-    ) {
-        Surface(color = color, shape = RoundedCornerShape(12.dp)) {
-            Text(
-                tipo,
-                color = Color.White,
-                fontSize = 10.sp,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun RowScope.PreviewEstadoSaldo(saldoRestante: Double, weight: Float) {
-    val activo = saldoRestante > 0.01
-    Row(
-        modifier = Modifier.weight(weight),
-        horizontalArrangement = Arrangement.End
-    ) {
-        Surface(
-            color = if (activo) Color(0xFF2E7D32) else Color(0xFF1565C0),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Text(
-                if (activo) formatearLempiras(saldoRestante) else "SALDADO",
-                color = Color.White,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-            )
-        }
-    }
 }

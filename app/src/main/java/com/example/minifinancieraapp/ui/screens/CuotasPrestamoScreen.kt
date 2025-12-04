@@ -54,7 +54,6 @@ data class CuotaInfo(
 
 // ===================== FUNCIONES PARA NUEVA LÓGICA DE CASCADA =====================
 
-// Función para calcular fechas (mantenida igual)
 private fun calcularFechaCuota(fechaInicio: Date, plazo: String, numeroCuota: Int): String {
     val calendar = Calendar.getInstance().apply { time = fechaInicio }
     val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
@@ -78,7 +77,6 @@ private fun calcularFechaCuota(fechaInicio: Date, plazo: String, numeroCuota: In
     return dateFormat.format(calendar.time)
 }
 
-// Nueva función adaptada para leer la estructura de pagos en cascada
 private suspend fun obtenerEstadoCuotasConCascada(
     db: FirebaseFirestore,
     prestamoId: String
@@ -101,11 +99,9 @@ private suspend fun obtenerEstadoCuotasConCascada(
                 else -> null
             }
 
-            // Nueva estructura con pagos en cascada
             val cuotasCubiertas = pago.get("cuotasCubiertas") as? List<*>
 
             if (cuotasCubiertas != null && cuotasCubiertas.isNotEmpty()) {
-                // Estructura nueva: lista de cuotas cubiertas
                 cuotasCubiertas.forEach { cuotaData ->
                     if (cuotaData is Map<*, *>) {
                         val numeroCuota = (cuotaData["numeroCuota"] as? Number)?.toInt() ?: 0
@@ -120,7 +116,6 @@ private suspend fun obtenerEstadoCuotasConCascada(
                     }
                 }
             } else {
-                // Compatibilidad con estructura anterior
                 val numeroCuota = when {
                     pago.contains("numeroCuota") -> pago.getLong("numeroCuota")?.toInt() ?: 1
                     pago.contains("cuota") -> pago.getLong("cuota")?.toInt() ?: 1
@@ -140,20 +135,18 @@ private suspend fun obtenerEstadoCuotasConCascada(
             }
         }
 
-        // Consolidar información por cuota
         val resultadoFinal = mutableMapOf<Int, CuotaInfo>()
         informacionCuotas.forEach { (numeroCuota, pagos) ->
             val montoTotalPagado = pagos.sumOf { it.first }
             val fechasHistorial = pagos.map { it.second }.distinct()
             val ultimaFechaPago = fechasHistorial.lastOrNull()
 
-            // Crear CuotaInfo temporal (se completará con datos del préstamo después)
             resultadoFinal[numeroCuota] = CuotaInfo(
                 numero = numeroCuota,
-                fecha = "", // Se llenará después
-                capital = 0.0, // Se llenará después
-                interes = 0.0, // Se llenará después
-                total = 0.0, // Se llenará después
+                fecha = "",
+                capital = 0.0,
+                interes = 0.0,
+                total = 0.0,
                 montoPagado = montoTotalPagado,
                 fechaPago = ultimaFechaPago,
                 historialPagos = fechasHistorial
@@ -169,7 +162,6 @@ private suspend fun obtenerEstadoCuotasConCascada(
     }
 }
 
-// Función para generar plan de cuotas base y aplicar estado de pagos
 private suspend fun generarPlanCuotasConEstado(
     db: FirebaseFirestore,
     prestamoId: String,
@@ -180,19 +172,18 @@ private suspend fun generarPlanCuotasConEstado(
     plazo: String
 ): List<CuotaInfo> {
     return try {
-        // Generar plan base de cuotas
         val capitalPorCuota = if (cuotasTotales > 0) montoPrestamo / cuotasTotales else 0.0
         val interesPorCuota = if (cuotasTotales > 0) interesTotal / cuotasTotales else 0.0
 
-        val capitalEntero = capitalPorCuota.toInt()
-        val capitalResiduo = montoPrestamo - (capitalEntero * cuotasTotales)
-        val interesEntero = interesPorCuota.toInt()
-        val interesResiduo = interesTotal - (interesEntero * cuotasTotales)
+        val capitalRedondeado = kotlin.math.round(capitalPorCuota).toInt()
+        val capitalResiduo = montoPrestamo - (capitalRedondeado * cuotasTotales)
+        val interesRedondeado = kotlin.math.round(interesPorCuota).toInt()
+        val interesResiduo = interesTotal - (interesRedondeado * cuotasTotales)
 
         val planBase = mutableListOf<CuotaInfo>()
         for (i in 0 until cuotasTotales) {
-            val capitalCuota = if (i == cuotasTotales - 1) capitalEntero + capitalResiduo else capitalEntero.toDouble()
-            val interesCuota = if (i == cuotasTotales - 1) interesEntero + interesResiduo else interesEntero.toDouble()
+            val capitalCuota = if (i == cuotasTotales - 1) capitalRedondeado + capitalResiduo else capitalRedondeado.toDouble()
+            val interesCuota = if (i == cuotasTotales - 1) interesRedondeado + interesResiduo else interesRedondeado.toDouble()
             val fechaCuota = calcularFechaCuota(fechaInicio, plazo, i + 1)
 
             planBase.add(
@@ -206,10 +197,8 @@ private suspend fun generarPlanCuotasConEstado(
             )
         }
 
-        // Obtener estado de pagos y aplicarlo
         val estadoPagos = obtenerEstadoCuotasConCascada(db, prestamoId)
 
-        // Combinar plan base con estado de pagos
         planBase.map { cuotaBase ->
             val estadoPago = estadoPagos[cuotaBase.numero]
             if (estadoPago != null) {
@@ -239,14 +228,12 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
     val formatter = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
     val dec = DecimalFormat("#,##0.00")
 
-    // Estados principales
     var cuotas by remember { mutableStateOf(listOf<CuotaInfo>()) }
     var cargando by remember { mutableStateOf(true) }
     var esActivo by remember { mutableStateOf(true) }
     var estaSaldado by remember { mutableStateOf(false) }
     var errorCarga by remember { mutableStateOf<String?>(null) }
 
-    // Estados del préstamo
     var totalCapital by remember { mutableStateOf(0.0) }
     var totalInteres by remember { mutableStateOf(0.0) }
     var moraAplicada by remember { mutableStateOf(0.0) }
@@ -254,9 +241,9 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
     var nombreCliente by remember { mutableStateOf("") }
     var descripcionPlazo by remember { mutableStateOf("") }
     var proximoPagoProgramado by remember { mutableStateOf<String?>(null) }
-    var numeroPrestamo by remember { mutableStateOf(0) }
+    var numeroPrestamo by remember { mutableStateOf("") }
+    var numeroPrestamoDisplay by remember { mutableStateOf("") }
 
-    // Función de recarga simplificada para nueva lógica
     suspend fun recargarDatosCompletos() {
         try {
             Log.d("CuotasScreenCascada", "=== RECARGANDO CON NUEVA LÓGICA DE CASCADA ===")
@@ -273,7 +260,11 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
             totalCapital = monto
             totalInteres = interesTotal
 
-            // Normalizar descripción del plazo
+            numeroPrestamo = prestamoDoc.getString("numeroPrestamo") ?:
+                    prestamoDoc.getLong("numeroPrestamo")?.toString() ?:
+                    "N/D"
+            numeroPrestamoDisplay = if (numeroPrestamo != "N/D") "Préstamo N° $numeroPrestamo" else "Préstamo ID: $prestamoId"
+
             descripcionPlazo = when (plazo.lowercase()) {
                 "diario" -> "Diario (incluye domingos)"
                 "lunes a sábado" -> "Lunes a Sábado (sin domingos)"
@@ -284,7 +275,6 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                 else -> plazo
             }
 
-            // Generar plan de cuotas con nueva lógica
             cuotas = generarPlanCuotasConEstado(
                 db = db,
                 prestamoId = prestamoId,
@@ -295,7 +285,6 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                 plazo = plazo.lowercase()
             )
 
-            // Obtener fecha programada actual (manejar diferentes tipos)
             proximoPagoProgramado = when (val proximoPago = prestamoDoc.get("proximoPago")) {
                 is Timestamp -> formatter.format(proximoPago.toDate())
                 is Date -> formatter.format(proximoPago)
@@ -303,31 +292,69 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                 else -> null
             }
 
-            // Manejar mora (simplificado)
             val moraValor = prestamoDoc.getDouble("mora") ?: 0.0
             val moraActiva = moraValor > 0.0
             moraAplicada = if (moraActiva) moraValor else 0.0
 
             if (moraActiva) {
-                cuotas = cuotas + CuotaInfo(
-                    numero = cuotas.size + 1,
-                    fecha = "Aplicada (mora)",
-                    capital = 0.0,
-                    interes = 0.0,
-                    total = moraValor,
-                    descripcion = "Mora",
-                    pagada = false // La mora siempre aparece como pendiente hasta que se pague
-                )
+                val pagosSnapshot = db.collection("pagos")
+                    .whereEqualTo("prestamoId", prestamoId)
+                    .get().await()
+
+                var moraPagada = false
+                var montoMoraPagado = 0.0
+
+                for (pago in pagosSnapshot.documents) {
+                    val moraPago = pago.getDouble("mora") ?: 0.0
+                    if (moraPago > 0) {
+                        montoMoraPagado += moraPago
+                    }
+                }
+
+                moraPagada = montoMoraPagado >= moraValor - 0.01
+
+                Log.d("CuotasScreenCascada", """
+                    📊 ESTADO DE MORA:
+                    - Mora aplicada: L. $moraValor
+                    - Mora pagada en total: L. $montoMoraPagado
+                    - ¿Está pagada?: $moraPagada
+                """.trimIndent())
+
+                if (!moraPagada) {
+                    cuotas = cuotas + CuotaInfo(
+                        numero = cuotas.size + 1,
+                        fecha = "Aplicada (mora)",
+                        capital = 0.0,
+                        interes = 0.0,
+                        total = moraValor,
+                        descripcion = "Mora",
+                        pagada = false,
+                        montoPagado = montoMoraPagado
+                    )
+                } else {
+                    cuotas = cuotas + CuotaInfo(
+                        numero = cuotas.size + 1,
+                        fecha = "Aplicada (mora)",
+                        capital = 0.0,
+                        interes = 0.0,
+                        total = moraValor,
+                        descripcion = "Mora",
+                        pagada = true,
+                        montoPagado = montoMoraPagado,
+                        fechaPago = "Pagada"
+                    )
+                }
             }
 
-            // Verificar si está saldado (simplificado)
             val cuotasNormales = cuotas.filter { it.descripcion != "Mora" }
             val todasPagadas = cuotasNormales.all { it.estaCompleta }
-            val moraCobrada = moraAplicada == 0.0 || cuotas.find { it.descripcion == "Mora" }?.estaCompleta == true
+            val cuotaMora = cuotas.find { it.descripcion == "Mora" }
+            val moraCobrada = moraAplicada == 0.0 || cuotaMora?.estaCompleta == true
             estaSaldado = todasPagadas && moraCobrada
 
             Log.d("CuotasScreenCascada", """
                 ✅ DATOS RECARGADOS CON LÓGICA DE CASCADA:
+                - Número de préstamo: $numeroPrestamo
                 - Cuotas totales: ${cuotasNormales.size}
                 - Completamente pagadas: ${cuotasNormales.count { it.estaCompleta }}
                 - Próxima fecha programada: $proximoPagoProgramado
@@ -341,7 +368,6 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
         }
     }
 
-    // Carga inicial
     LaunchedEffect(prestamoId) {
         cargando = true
         errorCarga = null
@@ -349,7 +375,6 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
         try {
             Log.d("CuotasScreenCascada", "=== INICIANDO CARGA CON LÓGICA DE CASCADA ===")
 
-            // Verificar que el préstamo existe
             val prestamoDoc = db.collection("prestamos").document(prestamoId).get().await()
 
             if (!prestamoDoc.exists()) {
@@ -361,7 +386,6 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                 throw Exception("Este préstamo ha sido eliminado")
             }
 
-            // Verificar permisos según rol
             if (rol == "cobrador") {
                 val cobradoresAsignados = prestamoDoc.get("cobradoresAsignados") as? List<*> ?: emptyList<String>()
                 val cobradoresString = cobradoresAsignados.mapNotNull { it as? String }
@@ -375,13 +399,10 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
             esActivo = estado == "activo"
 
             nombreCliente = prestamoDoc.getString("cliente") ?: "Cliente"
-            numeroPrestamo = prestamoDoc.getLong("numeroPrestamo")?.toInt() ?: 0
 
-            // Obtener nombre del usuario
             val usuarioDoc = db.collection("usuarios").document(uid).get().await()
             nombreCobrador = usuarioDoc.getString("nombre") ?: uid
 
-            // Cargar datos completos
             recargarDatosCompletos()
 
         } catch (e: Exception) {
@@ -396,11 +417,21 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        "Cuotas - Sistema Cascada",
-                        color = Color.White,
-                        fontSize = 18.sp
-                    )
+                    Column {
+                        Text(
+                            "Sistema de Cuotas",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (numeroPrestamoDisplay.isNotEmpty()) {
+                            Text(
+                                numeroPrestamoDisplay,
+                                color = Color.White.copy(alpha = 0.9f),
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0061A7))
             )
@@ -469,7 +500,6 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     contentPadding = PaddingValues(16.dp)
                 ) {
-                    // INFORMACIÓN GENERAL DEL PRÉSTAMO
                     item {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -477,7 +507,6 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                             elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                         ) {
                             Column(modifier = Modifier.padding(20.dp)) {
-                                // Título de la sección
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.fillMaxWidth()
@@ -488,22 +517,30 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                                         tint = Color(0xFF0061A7)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        "Información del Préstamo",
-                                        fontSize = 20.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF0061A7)
-                                    )
+                                    Column {
+                                        Text(
+                                            "Información del Préstamo",
+                                            fontSize = 20.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF0061A7)
+                                        )
+                                        if (numeroPrestamo != "N/D") {
+                                            Text(
+                                                "N° $numeroPrestamo",
+                                                fontSize = 16.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = Color(0xFF1976D2)
+                                            )
+                                        }
+                                    }
                                 }
 
                                 Spacer(modifier = Modifier.height(16.dp))
 
-                                // Información en dos columnas
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    // Columna izquierda
                                     Column(modifier = Modifier.weight(1f)) {
                                         InfoRow(Icons.Default.Person, "Cliente", nombreCliente)
                                         Spacer(modifier = Modifier.height(8.dp))
@@ -514,7 +551,6 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
 
                                     Spacer(modifier = Modifier.width(16.dp))
 
-                                    // Columna derecha
                                     Column(modifier = Modifier.weight(1f)) {
                                         InfoRow(Icons.Default.AttachMoney, "Interés", "L. ${dec.format(totalInteres)}")
                                         Spacer(modifier = Modifier.height(8.dp))
@@ -536,15 +572,29 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
 
                                 if (moraAplicada > 0.0) {
                                     Spacer(modifier = Modifier.height(12.dp))
+                                    val cuotaMora = cuotas.find { it.descripcion == "Mora" }
+                                    val moraEstaPagada = cuotaMora?.estaCompleta == true
+
                                     Card(
-                                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE))
-                                    ) {
-                                        Text(
-                                            "Mora aplicada: L. ${dec.format(moraAplicada)}",
-                                            modifier = Modifier.padding(12.dp),
-                                            color = Color.Red,
-                                            fontWeight = FontWeight.Bold
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (moraEstaPagada) Color(0xFFE8F5E8) else Color(0xFFFFEBEE)
                                         )
+                                    ) {
+                                        Column(modifier = Modifier.padding(12.dp)) {
+                                            Text(
+                                                if (moraEstaPagada) "Mora pagada: L. ${dec.format(moraAplicada)}"
+                                                else "Mora aplicada: L. ${dec.format(moraAplicada)}",
+                                                color = if (moraEstaPagada) Color(0xFF388E3C) else Color.Red,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            if (cuotaMora != null && cuotaMora.montoPagado > 0 && !moraEstaPagada) {
+                                                Text(
+                                                    "Pagado: L. ${dec.format(cuotaMora.montoPagado)}",
+                                                    color = Color(0xFFFF9800),
+                                                    fontSize = 12.sp
+                                                )
+                                            }
+                                        }
                                     }
                                 }
 
@@ -562,7 +612,6 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                         }
                     }
 
-                    // PROGRESO DEL PRÉSTAMO
                     item {
                         val cuotasNormales = cuotas.filter { it.descripcion != "Mora" }
                         val cuotasPagadas = cuotasNormales.count { it.estaCompleta }
@@ -609,7 +658,6 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                         }
                     }
 
-                    // INFORMACIÓN DEL SISTEMA
                     item {
                         Card(
                             colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1))
@@ -623,7 +671,7 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    "Los pagos se distribuyen automáticamente completando cuotas en orden secuencial. No hay abonos parciales.",
+                                    "Los pagos se distribuyen automáticamente completando cuotas en orden secuencial. Los saldos se calculan desde los pagos reales registrados.",
                                     color = Color(0xFFBF360C),
                                     fontSize = 14.sp
                                 )
@@ -631,14 +679,13 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                         }
                     }
 
-                    // BOTÓN EXPORTAR PDF
                     item {
                         Button(
                             onClick = {
                                 val pdfFile = ReciboHelper.generarCuotasPDF(
                                     context = context,
                                     cliente = nombreCliente,
-                                    prestamoId = prestamoId,
+                                    prestamoId = if (numeroPrestamo != "N/D") "Préstamo N° $numeroPrestamo" else prestamoId,
                                     cuotas.map { cuota ->
                                         mapOf(
                                             "numero" to cuota.numero,
@@ -670,7 +717,6 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                         }
                     }
 
-                    // LISTA DE CUOTAS
                     items(cuotas) { cuota ->
                         CuotaCard(
                             cuota = cuota,
@@ -681,17 +727,96 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                                 scope.launch {
                                     try {
                                         withContext(Dispatchers.IO) {
-                                            // Crear pago manual usando la nueva estructura de cascada
+                                            val prestamoRef = db.collection("prestamos").document(prestamoId)
+                                            val prestamoSnap = prestamoRef.get().await()
+
+                                            val monto = prestamoSnap.getDouble("monto") ?: 0.0
+                                            val interesTotal = prestamoSnap.getDouble("interesTotal")
+                                                ?: prestamoSnap.getDouble("interes") ?: 0.0
+                                            val totalPagar = prestamoSnap.getDouble("totalPagar")
+                                                ?: (monto + interesTotal)
+                                            val moraActual = prestamoSnap.getDouble("mora") ?: 0.0
+                                            val numeroPrestamoActual = prestamoSnap.getString("numeroPrestamo")
+                                                ?: prestamoSnap.getLong("numeroPrestamo")?.toString()
+                                                ?: "N/D"
+                                            val plazo = prestamoSnap.getString("plazo") ?: "semanal"
+                                            val fechaInicio = prestamoSnap.getTimestamp("fecha")?.toDate() ?: Date()
+
+                                            val pagosSnapshot = db.collection("pagos")
+                                                .whereEqualTo("prestamoId", prestamoId)
+                                                .get().await()
+
+                                            var totalRealmentePagado = 0.0
+                                            for (pago in pagosSnapshot.documents) {
+                                                val montoPago = pago.getDouble("monto") ?: 0.0
+                                                val moraPago = pago.getDouble("mora") ?: 0.0
+                                                totalRealmentePagado += montoPago + moraPago
+                                            }
+
+                                            val totalConMora = totalPagar + moraActual
+                                            val nuevoMontoPagado = totalRealmentePagado + cuota.total
+                                            val nuevoSaldo = (totalConMora - nuevoMontoPagado).coerceAtLeast(0.0)
+
+                                            Log.d("PagoManual", """
+                                                ✅ CÁLCULO DE SALDO DESDE PAGOS REALES:
+                                                - Préstamo N°: $numeroPrestamoActual
+                                                - Total préstamo base: L. $totalPagar
+                                                - Mora aplicada: L. $moraActual
+                                                - Total con mora: L. $totalConMora
+                                                - Ya pagado (real): L. $totalRealmentePagado
+                                                - Pago actual: L. ${cuota.total}
+                                                - Nuevo pagado: L. $nuevoMontoPagado
+                                                - SALDO FINAL: L. $nuevoSaldo
+                                            """.trimIndent())
+
+                                            val cuotasPagadas = mutableSetOf<Int>()
+                                            for (pago in pagosSnapshot.documents) {
+                                                val cuotasCubiertas = pago.get("cuotasCubiertas") as? List<*>
+                                                if (cuotasCubiertas != null) {
+                                                    cuotasCubiertas.forEach { cuotaData ->
+                                                        if (cuotaData is Map<*, *>) {
+                                                            val numCuota = (cuotaData["numeroCuota"] as? Number)?.toInt()
+                                                            if (numCuota != null) cuotasPagadas.add(numCuota)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            cuotasPagadas.add(cuota.numero)
+
+                                            val cuotasNum = prestamoSnap.getLong("cuotas")?.toInt() ?: 1
+                                            var proximaCuotaPendiente: Int? = null
+                                            for (i in 1..cuotasNum) {
+                                                if (!cuotasPagadas.contains(i)) {
+                                                    proximaCuotaPendiente = i
+                                                    break
+                                                }
+                                            }
+
+                                            val proximoPagoStr = if (proximaCuotaPendiente != null) {
+                                                calcularFechaCuota(fechaInicio, plazo, proximaCuotaPendiente)
+                                            } else {
+                                                "saldado"
+                                            }
+
+                                            val fechaActual = Timestamp.now()
+                                            val fechaFormateada = SimpleDateFormat(
+                                                "dd/MM/yyyy HH:mm",
+                                                Locale.getDefault()
+                                            ).format(fechaActual.toDate())
+
                                             val abonoManual = mapOf(
                                                 "prestamoId" to prestamoId,
-                                                "monto" to cuota.total,
-                                                "mora" to 0.0,
-                                                "fechaPago" to Timestamp.now(),
+                                                "numeroPrestamo" to numeroPrestamoActual,
+                                                "monto" to if (cuota.descripcion == "Mora") 0.0 else cuota.total,
+                                                "mora" to if (cuota.descripcion == "Mora") cuota.total else 0.0,
+                                                "fechaPago" to fechaActual,
                                                 "registradoPor" to uid,
                                                 "nombreCobrador" to nombreCobrador,
                                                 "clienteNombre" to nombreCliente,
                                                 "metodoPago" to "Manual (Admin)",
                                                 "sistemaPagoEnCascada" to true,
+                                                "saldoRestante" to nuevoSaldo,
+                                                "proximaFechaProgramada" to proximoPagoStr,
                                                 "cuotasCubiertas" to listOf(
                                                     mapOf(
                                                         "numeroCuota" to cuota.numero,
@@ -704,23 +829,64 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
 
                                             db.collection("pagos").add(abonoManual).await()
 
-                                            // Actualizar préstamo
-                                            val prestamoRef = db.collection("prestamos").document(prestamoId)
-                                            val prestamoSnap = prestamoRef.get().await()
-                                            val saldoActual = prestamoSnap.getDouble("saldo") ?: 0.0
-                                            val montoPagadoActual = prestamoSnap.getDouble("montoPagado") ?: 0.0
+                                            val saldoAnterior = (totalConMora - totalRealmentePagado).coerceAtLeast(0.0)
 
-                                            val nuevoSaldo = (saldoActual - cuota.total).coerceAtLeast(0.0)
-                                            val nuevoMontoPagado = montoPagadoActual + cuota.total
+                                            val pdfFile = ReciboHelper.generarReciboPDF(
+                                                context = context,
+                                                cliente = nombreCliente,
+                                                prestamoId = if (numeroPrestamoActual != "N/D") "Préstamo N° $numeroPrestamoActual" else "Préstamo ID: $prestamoId",
+                                                fecha = fechaFormateada,
+                                                montoPagado = cuota.total.toString(),
+                                                saldoAnterior = saldoAnterior,
+                                                proximoPago = proximoPagoStr,
+                                                cuota = if (cuota.descripcion == "Mora") "MORA" else "Cuota #${cuota.numero}",
+                                                cobrador = nombreCobrador,
+                                                lugar = "Registro Manual",
+                                                firma = nombreCobrador,
+                                                tipoPago = "Manual (Admin)",
+                                                mora = if (cuota.descripcion == "Mora") cuota.total else 0.0,
+                                                saldoNuevoFijo = nuevoSaldo
+                                            )
 
-                                            prestamoRef.update(mapOf(
-                                                "saldo" to nuevoSaldo,
-                                                "montoPagado" to nuevoMontoPagado,
-                                                "fechaUltimaActualizacion" to Timestamp.now()
-                                            )).await()
+                                            if (pdfFile != null && pdfFile.exists()) {
+                                                ReciboHelper.compartirReciboPDF(context, pdfFile)
+                                            }
+
+                                            val actualizacionPrestamo = if (nuevoSaldo <= 0.01) {
+                                                mapOf<String, Any>(
+                                                    "saldo" to 0.0,
+                                                    "montoPagado" to totalConMora,
+                                                    "estado" to "saldado",
+                                                    "proximoPago" to "saldado",
+                                                    "fechaUltimaActualizacion" to fechaActual,
+                                                    "ultimoPago" to fechaFormateada,
+                                                    "fechaSaldado" to fechaActual,
+                                                    "fechaCancelacion" to fechaActual,
+                                                    "mora" to 0.0
+                                                )
+                                            } else {
+                                                mapOf<String, Any>(
+                                                    "saldo" to nuevoSaldo,
+                                                    "montoPagado" to nuevoMontoPagado,
+                                                    "estado" to "activo",
+                                                    "proximoPago" to proximoPagoStr,
+                                                    "fechaUltimaActualizacion" to fechaActual,
+                                                    "ultimoPago" to fechaFormateada
+                                                )
+                                            }
+
+                                            prestamoRef.update(actualizacionPrestamo).await()
+
+                                            withContext(Dispatchers.Main) {
+                                                val mensaje = if (nuevoSaldo <= 0.01) {
+                                                    "¡PRÉSTAMO N° $numeroPrestamoActual SALDADO! ✅"
+                                                } else {
+                                                    "Cuota pagada (Préstamo N° $numeroPrestamoActual). Saldo: L. ${dec.format(nuevoSaldo)}"
+                                                }
+                                                Toast.makeText(context, mensaje, Toast.LENGTH_LONG).show()
+                                            }
                                         }
 
-                                        Toast.makeText(context, "Cuota marcada como pagada", Toast.LENGTH_SHORT).show()
                                         recargarDatosCompletos()
 
                                     } catch (e: Exception) {
@@ -732,7 +898,6 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                         )
                     }
 
-                    // RESUMEN FINAL
                     item {
                         val cuotasNormales = cuotas.filter { it.descripcion != "Mora" }
                         val cuotasCompletas = cuotasNormales.count { it.estaCompleta }
@@ -762,7 +927,7 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                                 Spacer(modifier = Modifier.height(12.dp))
 
                                 Text(
-                                    "El sistema de cascada elimina los abonos parciales distribuyendo automáticamente los pagos para completar cuotas en orden secuencial.",
+                                    "El sistema de cascada calcula los saldos desde los pagos reales registrados, eliminando inconsistencias.",
                                     color = Color(0xFF4A148C),
                                     fontSize = 14.sp,
                                     fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
@@ -771,7 +936,6 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                         }
                     }
 
-                    // BOTONES DE NAVEGACIÓN
                     item {
                         Row(
                             modifier = Modifier
@@ -799,13 +963,12 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                         }
                     }
 
-                    // INFORMACIÓN DEL USUARIO
                     item {
                         Card(
                             colors = CardDefaults.cardColors(containerColor = Color(0xFFFAFAFA))
                         ) {
                             Text(
-                                "Usuario: $nombreCobrador ($rol) | Préstamo #$numeroPrestamo",
+                                "Usuario: $nombreCobrador ($rol) | Préstamo ${if (numeroPrestamo != "N/D") "N° $numeroPrestamo" else prestamoId}",
                                 modifier = Modifier.padding(12.dp),
                                 fontSize = 12.sp,
                                 color = Color.Gray,
@@ -818,8 +981,6 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
         }
     }
 }
-
-// ===================== COMPOSABLES AUXILIARES =====================
 
 @Composable
 private fun InfoRow(
@@ -864,15 +1025,14 @@ private fun CuotaCard(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = when {
-                cuota.estaCompleta -> Color(0xFFE8F5E8) // Verde suave
-                cuota.montoPagado > 0 -> Color(0xFFFFF3E0) // Naranja muy suave
+                cuota.estaCompleta -> Color(0xFFE8F5E8)
+                cuota.montoPagado > 0 -> Color(0xFFFFF3E0)
                 else -> Color.White
             }
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // ENCABEZADO DE LA CUOTA
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -902,7 +1062,6 @@ private fun CuotaCard(
                     }
                 }
 
-                // INDICADOR DE ESTADO
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         if (cuota.estaCompleta) Icons.Default.CheckCircle else Icons.Default.HourglassBottom,
@@ -930,7 +1089,6 @@ private fun CuotaCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // INFORMACIÓN DE FECHAS
             if (cuota.descripcion != "Mora") {
                 Text(
                     "Fecha programada: ${cuota.fecha}",
@@ -939,7 +1097,6 @@ private fun CuotaCard(
                 )
             }
 
-            // INFORMACIÓN DE PAGOS REALIZADOS
             if (cuota.estaCompleta && cuota.fechaPago != null) {
                 Text(
                     "✓ Pagada el: ${cuota.fechaPago}",
@@ -974,7 +1131,6 @@ private fun CuotaCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // INFORMACIÓN FINANCIERA
             if (cuota.capital > 0 || cuota.interes > 0) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -998,7 +1154,6 @@ private fun CuotaCard(
                 Spacer(modifier = Modifier.height(4.dp))
             }
 
-            // TOTAL Y MONTOS
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1032,8 +1187,7 @@ private fun CuotaCard(
                 }
             }
 
-            // BOTONES DE ACCIÓN
-            if (!cuota.estaCompleta && esActivo && cuota.descripcion != "Mora") {
+            if (!cuota.estaCompleta && esActivo) {
                 Spacer(modifier = Modifier.height(12.dp))
 
                 when (rol) {
@@ -1043,7 +1197,11 @@ private fun CuotaCard(
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A7))
                         ) {
-                            Text("Marcar como Pagada (Admin)", color = Color.White)
+                            Text(
+                                if (cuota.descripcion == "Mora") "Marcar Mora como Pagada (Admin)"
+                                else "Marcar como Pagada (Admin)",
+                                color = Color.White
+                            )
                         }
                     }
                     "cobrador" -> {
@@ -1094,4 +1252,5 @@ private fun ResumenRow(
                     .background(color = color, shape = androidx.compose.foundation.shape.CircleShape)
             )
         }
-    }}
+    }
+}

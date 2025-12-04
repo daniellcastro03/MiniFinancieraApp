@@ -93,6 +93,41 @@ private fun calcularFechaCuota(fechaInicio: Date, plazo: String, numeroCuota: In
     return dateFormat.format(calendar.time)
 }
 
+// ✅✅✅ NUEVA FUNCIÓN: CALCULAR SALDO REAL DESDE PAGOS ✅✅✅
+private suspend fun calcularSaldoRealDesdePagos(
+    db: FirebaseFirestore,
+    prestamoId: String,
+    totalPagar: Double
+): Double {
+    return try {
+        val pagosSnapshot = db.collection("pagos")
+            .whereEqualTo("prestamoId", prestamoId)
+            .get().await()
+
+        var totalPagado = 0.0
+        for (pago in pagosSnapshot.documents) {
+            val montoPago = pago.getDouble("monto") ?: 0.0
+            val moraPago = pago.getDouble("mora") ?: 0.0
+            totalPagado += montoPago + moraPago
+        }
+
+        val saldoReal = (totalPagar - totalPagado).coerceAtLeast(0.0)
+
+        Log.d("SaldoReal", """
+            Préstamo: $prestamoId
+            Total a pagar: L. $totalPagar
+            Total pagado: L. $totalPagado
+            Saldo real: L. $saldoReal
+        """.trimIndent())
+
+        saldoReal
+
+    } catch (e: Exception) {
+        Log.e("SaldoReal", "Error calculando saldo: ${e.message}")
+        0.0
+    }
+}
+
 private suspend fun obtenerEstadoCuotasSimplificado(
     db: FirebaseFirestore,
     prestamoId: String,
@@ -171,20 +206,28 @@ suspend fun procesarPrestamoConCascada(
         if (eliminado) return null
 
         val plazo = doc.getString("plazo") ?: "semanal"
-        val saldoActual = doc.getDouble("saldo") ?: 0.0
         val estadoDoc = doc.getString("estado") ?: "activo"
         val cuotasNum = doc.getLong("cuotas")?.toInt() ?: 1
         val fechaInicio = doc.getTimestamp("fecha")?.toDate() ?: doc.getDate("fecha") ?: Date()
         val cuotaEstimada = doc.getDouble("cuota") ?: 0.0
 
-        // ✅ FILTRAR PRÉSTAMOS SALDADOS
-        if (saldoActual <= 0.0 || estadoDoc.equals("saldado", ignoreCase = true)) {
+        // ✅✅✅ CALCULAR SALDO REAL DESDE PAGOS ✅✅✅
+        val monto = doc.getDouble("monto") ?: 0.0
+        val interesTotal = doc.getDouble("interesTotal") ?: doc.getDouble("interes") ?: 0.0
+        val moraActual = doc.getDouble("mora") ?: 0.0
+        val totalPagar = doc.getDouble("totalPagar") ?: (monto + interesTotal)
+        val totalConMora = totalPagar + moraActual
+
+        val db = FirebaseFirestore.getInstance()
+        val saldoReal = calcularSaldoRealDesdePagos(db, prestamoId, totalConMora)
+
+        // ✅ FILTRAR PRÉSTAMOS SALDADOS CON SALDO REAL
+        if (saldoReal <= 0.0 || estadoDoc.equals("saldado", ignoreCase = true)) {
             return null
         }
 
         if (cuotasNum <= 0 || cuotasNum > 500 || cuotaEstimada <= 0) return null
 
-        val db = FirebaseFirestore.getInstance()
         val (cuotasCompletadas, proximaCuotaNumero) = obtenerEstadoCuotasSimplificado(
             db, prestamoId, cuotasNum, cuotaEstimada
         )
@@ -213,7 +256,7 @@ suspend fun procesarPrestamoConCascada(
 
         NotificacionCobroCascada(
             cliente = cliente,
-            montoSaldoPendiente = saldoActual,
+            montoSaldoPendiente = saldoReal, // ⭐ USAR SALDO REAL
             fechaProximaCuota = fechaProximaCuota,
             tipo = tipo,
             prestamoId = prestamoId,
@@ -309,10 +352,8 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
             val query = if (rol == "cobrador") {
                 db.collection("prestamos")
                     .whereArrayContains("cobradoresAsignados", uid)
-                    .whereGreaterThan("saldo", 0.0)
             } else {
                 db.collection("prestamos")
-                    .whereGreaterThan("saldo", 0.0)
             }
 
             val snapshot = query.get().await()
@@ -326,14 +367,12 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                 val eliminado = doc.getBoolean("eliminado") ?: false
                 val cliente = doc.getString("cliente")
                 val cuotas = doc.getLong("cuotas")?.toInt() ?: 0
-                val saldo = doc.getDouble("saldo") ?: 0.0
                 val estado = doc.getString("estado") ?: "activo"
 
                 !eliminado &&
                         !cliente.isNullOrBlank() &&
                         cuotas > 0 &&
                         cuotas <= 500 &&
-                        saldo > 0.0 &&
                         !estado.equals("saldado", ignoreCase = true)
             }
 
@@ -680,6 +719,7 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
     }
 }
 
+// Los demás composables permanecen igual...
 @Composable
 fun StatCard(label: String, count: Int, color: Color, icon: ImageVector) {
     Card(
@@ -769,7 +809,7 @@ fun SistemaCascadaInfo() {
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                "Sistema Cascada: Pagos automáticos en orden",
+                "Sistema Cascada: Saldos calculados desde pagos reales",
                 fontSize = 13.sp,
                 color = Color(0xFF4A148C)
             )

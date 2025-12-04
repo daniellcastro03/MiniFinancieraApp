@@ -378,7 +378,7 @@ fun PagosAsignadosCobradorScreen(navController: NavController) {
     }
 }
 
-// Función para procesar documentos de pago del cobrador
+// ⭐ FUNCIÓN CORREGIDA: procesarDocumentoPagoCobrador
 private fun procesarDocumentoPagoCobrador(
     doc: com.google.firebase.firestore.DocumentSnapshot,
     usuarios: Map<String, String>,
@@ -452,7 +452,14 @@ private fun procesarDocumentoPagoCobrador(
 
         val nombreCobrador = usuarios[cobradorId] ?: cobradorId
         val datosPrestamoInt = prestamos[prestamoId]
-        val numeroPrestamo = (datosPrestamoInt?.get("numeroPrestamo") as? Long ?: 0L).toInt()
+
+        // ⭐ LEER numeroPrestamo COMO STRING CON COMPATIBILIDAD
+        val numeroPrestamoStr = when (val numPrestamo = datosPrestamoInt?.get("numeroPrestamo")) {
+            is String -> numPrestamo
+            is Long -> numPrestamo.toString()
+            is Int -> numPrestamo.toString()
+            else -> doc.getString("numeroPrestamo") ?: ""
+        }
 
         return PagoItem(
             docId = doc.id,
@@ -468,7 +475,7 @@ private fun procesarDocumentoPagoCobrador(
             firma = firma,
             tipoPago = tipoPagoFinal,
             saldoRestante = saldoRestante,
-            numeroPrestamo = numeroPrestamo
+            numeroPrestamo = numeroPrestamoStr // ⭐ STRING
         )
 
     } catch (e: Exception) {
@@ -1073,7 +1080,7 @@ private fun PagoCardCobrador(
                     }
                 }
 
-                if (pago.numeroPrestamo > 0) {
+                if (pago.numeroPrestamo.isNotEmpty()) {
                     Surface(
                         color = Color(0xFF0061A7),
                         shape = RoundedCornerShape(8.dp)
@@ -1122,9 +1129,9 @@ private fun PagoCardCobrador(
                     }
 
                     // Info específica para abonos parciales
-                    if (esAbonoParcial && pago.saldoRestante > 0) {
+                    if (esAbonoParcial && (pago.saldoRestante ?: 0.0) > 0) {
                         Text(
-                            "Resta de cuota: L. ${String.format("%.2f", pago.saldoRestante)}",
+                            "Resta de cuota: L. ${String.format("%.2f", pago.saldoRestante ?: 0.0)}",
                             fontSize = 12.sp,
                             color = Color(0xFFFF9800),
                             fontWeight = FontWeight.Medium
@@ -1233,11 +1240,11 @@ private fun PagoCardCobrador(
 // Función para reimprimir recibo del cobrador
 private suspend fun reimprimirReciboCobrador(context: android.content.Context, pago: PagoItem) {
     try {
-        val saldoAnterior = pago.saldoRestante + pago.monto
+        val saldoAnterior = (pago.saldoRestante ?: 0.0) + pago.monto
         val file = ReciboHelper.generarReciboPDF(
             context = context,
             cliente = pago.cliente,
-            prestamoId = if (pago.numeroPrestamo > 0) "Préstamo Nº ${pago.numeroPrestamo}" else pago.prestamoId,
+            prestamoId = if (pago.numeroPrestamo.isNotEmpty()) "Préstamo Nº ${pago.numeroPrestamo}" else pago.prestamoId,
             fecha = pago.fecha,
             montoPagado = pago.monto.toString(),
             saldoAnterior = saldoAnterior,

@@ -40,7 +40,7 @@ import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.*
 
-// Data class actualizada para incluir el campo eliminado
+// ⭐ Data class actualizada con numeroPrestamo como String
 data class PrestamoAdmin(
     val cliente: String = "",
     val monto: Double = 0.0,
@@ -68,7 +68,7 @@ data class PrestamoAdmin(
     val fotos: List<String> = emptyList(),
     val diasEfectivos: Int = 0,
     val cobradores: List<String> = emptyList(),
-    val numeroPrestamo: Int = 0,
+    val numeroPrestamo: String = "", // ⭐ CAMBIADO A STRING
     val prestamoId: String = "",
     val id: String = "",
     val eliminado: Boolean = false,
@@ -77,9 +77,6 @@ data class PrestamoAdmin(
     val eliminadoPor: String = ""
 )
 
-// ✅ FUNCIONES CORREGIDAS PARA VERIFICAR ESTADO REAL
-
-// Función para calcular fechas de cuotas (igual que en NotificacionesScreen)
 private fun calcularFechaCuotaAdmin(fechaInicio: Date, plazo: String, numeroCuota: Int): String {
     val calendar = Calendar.getInstance().apply { time = fechaInicio }
     val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
@@ -115,7 +112,6 @@ private fun calcularFechaCuotaAdmin(fechaInicio: Date, plazo: String, numeroCuot
     return dateFormat.format(calendar.time)
 }
 
-// Función para verificar si un préstamo está realmente saldado
 private suspend fun verificarEstadoRealPrestamoAdmin(
     db: FirebaseFirestore,
     prestamoId: String,
@@ -123,8 +119,7 @@ private suspend fun verificarEstadoRealPrestamoAdmin(
     saldo: Double
 ): String {
     return try {
-        // ✅ VERIFICACIÓN PRIORITARIA POR SALDO
-        if (saldo <= 0) {
+        if (saldo <= 0.01) {
             Log.d("PrestamoAdminScreen", """
                 ✅ PRÉSTAMO SALDADO POR SALDO
                 - Préstamo: $prestamoId
@@ -135,7 +130,7 @@ private suspend fun verificarEstadoRealPrestamoAdmin(
         }
 
         if (cuotasTotales == 0) {
-            return "activo" // Si no tiene cuotas válidas, asumir activo
+            return if (saldo > 0.01) "activo" else "saldado"
         }
 
         val pagosSnapshot = db.collection("pagos")
@@ -165,7 +160,6 @@ private suspend fun verificarEstadoRealPrestamoAdmin(
             - Saldo: $saldo
             - Cuotas totales: $cuotasTotales
             - Cuotas pagadas: $cuotasPagadas
-            - Cuotas pagadas set: ${cuotasPagadasSet.sorted()}
             - Estado real: ${if (realmenteSaldado) "saldado" else "activo"}
         """.trimIndent())
 
@@ -177,7 +171,6 @@ private suspend fun verificarEstadoRealPrestamoAdmin(
     }
 }
 
-// Función para obtener nombres de cobradores
 suspend fun obtenerNombresCobradores(cobradores: List<String>): String {
     if (cobradores.isEmpty()) return "Sin asignar"
 
@@ -186,7 +179,7 @@ suspend fun obtenerNombresCobradores(cobradores: List<String>): String {
         val nombres = mutableListOf<String>()
 
         for (cobradorId in cobradores) {
-            val doc = db.collection("users").document(cobradorId).get().await()
+            val doc = db.collection("usuarios").document(cobradorId).get().await()
             val nombre = doc.getString("nombre") ?: doc.getString("email") ?: "Usuario desconocido"
             nombres.add(nombre)
         }
@@ -198,7 +191,6 @@ suspend fun obtenerNombresCobradores(cobradores: List<String>): String {
     }
 }
 
-// Componente para filtros horizontales compactos
 @Composable
 fun FiltrosCompactos(
     estadoSeleccionado: String,
@@ -223,7 +215,6 @@ fun FiltrosCompactos(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Barra de búsqueda compacta
             OutlinedTextField(
                 value = search,
                 onValueChange = onSearchChange,
@@ -250,7 +241,6 @@ fun FiltrosCompactos(
                 singleLine = true
             )
 
-            // Toggle para eliminados (solo admin)
             if (esAdmin) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -284,7 +274,6 @@ fun FiltrosCompactos(
                 }
             }
 
-            // Filtros de estado como chips horizontales (solo si no está viendo eliminados)
             if (!mostrarEliminados) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -335,7 +324,6 @@ fun FiltrosCompactos(
                 }
             }
 
-            // Botón reset si hay filtros activos
             if (hayFiltrosActivos) {
                 OutlinedButton(
                     onClick = onResetFiltros,
@@ -354,7 +342,6 @@ fun FiltrosCompactos(
     }
 }
 
-// Componente mejorado para la tarjeta de préstamo
 @Composable
 fun TarjetaPrestamo(
     prestamo: PrestamoAdmin,
@@ -378,7 +365,6 @@ fun TarjetaPrestamo(
         shape = RoundedCornerShape(16.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Header con indicador de eliminado
             if (prestamo.eliminado) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -396,7 +382,6 @@ fun TarjetaPrestamo(
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            // Info principal en una sola fila compacta
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -418,11 +403,13 @@ fun TarjetaPrestamo(
                 }
 
                 Column(horizontalAlignment = Alignment.End) {
-                    if (prestamo.numeroPrestamo > 0) {
+                    // ⭐ MOSTRAR NÚMERO DE PRÉSTAMO (STRING)
+                    if (prestamo.numeroPrestamo.isNotEmpty()) {
                         Text(
                             "#${prestamo.numeroPrestamo}",
                             color = Color.Gray,
-                            fontSize = 12.sp
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
                         )
                     }
                     EstadoChipCompacto(prestamo.estado)
@@ -431,7 +418,6 @@ fun TarjetaPrestamo(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Información clave en filas compactas
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -448,13 +434,12 @@ fun TarjetaPrestamo(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     InfoCompacta("Pagado", "L. ${"%.0f".format(prestamo.montoPagado)}")
-                    if (prestamo.saldo > 0 && prestamo.estado.lowercase() != "saldado") {
+                    if (prestamo.saldo > 0.01 && prestamo.estado.lowercase() != "saldado") {
                         InfoCompacta("Saldo", "L. ${"%.0f".format(prestamo.saldo)}")
                     }
                 }
             }
 
-            // Cobrador
             if (nombresCobradores != "Cargando...") {
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -476,7 +461,6 @@ fun TarjetaPrestamo(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Botones de acción
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -561,7 +545,6 @@ fun EstadoChipCompacto(estado: String) {
     }
 }
 
-// Componente para estadísticas rápidas
 @Composable
 fun EstadisticasRapidas(prestamos: List<PrestamoAdmin>) {
     val activos = prestamos.count { it.estado.lowercase() == "activo" }
@@ -609,7 +592,6 @@ fun EstadisticaItem(label: String, valor: String, color: Color) {
     }
 }
 
-// Extensiones helper
 fun DocumentSnapshot.getTimestampSafe(field: String): Timestamp? {
     return try {
         this.getTimestamp(field)
@@ -674,31 +656,26 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
     val esAdmin = rol == "admin"
     val esCobrador = rol == "cobrador"
 
-    // Función para verificar conectividad
     fun isNetworkAvailable(context: Context): Boolean {
         val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
         val activeNetwork = connectivityManager.activeNetworkInfo
         return activeNetwork?.isConnectedOrConnecting == true
     }
 
-    // Función para formatear fecha desde timestamp (día/mes/año)
     fun formatearFecha(timestamp: Timestamp?): String {
         return timestamp?.toDate()?.let { formatter.format(it) } ?: "-"
     }
 
-    // Función para formatear fecha completa (con hora)
     fun formatearFechaCompleta(timestamp: Timestamp?): String {
         return timestamp?.toDate()?.let { fullFormatter.format(it) } ?: "-"
     }
 
-    // Función para resetear filtros
     fun resetearFiltros() {
         estadoSeleccionado = "Todos"
         search = ""
         mostrarEliminados = false
     }
 
-    // ✅ FUNCIÓN CORREGIDA PARA CONFIGURAR LISTENER FIREBASE
     fun configurarListenerFirebase() {
         cargando = true
         errorMessage = ""
@@ -743,29 +720,43 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                                 val prestamoId = doc.id
                                 val saldo = doc.getDouble("saldo") ?: 0.0
 
-                                // ✅ VERIFICAR ESTADO REAL BASADO EN SALDO Y CUOTAS PAGADAS
                                 val estadoReal = when {
-                                    saldo <= 0 -> {
-                                        // ✅ SI EL SALDO ES 0 O NEGATIVO, DEBE SER SALDADO
+                                    saldo <= 0.01 -> {
+                                        Log.d("PrestamoAdminScreen", """
+                                            ✅ SALDO CERO DETECTADO - MARCANDO COMO SALDADO
+                                            - Cliente: $cliente
+                                            - Préstamo: $prestamoId
+                                            - Saldo: $saldo
+                                            - Estado anterior: $estadoFirestore
+                                            - Nuevo estado: saldado
+                                        """.trimIndent())
+
+                                        if (!estadoFirestore.equals("saldado", ignoreCase = true)) {
+                                            try {
+                                                db.collection("prestamos").document(prestamoId)
+                                                    .update("estado", "saldado")
+                                                    .await()
+                                                Log.d("PrestamoAdminScreen", "✅ Estado actualizado a saldado en Firestore")
+                                            } catch (updateE: Exception) {
+                                                Log.e("PrestamoAdminScreen", "Error actualizando estado: ${updateE.message}")
+                                            }
+                                        }
+
                                         "saldado"
                                     }
                                     estadoFirestore.equals("saldado", ignoreCase = true) -> {
-                                        // Si dice que está saldado pero el saldo es positivo, verificar cuotas
                                         val estadoVerificado = verificarEstadoRealPrestamoAdmin(db, prestamoId, cuotasTotales, saldo)
 
                                         if (estadoVerificado != "saldado") {
                                             Log.w("PrestamoAdminScreen", """
-                                                ⚠️ INCONSISTENCIA DETECTADA EN PRESTAMO ADMIN:
+                                                ⚠️ INCONSISTENCIA DETECTADA:
                                                 - Cliente: $cliente
                                                 - Préstamo ID: $prestamoId
                                                 - Estado en Firestore: $estadoFirestore
-                                                - Estado real verificado: $estadoVerificado
+                                                - Estado real: $estadoVerificado
                                                 - Saldo: $saldo
-                                                - Cuotas totales: $cuotasTotales
-                                                - MOSTRANDO COMO: $estadoVerificado
                                             """.trimIndent())
 
-                                            // Actualizar el estado en Firestore
                                             try {
                                                 db.collection("prestamos").document(prestamoId)
                                                     .update("estado", estadoVerificado)
@@ -779,6 +770,11 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                                     }
                                     else -> estadoFirestore
                                 }
+
+                                // ⭐ OBTENER NÚMERO DE PRÉSTAMO COMO STRING
+                                val numeroPrestamoStr = doc.getString("numeroPrestamo")
+                                    ?: doc.getLong("numeroPrestamo")?.toString()
+                                    ?: ""
 
                                 val prestamoAdmin = PrestamoAdmin(
                                     cliente = cliente,
@@ -796,11 +792,11 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                                     montoPagado = doc.getDouble("montoPagado") ?: 0.0,
                                     saldo = saldo,
                                     saldoAnterior = doc.getDouble("saldoAnterior") ?: 0.0,
-                                    estado = estadoReal, // ✅ USAR ESTADO VERIFICADO
+                                    estado = estadoReal,
                                     observaciones = doc.getString("observaciones") ?: "",
                                     diasEfectivos = doc.getLong("diasEfectivos")?.toInt() ?: 0,
-                                    numeroPrestamo = doc.getLong("numeroPrestamo")?.toInt() ?: 0,
-                                    prestamoId = doc.getString("prestamoId") ?: "",
+                                    numeroPrestamo = numeroPrestamoStr, // ⭐ STRING
+                                    prestamoId = doc.id,
                                     fechaTimestamp = doc.getTimestampSafe("fecha"),
                                     fechaCreacionTimestamp = doc.getTimestampSafe("fechaCreacion"),
                                     proximoPagoTimestamp = doc.getTimestampSafe("proximoPago"),
@@ -837,11 +833,10 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                             errorMessage = ""
 
                             Log.d("PrestamoAdminScreen", """
-                                ✅ CARGA COMPLETADA EN PRESTAMO ADMIN:
-                                - Total préstamos cargados: ${lista.size}
+                                ✅ CARGA COMPLETADA:
+                                - Total préstamos: ${lista.size}
                                 - Activos: ${lista.count { it.estado.lowercase() == "activo" }}
                                 - Saldados: ${lista.count { it.estado.lowercase() == "saldado" }}
-                                - Estados verificados correctamente
                             """.trimIndent())
                         } else {
                             errorMessage = if (esCobrador) {
@@ -873,19 +868,16 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
         }
     }
 
-    // Configurar listener al iniciar
     LaunchedEffect(Unit) {
         configurarListenerFirebase()
     }
 
-    // Limpiar listener al salir
     DisposableEffect(Unit) {
         onDispose {
             firestoreListener?.remove()
         }
     }
 
-    // Efecto para filtrar
     LaunchedEffect(estadoSeleccionado, search, prestamosOriginales, mostrarEliminados) {
         prestamosFiltrados = prestamosOriginales
             .filter { prestamo ->
@@ -954,7 +946,6 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Filtros compactos
             FiltrosCompactos(
                 estadoSeleccionado = estadoSeleccionado,
                 onEstadoChange = { estadoSeleccionado = it },
@@ -966,12 +957,10 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                 onResetFiltros = ::resetearFiltros
             )
 
-            // Estadísticas rápidas (solo si no está cargando y hay préstamos)
             if (!cargando && prestamosFiltrados.isNotEmpty() && !mostrarEliminados) {
                 EstadisticasRapidas(prestamosFiltrados)
             }
 
-            // Mensaje de error
             if (errorMessage.isNotBlank()) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -1020,7 +1009,6 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                 }
             }
 
-            // Contenido principal
             when {
                 cargando -> {
                     Box(
@@ -1100,7 +1088,6 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                 }
 
                 else -> {
-                    // Lista de préstamos
                     LazyColumn(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.fillMaxSize()
@@ -1133,7 +1120,6 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
         }
     }
 
-    // Diálogo de confirmación para eliminar
     prestamoAEliminar?.let { prestamo ->
         AlertDialog(
             onDismissRequest = { prestamoAEliminar = null },
@@ -1151,6 +1137,9 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                         "Cliente: ${prestamo.cliente}",
                         fontWeight = FontWeight.Bold
                     )
+                    if (prestamo.numeroPrestamo.isNotEmpty()) {
+                        Text("Número: ${prestamo.numeroPrestamo}")
+                    }
                     Text("Monto: L. ${"%.2f".format(prestamo.monto)}")
                     Text("Total: L. ${"%.2f".format(prestamo.totalPagar)}")
                     Spacer(modifier = Modifier.height(8.dp))
