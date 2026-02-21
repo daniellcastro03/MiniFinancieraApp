@@ -5,24 +5,30 @@ import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import android.widget.Toast
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -30,19 +36,26 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import java.text.DecimalFormat
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 
+// ─────────────────────────────────────────────
+//  DATA CLASS
+// ─────────────────────────────────────────────
 data class NotificacionCobroCascada(
     val cliente: String,
     val montoSaldoPendiente: Double,
@@ -55,362 +68,532 @@ data class NotificacionCobroCascada(
     val ultimoPago: String? = null,
     val proximaCuotaNumero: Int = 1,
     val totalCuotas: Int = 1,
-    val cuotasCompletadas: Int = 0
+    val cuotasCompletadas: Int = 0,
+    val numeroPrestamo: String = "N/D"
 )
 
-object NotificationColors {
-    val PrimaryBlue = Color(0xFF1565C0)
-    val SecondaryBlue = Color(0xFF42A5F5)
-    val LightBlue = Color(0xFFE3F2FD)
-    val DarkBlue = Color(0xFF0D47A1)
-    val SuccessGreen = Color(0xFF2E7D32)
-    val WarningOrange = Color(0xFFEF6C00)
-    val DangerRed = Color(0xFFD32F2F)
-    val InfoBlue = Color(0xFF1976D2)
-    val TextSecondary = Color(0xFF757575)
+// ─────────────────────────────────────────────
+//  PALETA DE COLORES
+// ─────────────────────────────────────────────
+object NC {
+    val Navy        = Color(0xFF0A1628)
+    val NavyMid     = Color(0xFF0F2044)
+    val Blue        = Color(0xFF1A56DB)
+    val BlueSoft    = Color(0xFF3B82F6)
+    val BlueLight   = Color(0xFFEFF6FF)
+
+    val Red         = Color(0xFFEF4444)
+    val RedSoft     = Color(0xFFFEF2F2)
+    val Orange      = Color(0xFFF97316)
+    val OrangeSoft  = Color(0xFFFFF7ED)
+    val Amber       = Color(0xFFF59E0B)
+    val AmberSoft   = Color(0xFFFFFBEB)
+    val Green       = Color(0xFF10B981)
+    val GreenSoft   = Color(0xFFECFDF5)
+
+    val Surface     = Color(0xFFF8FAFC)
+    val Card        = Color(0xFFFFFFFF)
+    val Border      = Color(0xFFE2E8F0)
+    val TextPrimary = Color(0xFF0F172A)
+    val TextSec     = Color(0xFF64748B)
+    val TextMuted   = Color(0xFF94A3B8)
+
+    val GradStart   = Color(0xFF0A1628)
+    val GradEnd     = Color(0xFF1A3A6B)
 }
 
-private fun calcularFechaCuota(fechaInicio: Date, plazo: String, numeroCuota: Int): String {
-    val calendar = Calendar.getInstance().apply { time = fechaInicio }
-    val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+// ─────────────────────────────────────────────
+//  FORMATEADORES / FECHAS
+// ─────────────────────────────────────────────
+private val fmtFecha     = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+private val fmtFechaHora = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
 
-    when (plazo.lowercase()) {
-        "diario" -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota)
-        "lunes a sábado" -> {
-            repeat(numeroCuota) {
-                do {
-                    calendar.add(Calendar.DAY_OF_YEAR, 1)
-                } while (calendar.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY)
-            }
-        }
-        "semanal" -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 7)
-        "quincenal" -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 15)
-        "mensual" -> calendar.add(Calendar.MONTH, numeroCuota)
-        "bimestral" -> calendar.add(Calendar.MONTH, numeroCuota * 2)
-        else -> calendar.add(Calendar.MONTH, numeroCuota)
-    }
-
-    return dateFormat.format(calendar.time)
+private fun startOfDay(d: Date): Date {
+    val c = Calendar.getInstance().apply { time = d }
+    c.set(Calendar.HOUR_OF_DAY, 0)
+    c.set(Calendar.MINUTE, 0)
+    c.set(Calendar.SECOND, 0)
+    c.set(Calendar.MILLISECOND, 0)
+    return c.time
 }
 
-// ✅✅✅ NUEVA FUNCIÓN: CALCULAR SALDO REAL DESDE PAGOS ✅✅✅
-private suspend fun calcularSaldoRealDesdePagos(
-    db: FirebaseFirestore,
-    prestamoId: String,
-    totalPagar: Double
-): Double {
+private fun daysBetween(from: Date, to: Date): Int {
+    val a = startOfDay(from).time
+    val b = startOfDay(to).time
+    return ((b - a) / (1000L * 60L * 60L * 24L)).toInt()
+}
+
+private fun parseFlexibleDate(raw: Any?): Date? {
     return try {
-        val pagosSnapshot = db.collection("pagos")
-            .whereEqualTo("prestamoId", prestamoId)
-            .get().await()
-
-        var totalPagado = 0.0
-        for (pago in pagosSnapshot.documents) {
-            val montoPago = pago.getDouble("monto") ?: 0.0
-            val moraPago = pago.getDouble("mora") ?: 0.0
-            totalPagado += montoPago + moraPago
+        when (raw) {
+            is Timestamp -> raw.toDate()
+            is Date      -> raw
+            is String    -> {
+                val s = raw.trim()
+                if (s.isBlank() || s.equals("saldado", true) || s.equals("null", true)) null
+                else fmtFecha.parse(s.take(10))
+            }
+            else -> null
         }
-
-        val saldoReal = (totalPagar - totalPagado).coerceAtLeast(0.0)
-
-        Log.d("SaldoReal", """
-            Préstamo: $prestamoId
-            Total a pagar: L. $totalPagar
-            Total pagado: L. $totalPagado
-            Saldo real: L. $saldoReal
-        """.trimIndent())
-
-        saldoReal
-
-    } catch (e: Exception) {
-        Log.e("SaldoReal", "Error calculando saldo: ${e.message}")
-        0.0
-    }
+    } catch (_: Exception) { null }
 }
 
-private suspend fun obtenerEstadoCuotasSimplificado(
-    db: FirebaseFirestore,
-    prestamoId: String,
-    cuotasTotales: Int,
-    cuotaEstimada: Double
-): Pair<Int, Int> {
+private fun addOneInterval(base: Date, plazo: String): Date {
+    val cal = Calendar.getInstance().apply { time = base }
+    when (plazo.lowercase().trim()) {
+        "diario"                           -> cal.add(Calendar.DAY_OF_YEAR, 1)
+        "lunes a sábado", "lunes a sabado" -> {
+            do { cal.add(Calendar.DAY_OF_YEAR, 1) }
+            while (cal.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY)
+        }
+        "semanal"   -> cal.add(Calendar.DAY_OF_YEAR, 7)
+        "quincenal" -> cal.add(Calendar.DAY_OF_YEAR, 15)
+        "mensual"   -> cal.add(Calendar.MONTH, 1)
+        "bimestral" -> cal.add(Calendar.MONTH, 2)
+        else        -> cal.add(Calendar.MONTH, 1)
+    }
+    return cal.time
+}
+
+private fun obtenerFechaInicioPrestamo(doc: DocumentSnapshot): Date {
+    doc.getTimestamp("fecha")?.toDate()?.let { return it }
+    doc.getTimestamp("fechaCreacion")?.toDate()?.let { return it }
+    parseFlexibleDate(doc.get("fecha"))?.let { return it }
+    return Date()
+}
+
+private fun obtenerProximoPagoDelPrestamo(doc: DocumentSnapshot): Date? =
+    parseFlexibleDate(doc.get("proximoPago"))
+
+private fun ultimaFechaPagoDesdePagos(pagos: List<Map<String, Any>>): Date? {
+    var max: Date? = null
+    for (p in pagos) {
+        val d = parseFlexibleDate(p["fechaPago"])
+        if (d != null && (max == null || d.after(max))) max = d
+    }
+    return max
+}
+
+// ─────────────────────────────────────────────
+//  CACHE
+// ─────────────────────────────────────────────
+private val fechasCuotasCache = ConcurrentHashMap<String, String>()
+
+// ─────────────────────────────────────────────
+//  HELPERS
+// ─────────────────────────────────────────────
+fun DocumentSnapshot.getNumeroPrestamoSafeNotif(): String {
     return try {
-        val pagosSnapshot = db.collection("pagos")
-            .whereEqualTo("prestamoId", prestamoId)
-            .get().await()
-
-        val montoPorCuota = mutableMapOf<Int, Double>()
-
-        for (pago in pagosSnapshot.documents) {
-            val cuotasCubiertas = pago.get("cuotasCubiertas") as? List<*>
-
-            if (cuotasCubiertas != null && cuotasCubiertas.isNotEmpty()) {
-                cuotasCubiertas.forEach { cuotaData ->
-                    if (cuotaData is Map<*, *>) {
-                        val numeroCuota = (cuotaData["numeroCuota"] as? Number)?.toInt() ?: 0
-                        val montoAplicado = (cuotaData["montoAplicado"] as? Number)?.toDouble() ?: 0.0
-
-                        if (numeroCuota > 0) {
-                            montoPorCuota[numeroCuota] = (montoPorCuota[numeroCuota] ?: 0.0) + montoAplicado
-                        }
-                    }
-                }
-            } else {
-                val numeroCuota = when {
-                    pago.contains("numeroCuota") -> pago.getLong("numeroCuota")?.toInt() ?: 1
-                    pago.contains("cuota") -> pago.getLong("cuota")?.toInt() ?: 1
-                    else -> 1
-                }
-
-                val montoPago = pago.getDouble("monto") ?: 0.0
-
-                if (montoPago > 0) {
-                    montoPorCuota[numeroCuota] = (montoPorCuota[numeroCuota] ?: 0.0) + montoPago
-                }
-            }
+        if (!this.contains("numeroPrestamo")) return "N/D"
+        when (val raw = this.get("numeroPrestamo")) {
+            null      -> "N/D"
+            is String -> if (raw.isNotBlank()) raw else "N/D"
+            is Long   -> raw.toString()
+            is Int    -> raw.toString()
+            is Double -> raw.toInt().toString()
+            is Number -> raw.toString()
+            else      -> raw.toString().takeIf { it.isNotBlank() && it != "null" } ?: "N/D"
         }
-
-        var cuotasCompletadas = 0
-        var proximaCuotaNumero = cuotasTotales + 1
-
-        for (i in 1..cuotasTotales) {
-            val montoPagado = montoPorCuota[i] ?: 0.0
-            if (montoPagado >= cuotaEstimada - 0.01) {
-                cuotasCompletadas++
-            } else {
-                if (proximaCuotaNumero > cuotasTotales) {
-                    proximaCuotaNumero = i
-                }
-            }
-        }
-
-        Pair(cuotasCompletadas, proximaCuotaNumero)
-
-    } catch (e: Exception) {
-        Log.e("EstadoCuotas", "Error: ${e.message}")
-        Pair(0, 1)
-    }
+    } catch (_: Exception) { "N/D" }
 }
 
-suspend fun procesarPrestamoConCascada(
+fun obtenerUltimoPagoOptimizado(doc: DocumentSnapshot): String? {
+    return try {
+        when (val raw = doc.get("ultimoPago")) {
+            is String    -> raw.takeIf { it.isNotBlank() && it != "saldado" }
+            is Timestamp -> fmtFechaHora.format(raw.toDate())
+            is Date      -> fmtFechaHora.format(raw)
+            else         -> null
+        }
+    } catch (_: Exception) { null }
+}
+
+// ─────────────────────────────────────────────
+//  PROCESAMIENTO
+// ─────────────────────────────────────────────
+suspend fun procesarPrestamoUltraOptimizado(
     doc: DocumentSnapshot,
-    formato: SimpleDateFormat
+    pagosCache: Map<String, List<Map<String, Any>>>
 ): NotificacionCobroCascada? {
     return try {
-        val cliente = doc.getString("cliente")
-        val prestamoId = doc.id
+        val cliente = doc.getString("cliente") ?: return null
+        if (cliente.isBlank()) return null
+        if (doc.getBoolean("eliminado") == true) return null
 
-        if (cliente.isNullOrBlank()) return null
+        val prestamoId     = doc.id
+        val numeroPrestamo = doc.getNumeroPrestamoSafeNotif()
+        val plazo          = (doc.getString("plazo") ?: "semanal").trim()
+        val estadoDoc      = doc.getString("estado")?.lowercase()?.trim() ?: "activo"
+        val cuotasNum      = doc.getLong("cuotas")?.toInt() ?: 1
 
-        val eliminado = doc.getBoolean("eliminado") ?: false
-        if (eliminado) return null
-
-        val plazo = doc.getString("plazo") ?: "semanal"
-        val estadoDoc = doc.getString("estado") ?: "activo"
-        val cuotasNum = doc.getLong("cuotas")?.toInt() ?: 1
-        val fechaInicio = doc.getTimestamp("fecha")?.toDate() ?: doc.getDate("fecha") ?: Date()
-        val cuotaEstimada = doc.getDouble("cuota") ?: 0.0
-
-        // ✅✅✅ CALCULAR SALDO REAL DESDE PAGOS ✅✅✅
-        val monto = doc.getDouble("monto") ?: 0.0
-        val interesTotal = doc.getDouble("interesTotal") ?: doc.getDouble("interes") ?: 0.0
-        val moraActual = doc.getDouble("mora") ?: 0.0
-        val totalPagar = doc.getDouble("totalPagar") ?: (monto + interesTotal)
-        val totalConMora = totalPagar + moraActual
-
-        val db = FirebaseFirestore.getInstance()
-        val saldoReal = calcularSaldoRealDesdePagos(db, prestamoId, totalConMora)
-
-        // ✅ FILTRAR PRÉSTAMOS SALDADOS CON SALDO REAL
-        if (saldoReal <= 0.0 || estadoDoc.equals("saldado", ignoreCase = true)) {
-            return null
-        }
-
-        if (cuotasNum <= 0 || cuotasNum > 500 || cuotaEstimada <= 0) return null
-
-        val (cuotasCompletadas, proximaCuotaNumero) = obtenerEstadoCuotasSimplificado(
-            db, prestamoId, cuotasNum, cuotaEstimada
+        val estadosExcluidos = setOf(
+            "saldado", "completado", "cancelado", "eliminado", "rechazado", "pendiente"
         )
+        if (estadoDoc in estadosExcluidos) return null
+        if (cuotasNum <= 0 || cuotasNum > 500) return null
 
-        // ✅ FILTRAR SI TODAS LAS CUOTAS ESTÁN COMPLETADAS
-        if (cuotasCompletadas >= cuotasNum) {
-            return null
+        val saldoPendiente = doc.getDouble("saldo") ?: 0.0
+        val cuotaEstimada  = doc.getDouble("cuota") ?: 0.0
+        val montoPagado    = doc.getDouble("montoPagado") ?: 0.0
+        val totalAPagar    = doc.getDouble("totalPagar") ?: 0.0
+        if (saldoPendiente <= 0.01 && montoPagado >= totalAPagar - 0.01) return null
+
+        val pagosDelPrestamo = pagosCache[prestamoId] ?: emptyList()
+        val montoPorCuota    = mutableMapOf<Int, Double>()
+
+        for (pago in pagosDelPrestamo) {
+            @Suppress("UNCHECKED_CAST")
+            val cuotasCubiertasRaw = pago["cuotasCubiertas"]
+            when {
+                cuotasCubiertasRaw is List<*> && cuotasCubiertasRaw.isNotEmpty() -> {
+                    for (item in cuotasCubiertasRaw) {
+                        val cuotaMap      = item as? Map<*, *> ?: continue
+                        val num           = (cuotaMap["numeroCuota"] as? Number)?.toInt() ?: continue
+                        val montoAplicado = (cuotaMap["montoAplicado"] as? Number)?.toDouble() ?: 0.0
+                        if (num > 0 && montoAplicado > 0)
+                            montoPorCuota[num] = (montoPorCuota[num] ?: 0.0) + montoAplicado
+                    }
+                }
+                else -> {
+                    val num = when {
+                        pago.containsKey("numeroCuota") -> (pago["numeroCuota"] as? Number)?.toInt() ?: 1
+                        pago.containsKey("cuota")       -> (pago["cuota"] as? Number)?.toInt() ?: 1
+                        else -> 1
+                    }
+                    val monto = (pago["monto"] as? Number)?.toDouble() ?: 0.0
+                    val mora  = (pago["mora"]  as? Number)?.toDouble() ?: 0.0
+                    val total = monto + mora
+                    if (num > 0 && total > 0)
+                        montoPorCuota[num] = (montoPorCuota[num] ?: 0.0) + total
+                }
+            }
         }
 
-        val fechaProximaCuota = if (proximaCuotaNumero <= cuotasNum) {
-            calcularFechaCuota(fechaInicio, plazo, proximaCuotaNumero)
-        } else {
-            "saldado"
+        var cuotasCompletadas  = 0
+        var proximaCuotaNumero = -1
+
+        for (i in 1..cuotasNum) {
+            val pagado = montoPorCuota[i] ?: 0.0
+            if (cuotaEstimada > 0 && pagado >= cuotaEstimada - 0.01) {
+                cuotasCompletadas++
+            } else if (proximaCuotaNumero == -1) {
+                proximaCuotaNumero = i
+                break
+            }
+        }
+        if (proximaCuotaNumero == -1) proximaCuotaNumero = cuotasNum + 1
+        if (cuotasCompletadas >= cuotasNum && saldoPendiente <= 0.01) return null
+
+        val ultimoPagoRealDate = ultimaFechaPagoDesdePagos(pagosDelPrestamo)
+        val fechaInicio        = obtenerFechaInicioPrestamo(doc)
+        val proximoPagoDoc     = obtenerProximoPagoDelPrestamo(doc)
+
+        val fechaProximaCuotaDate: Date = when {
+            proximaCuotaNumero > cuotasNum && saldoPendiente <= 0.01 -> return null
+            ultimoPagoRealDate != null -> addOneInterval(ultimoPagoRealDate, plazo)
+            proximoPagoDoc != null     -> proximoPagoDoc
+            else                       -> addOneInterval(fechaInicio, plazo)
         }
 
-        val diasHastaProximo = calcularDiasHastaFechaCuota(fechaProximaCuota)
+        val fechaProximaCuota = fmtFecha.format(fechaProximaCuotaDate)
+        val diasHastaProximo  = daysBetween(Date(), fechaProximaCuotaDate)
 
         val (tipo, estadoFinal) = when {
             estadoDoc.equals("inactivo", ignoreCase = true) -> "inactivo" to "inactivo"
-            diasHastaProximo < -3 -> "vencido" to "mora"
-            diasHastaProximo < 0 -> "vencido" to "activo"
-            diasHastaProximo == 0 -> "hoy" to "activo"
-            diasHastaProximo <= 3 -> "próximo" to "activo"
-            else -> "futuro" to "activo"
+            diasHastaProximo < -3  -> "vencido" to "mora"
+            diasHastaProximo < 0   -> "vencido" to "activo"
+            diasHastaProximo == 0  -> "hoy"     to "activo"
+            diasHastaProximo <= 3  -> "próximo" to "activo"
+            else                   -> "futuro"  to "activo"
         }
 
         NotificacionCobroCascada(
-            cliente = cliente,
-            montoSaldoPendiente = saldoReal, // ⭐ USAR SALDO REAL
-            fechaProximaCuota = fechaProximaCuota,
-            tipo = tipo,
-            prestamoId = prestamoId,
-            plazo = plazo,
-            diferenciaDias = diasHastaProximo,
-            estado = estadoFinal,
-            ultimoPago = obtenerUltimoPago(doc, formato),
-            proximaCuotaNumero = proximaCuotaNumero,
-            totalCuotas = cuotasNum,
-            cuotasCompletadas = cuotasCompletadas
+            cliente             = cliente,
+            montoSaldoPendiente = saldoPendiente,
+            fechaProximaCuota   = fechaProximaCuota,
+            tipo                = tipo,
+            prestamoId          = prestamoId,
+            plazo               = plazo,
+            diferenciaDias      = diasHastaProximo,
+            estado              = estadoFinal,
+            ultimoPago          = ultimoPagoRealDate?.let { fmtFechaHora.format(it) }
+                ?: obtenerUltimoPagoOptimizado(doc),
+            proximaCuotaNumero  = proximaCuotaNumero,
+            totalCuotas         = cuotasNum,
+            cuotasCompletadas   = cuotasCompletadas,
+            numeroPrestamo      = numeroPrestamo
         )
-
     } catch (e: Exception) {
-        Log.e("NotificacionesCascada", "Error: ${e.message}", e)
+        Log.e("Notif", "Error en ${doc.id}: ${e.message}", e)
         null
     }
 }
 
-fun calcularDiasHastaFechaCuota(fechaCuota: String): Int {
-    if (fechaCuota == "saldado") return 0
-
-    val formato = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-    val hoy = Calendar.getInstance().apply {
-        set(Calendar.HOUR_OF_DAY, 0)
-        set(Calendar.MINUTE, 0)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
-    }
-
-    return try {
-        val fechaCuotaCalendar = Calendar.getInstance().apply {
-            time = formato.parse(fechaCuota) ?: Date()
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-
-        ((fechaCuotaCalendar.timeInMillis - hoy.timeInMillis) / (1000 * 60 * 60 * 24)).toInt()
-    } catch (e: Exception) {
-        0
-    }
-}
-
-fun obtenerUltimoPago(doc: DocumentSnapshot, formato: SimpleDateFormat): String? {
-    return try {
-        when (val raw = doc.get("ultimoPago")) {
-            is String -> if (raw.isNotBlank() && raw != "saldado") raw else null
-            is com.google.firebase.Timestamp -> formato.format(raw.toDate())
-            is Date -> formato.format(raw)
-            else -> null
-        }
-    } catch (e: Exception) {
-        null
-    }
-}
-
+// ─────────────────────────────────────────────
+//  PANTALLA PRINCIPAL
+// ─────────────────────────────────────────────
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotificacionesScreen(navController: NavHostController, uid: String, rol: String) {
     val context = LocalContext.current
-    val db = FirebaseFirestore.getInstance()
-    val scope = rememberCoroutineScope()
-    val formato = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+    val db      = FirebaseFirestore.getInstance()
+    val scope   = rememberCoroutineScope()
 
-    val notificaciones = remember { mutableStateListOf<NotificacionCobroCascada>() }
+    val notificaciones         = remember { mutableStateListOf<NotificacionCobroCascada>() }
     val todasLasNotificaciones = remember { mutableStateListOf<NotificacionCobroCascada>() }
-    var isLoading by remember { mutableStateOf(true) }
-    var hasError by remember { mutableStateOf(false) }
+    var isLoading    by remember { mutableStateOf(true) }
+    var hasError     by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
 
-    var filtroTipo by rememberSaveable { mutableStateOf("Todos") }
-    var filtroEstado by rememberSaveable { mutableStateOf("Todos") }
+    var filtroTipo    by rememberSaveable { mutableStateOf("Todos") }
     var textoBusqueda by rememberSaveable { mutableStateOf("") }
 
-    val filtrosTipo = listOf("Todos", "vencido", "hoy", "próximo")
-    val filtrosEstado = listOf("Todos", "activo", "inactivo", "mora")
-
     var mostrarDialogoMora by remember { mutableStateOf(false) }
-    var clienteMora by remember { mutableStateOf("") }
-    var prestamoIdMora by remember { mutableStateOf("") }
-    var moraCalculada by remember { mutableStateOf("") }
-    var diasMora by remember { mutableStateOf(0) }
-    var montoPrestamo by remember { mutableStateOf(0.0) }
+    var clienteMora        by remember { mutableStateOf("") }
+    var prestamoIdMora     by remember { mutableStateOf("") }
+    var moraCalculada      by remember { mutableStateOf("") }
+    var diasMora           by remember { mutableStateOf(0) }
+    var montoPrestamo      by remember { mutableStateOf(0.0) }
 
-    suspend fun cargarNotificacionesConCascada() {
+    // ─── CARGA ───────────────────────────────────────────────────────────
+    suspend fun cargarNotificaciones() {
         try {
             isLoading = true
-            hasError = false
-            errorMessage = ""
+            hasError  = false
             todasLasNotificaciones.clear()
+            fechasCuotasCache.clear()
 
-            val query = if (rol == "cobrador") {
-                db.collection("prestamos")
-                    .whereArrayContains("cobradoresAsignados", uid)
-            } else {
-                db.collection("prestamos")
-            }
+            val (documentosRaw, pagosSnapshot) = withContext(Dispatchers.IO) {
 
-            val snapshot = query.get().await()
-            val documentos = snapshot.documents
+                val pagosDeferred = async {
+                    db.collection("pagos").get().await()
+                }
 
-            if (documentos.isEmpty()) {
-                return
-            }
+                val docsDeferred = async {
+                    if (rol != "cobrador") {
+                        // ── ADMIN: trae TODOS los préstamos no eliminados ──────
+                        db.collection("prestamos")
+                            .whereEqualTo("eliminado", false)
+                            .get().await()
+                            .documents
+                    } else {
+                        // ── COBRADOR ──────────────────────────────────────────
 
-            val documentosValidos = documentos.filter { doc ->
-                val eliminado = doc.getBoolean("eliminado") ?: false
-                val cliente = doc.getString("cliente")
-                val cuotas = doc.getLong("cuotas")?.toInt() ?: 0
-                val estado = doc.getString("estado") ?: "activo"
-
-                !eliminado &&
-                        !cliente.isNullOrBlank() &&
-                        cuotas > 0 &&
-                        cuotas <= 500 &&
-                        !estado.equals("saldado", ignoreCase = true)
-            }
-
-            val loteSize = 15
-            for (lote in documentosValidos.chunked(loteSize)) {
-                val notificacionesLote = withContext(Dispatchers.Default) {
-                    lote.mapNotNull { doc ->
-                        try {
-                            procesarPrestamoConCascada(doc, formato)
-                        } catch (e: Exception) {
-                            null
+                        // ✅ Fuente 1: clientes donde cobradorAsignado (string) = uid
+                        // SIN filtro .whereEqualTo("eliminado", false) para no perder
+                        // clientes que no tienen ese campo, filtro manual después
+                        val clientes1 = async {
+                            try {
+                                db.collection("clientes")
+                                    .whereEqualTo("cobradorAsignado", uid)
+                                    .get().await()
+                                    .documents
+                                    .filter { it.getBoolean("eliminado") != true }
+                                    .map { it.id }
+                            } catch (e: Exception) {
+                                Log.w("Notif", "clientes.cobradorAsignado falló: ${e.message}")
+                                emptyList()
+                            }
                         }
+
+                        // ✅ Fuente 2: clientes donde cobradoresAsignados (array) contiene uid
+                        // SIN filtro .whereEqualTo("eliminado", false) por la misma razón
+                        val clientes2 = async {
+                            try {
+                                db.collection("clientes")
+                                    .whereArrayContains("cobradoresAsignados", uid)
+                                    .get().await()
+                                    .documents
+                                    .filter { it.getBoolean("eliminado") != true }
+                                    .map { it.id }
+                            } catch (e: Exception) {
+                                Log.w("Notif", "clientes.cobradoresAsignados falló: ${e.message}")
+                                emptyList()
+                            }
+                        }
+
+                        val todosClienteIds = (clientes1.await() + clientes2.await()).distinct()
+
+                        Log.d("Notif", "👥 Clientes para cobrador $uid: ${todosClienteIds.size} " +
+                                "(cobradorAsignado: ${clientes1.await().size}, " +
+                                "cobradoresAsignados: ${clientes2.await().size})")
+
+                        // ✅ Fuente 3: TODOS los préstamos de esos clientes
+                        // (no importa qué cobrador tenga el préstamo, lo que manda es el cliente)
+                        val prestamosPorClientes = if (todosClienteIds.isNotEmpty()) {
+                            todosClienteIds
+                                .chunked(10)
+                                .map { chunk ->
+                                    async {
+                                        try {
+                                            db.collection("prestamos")
+                                                .whereIn("clienteId", chunk)
+                                                .get().await()
+                                                .documents
+                                                .filter { it.getBoolean("eliminado") != true }
+                                        } catch (e: Exception) {
+                                            Log.w("Notif", "whereIn clienteId falló: ${e.message}")
+                                            emptyList()
+                                        }
+                                    }
+                                }.flatMap { it.await() }
+                        } else {
+                            emptyList()
+                        }
+
+                        // ✅ Fuente 4: cobradorUid = uid (directo en préstamo)
+                        val qCobradorUid = async {
+                            try {
+                                db.collection("prestamos")
+                                    .whereEqualTo("cobradorUid", uid)
+                                    .get().await()
+                                    .documents
+                                    .filter { it.getBoolean("eliminado") != true }
+                            } catch (e: Exception) {
+                                Log.w("Notif", "Q cobradorUid falló: ${e.message}")
+                                emptyList()
+                            }
+                        }
+
+                        // ✅ Fuente 5: cobradoresAsignados array contiene uid
+                        val q1 = async {
+                            try {
+                                db.collection("prestamos")
+                                    .whereArrayContains("cobradoresAsignados", uid)
+                                    .get().await()
+                                    .documents
+                                    .filter { it.getBoolean("eliminado") != true }
+                            } catch (e: Exception) {
+                                Log.w("Notif", "Q1 cobradoresAsignados falló: ${e.message}")
+                                emptyList()
+                            }
+                        }
+
+                        // ✅ Fuente 6: cobradorAsignado string = uid
+                        val q2 = async {
+                            try {
+                                db.collection("prestamos")
+                                    .whereEqualTo("cobradorAsignado", uid)
+                                    .get().await()
+                                    .documents
+                                    .filter { it.getBoolean("eliminado") != true }
+                            } catch (e: Exception) {
+                                Log.w("Notif", "Q2 cobradorAsignado falló: ${e.message}")
+                                emptyList()
+                            }
+                        }
+
+                        // ✅ Fuente 7: cobrador = uid (legacy, por si hay datos viejos)
+                        val q3 = async {
+                            try {
+                                db.collection("prestamos")
+                                    .whereEqualTo("cobrador", uid)
+                                    .get().await()
+                                    .documents
+                                    .filter { it.getBoolean("eliminado") != true }
+                            } catch (e: Exception) {
+                                Log.w("Notif", "Q3 cobrador legacy falló: ${e.message}")
+                                emptyList()
+                            }
+                        }
+
+                        // Dedup por doc.id
+                        val todos = prestamosPorClientes +
+                                qCobradorUid.await() +
+                                q1.await() +
+                                q2.await() +
+                                q3.await()
+
+                        val vistos = mutableSetOf<String>()
+                        val dedup  = todos.filter { vistos.add(it.id) }
+
+                        Log.d("Notif", "📋 Préstamos cobrador $uid: ${dedup.size} total " +
+                                "(porClientes: ${prestamosPorClientes.size}, " +
+                                "cobradorUid: ${qCobradorUid.await().size}, " +
+                                "q1: ${q1.await().size}, " +
+                                "q2: ${q2.await().size}, " +
+                                "q3: ${q3.await().size})")
+
+                        dedup
                     }
                 }
 
-                todasLasNotificaciones.addAll(notificacionesLote)
-                delay(50)
+                docsDeferred.await() to pagosDeferred.await()
             }
 
-            todasLasNotificaciones.sortWith(compareBy<NotificacionCobroCascada> {
-                when (it.tipo) {
-                    "vencido" -> 0
-                    "hoy" -> 1
-                    "próximo" -> 2
-                    "futuro" -> 3
-                    else -> 4
+            val documentos = documentosRaw
+            Log.d("Notif", "📋 Total docs brutos $rol ($uid): ${documentos.size}")
+
+            if (documentos.isEmpty()) {
+                isLoading = false
+                notificaciones.clear()
+                return
+            }
+
+            // ── Cache pagos ─────────────────────────────────────────────────
+            val pagosCache = withContext(Dispatchers.Default) {
+                val cache = mutableMapOf<String, MutableList<Map<String, Any>>>()
+                for (pagoDoc in pagosSnapshot.documents) {
+                    val pid  = pagoDoc.getString("prestamoId") ?: continue
+                    val data = pagoDoc.data ?: continue
+                    cache.getOrPut(pid) { mutableListOf() }.add(data)
                 }
-            }.thenBy { it.diferenciaDias })
+                cache as Map<String, List<Map<String, Any>>>
+            }
+
+            // ── Pre-filtro ─────────────────────────────────────────────────
+            val estadosExcluidos = setOf(
+                "saldado", "completado", "cancelado", "eliminado", "rechazado", "pendiente"
+            )
+
+            val documentosValidos = withContext(Dispatchers.Default) {
+                documentos.filter { doc ->
+                    if (doc.getBoolean("eliminado") == true) return@filter false
+                    val cliente = doc.getString("cliente")
+                    val cuotas  = doc.getLong("cuotas")?.toInt() ?: 0
+                    val estado  = doc.getString("estado")?.lowercase()?.trim()
+                        ?.takeIf { it.isNotBlank() } ?: "activo"
+                    !cliente.isNullOrBlank() &&
+                            cuotas > 0 && cuotas <= 500 &&
+                            estado !in estadosExcluidos
+                }
+            }
+
+            Log.d("Notif", "✅ Docs válidos: ${documentosValidos.size}")
+
+            val resultado = withContext(Dispatchers.Default) {
+                documentosValidos.chunked(50).flatMap { chunk ->
+                    chunk.mapNotNull { doc ->
+                        try { procesarPrestamoUltraOptimizado(doc, pagosCache) }
+                        catch (_: Exception) { null }
+                    }
+                }
+            }
+
+            val ordenado = withContext(Dispatchers.Default) {
+                resultado.sortedWith(
+                    compareBy<NotificacionCobroCascada> {
+                        when (it.tipo) {
+                            "vencido" -> 0
+                            "hoy"     -> 1
+                            "próximo" -> 2
+                            "futuro"  -> 3
+                            else      -> 4
+                        }
+                    }.thenBy { it.diferenciaDias }
+                )
+            }
+
+            todasLasNotificaciones.addAll(ordenado)
 
         } catch (e: Exception) {
             hasError = true
             errorMessage = when {
-                e.message?.contains("network", ignoreCase = true) == true ->
-                    "Error de conexión"
-                e.message?.contains("permission", ignoreCase = true) == true ->
-                    "Sin permisos"
-                else -> "Error: ${e.localizedMessage}"
+                e.message?.contains("network", ignoreCase = true) == true    -> "Sin conexión a internet"
+                e.message?.contains("permission", ignoreCase = true) == true -> "Sin permisos de acceso"
+                else -> "Error inesperado. Intenta de nuevo."
             }
+            Log.e("Notif", "Error general: ${e.message}", e)
         } finally {
             isLoading = false
         }
@@ -418,250 +601,203 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
 
     fun aplicarFiltros() {
         notificaciones.clear()
-
-        val filtradas = todasLasNotificaciones.asSequence()
-            .filter { notif ->
-                val pasaFiltroTipo = filtroTipo == "Todos" || filtroTipo == notif.tipo
-                val pasaFiltroEstado = filtroEstado == "Todos" || filtroEstado == notif.estado
-                val pasaBusqueda = textoBusqueda.isBlank() ||
-                        notif.cliente.contains(textoBusqueda, ignoreCase = true)
-
-                pasaFiltroTipo && pasaFiltroEstado && pasaBusqueda
-            }
-            .toList()
-
+        val filtradas = todasLasNotificaciones.asSequence().filter { n ->
+            val pasaTipo     = filtroTipo == "Todos" || filtroTipo == n.tipo
+            val pasaBusqueda = textoBusqueda.isBlank() ||
+                    n.cliente.contains(textoBusqueda, ignoreCase = true)
+            pasaTipo && pasaBusqueda
+        }.toList()
         notificaciones.addAll(filtradas)
     }
 
-    LaunchedEffect(filtroTipo, filtroEstado, textoBusqueda, todasLasNotificaciones.size) {
-        aplicarFiltros()
-    }
+    LaunchedEffect(filtroTipo, textoBusqueda, todasLasNotificaciones.size) { aplicarFiltros() }
+    LaunchedEffect(Unit) { scope.launch { cargarNotificaciones() } }
 
-    LaunchedEffect(Unit) {
-        scope.launch {
-            cargarNotificacionesConCascada()
-        }
-    }
-
+    // ─── UI ──────────────────────────────────────────────────────────────
     Scaffold(
+        containerColor = NC.Surface,
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        "Notificaciones",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = NotificationColors.PrimaryBlue
-                ),
-                actions = {
-                    IconButton(
-                        onClick = {
-                            scope.launch { cargarNotificacionesConCascada() }
-                        },
-                        enabled = !isLoading
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Brush.linearGradient(colors = listOf(NC.GradStart, NC.GradEnd)))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .statusBarsPadding()
+                        .padding(horizontal = 20.dp, vertical = 16.dp)
+                ) {
+                    Row(
+                        modifier              = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment     = Alignment.CenterVertically
                     ) {
-                        if (isLoading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = Color.White,
-                                strokeWidth = 2.dp
+                        Column {
+                            Text(
+                                "Cobros",
+                                fontSize      = 28.sp,
+                                fontWeight    = FontWeight.ExtraBold,
+                                color         = Color.White,
+                                letterSpacing = (-0.5).sp
                             )
-                        } else {
-                            Icon(
-                                Icons.Default.Refresh,
-                                contentDescription = "Actualizar",
-                                tint = Color.White
+                            Text(
+                                "Gestión de notificaciones",
+                                fontSize   = 13.sp,
+                                color      = Color.White.copy(alpha = 0.6f),
+                                fontWeight = FontWeight.Normal
                             )
                         }
+                        IconButton(
+                            onClick  = { scope.launch { cargarNotificaciones() } },
+                            enabled  = !isLoading,
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.12f))
+                        ) {
+                            if (isLoading) {
+                                CircularProgressIndicator(
+                                    modifier    = Modifier.size(18.dp),
+                                    color       = Color.White,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = "Actualizar",
+                                    tint               = Color.White,
+                                    modifier           = Modifier.size(20.dp)
+                                )
+                            }
+                        }
                     }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    OutlinedTextField(
+                        value         = textoBusqueda,
+                        onValueChange = { textoBusqueda = it },
+                        placeholder   = {
+                            Text(
+                                "Buscar cliente...",
+                                color    = Color.White.copy(alpha = 0.5f),
+                                fontSize = 14.sp
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = null,
+                                tint               = Color.White.copy(alpha = 0.7f),
+                                modifier           = Modifier.size(18.dp)
+                            )
+                        },
+                        trailingIcon = {
+                            if (textoBusqueda.isNotBlank()) {
+                                IconButton(onClick = { textoBusqueda = "" }) {
+                                    Icon(
+                                        Icons.Default.Clear,
+                                        contentDescription = "Limpiar",
+                                        tint               = Color.White.copy(alpha = 0.7f),
+                                        modifier           = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        modifier   = Modifier.fillMaxWidth(),
+                        shape      = RoundedCornerShape(14.dp),
+                        colors     = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor        = Color.White,
+                            unfocusedTextColor      = Color.White,
+                            focusedBorderColor      = Color.White.copy(alpha = 0.5f),
+                            unfocusedBorderColor    = Color.White.copy(alpha = 0.2f),
+                            focusedContainerColor   = Color.White.copy(alpha = 0.1f),
+                            unfocusedContainerColor = Color.White.copy(alpha = 0.07f),
+                            cursorColor             = Color.White
+                        ),
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp)
+                    )
                 }
-            )
+            }
         }
     ) { padding ->
 
         when {
-            hasError -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Card(
-                        modifier = Modifier.padding(24.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE))
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(32.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Icon(
-                                Icons.Default.ErrorOutline,
-                                contentDescription = null,
-                                modifier = Modifier.size(80.dp),
-                                tint = NotificationColors.DangerRed
-                            )
-                            Spacer(modifier = Modifier.height(20.dp))
-                            Text(
-                                "Error al cargar",
-                                style = MaterialTheme.typography.headlineSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = NotificationColors.DangerRed
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                errorMessage,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = NotificationColors.TextSecondary,
-                                textAlign = TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.height(32.dp))
-                            Button(
-                                onClick = {
-                                    scope.launch { cargarNotificacionesConCascada() }
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = NotificationColors.PrimaryBlue
-                                )
-                            ) {
-                                Text("Reintentar")
-                            }
-                        }
-                    }
-                }
-            }
-
-            isLoading -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(64.dp),
-                            color = NotificationColors.PrimaryBlue
-                        )
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Text("Cargando notificaciones...")
-                        Text(
-                            "Sistema de cascada",
-                            color = NotificationColors.TextSecondary
-                        )
-                    }
-                }
-            }
-
+            hasError  -> ErrorView(errorMessage) { scope.launch { cargarNotificaciones() } }
+            isLoading -> LoadingView()
             else -> {
+                val vencidos = notificaciones.count { it.tipo == "vencido" }
+                val hoyCount = notificaciones.count { it.tipo == "hoy" }
+                val proximos = notificaciones.count { it.tipo == "próximo" }
+
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    NotificationColors.LightBlue.copy(alpha = 0.1f),
-                                    Color.White
-                                )
-                            )
-                        ),
+                        .padding(top = padding.calculateTopPadding()),
                     contentPadding = PaddingValues(
-                        top = padding.calculateTopPadding() + 8.dp,
-                        bottom = 16.dp,
-                        start = 16.dp,
-                        end = 16.dp
+                        top    = 20.dp,
+                        bottom = 32.dp,
+                        start  = 16.dp,
+                        end    = 16.dp
                     ),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     item {
-                        val vencidos = notificaciones.count { it.tipo == "vencido" }
-                        val hoyCount = notificaciones.count { it.tipo == "hoy" }
-                        val proximos = notificaciones.count { it.tipo == "próximo" }
-
-                        ResumenDelDiaCompacto(
+                        ResumenRow(
                             vencidos = vencidos,
-                            hoyCount = hoyCount,
+                            hoy      = hoyCount,
                             proximos = proximos,
-                            total = notificaciones.size
+                            total    = notificaciones.size
                         )
                     }
 
                     item {
-                        SistemaCascadaInfo()
-                    }
-
-                    item {
-                        OutlinedTextField(
-                            value = textoBusqueda,
-                            onValueChange = { textoBusqueda = it },
-                            label = { Text("Buscar cliente...", fontSize = 14.sp) },
-                            leadingIcon = {
-                                Icon(Icons.Default.Search, contentDescription = null)
-                            },
-                            trailingIcon = {
-                                if (textoBusqueda.isNotBlank()) {
-                                    IconButton(onClick = { textoBusqueda = "" }) {
-                                        Icon(Icons.Default.Clear, contentDescription = "Limpiar")
-                                    }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-                    }
-
-                    item {
-                        FiltrosCompactos(
-                            filtroTipo = filtroTipo,
-                            onFiltroTipoChange = { filtroTipo = it },
-                            filtroEstado = filtroEstado,
-                            onFiltroEstadoChange = { filtroEstado = it }
+                        FiltrosTipo(
+                            filtroActual   = filtroTipo,
+                            onFiltroChange = { filtroTipo = it }
                         )
                     }
 
                     if (notificaciones.isEmpty()) {
-                        item {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(120.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(
-                                        Icons.Default.Notifications,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(48.dp),
-                                        tint = NotificationColors.TextSecondary
-                                    )
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text("No hay notificaciones", fontSize = 14.sp)
-                                }
-                            }
-                        }
+                        item { EstadoVacio() }
                     } else {
-                        items(
+                        itemsIndexed(
                             items = notificaciones,
-                            key = { it.prestamoId }
-                        ) { notif ->
-                            NotificacionCardCascada(
-                                notif = notif,
-                                rol = rol,
-                                uid = uid,
-                                context = context,
-                                navController = navController,
-                                db = db,
-                                onAplicarMora = { prestamoId, cliente, moraSugerida ->
-                                    prestamoIdMora = prestamoId
-                                    clienteMora = cliente
-                                    moraCalculada = moraSugerida
-                                    diasMora = -notif.diferenciaDias
-                                    montoPrestamo = notif.montoSaldoPendiente
-                                    mostrarDialogoMora = true
-                                }
-                            )
+                            key   = { _, n -> n.prestamoId }
+                        ) { index, notif ->
+                            AnimatedVisibility(
+                                visible = true,
+                                enter   = fadeIn(
+                                    animationSpec = tween(
+                                        durationMillis = 300,
+                                        delayMillis    = (index * 30).coerceAtMost(300)
+                                    )
+                                ) + slideInVertically(
+                                    initialOffsetY = { it / 4 },
+                                    animationSpec  = tween(
+                                        durationMillis = 300,
+                                        delayMillis    = (index * 30).coerceAtMost(300)
+                                    )
+                                )
+                            ) {
+                                NotifCard(
+                                    notif         = notif,
+                                    rol           = rol,
+                                    uid           = uid,
+                                    context       = context,
+                                    navController = navController,
+                                    db            = db,
+                                    onAplicarMora = { pid, cli, mora ->
+                                        prestamoIdMora     = pid
+                                        clienteMora        = cli
+                                        moraCalculada      = mora
+                                        diasMora           = -notif.diferenciaDias
+                                        montoPrestamo      = notif.montoSaldoPendiente
+                                        mostrarDialogoMora = true
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -671,43 +807,34 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
 
     if (mostrarDialogoMora) {
         DialogoAplicarMora(
-            cliente = clienteMora,
-            moraSugerida = moraCalculada,
-            diasMora = diasMora,
+            cliente       = clienteMora,
+            moraSugerida  = moraCalculada,
+            diasMora      = diasMora,
             montoPrestamo = montoPrestamo,
-            onDismiss = { mostrarDialogoMora = false },
-            onConfirmar = { montoMora ->
+            onDismiss     = { mostrarDialogoMora = false },
+            onConfirmar   = { montoMora ->
                 scope.launch {
                     try {
                         val ref = db.collection("prestamos").document(prestamoIdMora)
                         val doc = ref.get().await()
-
-                        val eliminado = doc.getBoolean("eliminado") ?: false
-                        if (eliminado) {
+                        if (doc.getBoolean("eliminado") == true) {
                             Toast.makeText(context, "Préstamo eliminado", Toast.LENGTH_SHORT).show()
                             return@launch
                         }
-
-                        val saldoActual = doc.getDouble("saldo") ?: 0.0
-                        val morasAplicadas = (doc.get("morasAplicadas") as? List<*>)?.mapNotNull {
-                            it as? String
-                        } ?: emptyList()
-
-                        val claveMora = "${clienteMora}_${System.currentTimeMillis()}"
-
+                        val saldoActual    = doc.getDouble("saldo") ?: 0.0
+                        val morasAplicadas = (doc.get("morasAplicadas") as? List<*>)
+                            ?.mapNotNull { it as? String } ?: emptyList()
                         ref.update(
                             mapOf(
-                                "saldo" to (saldoActual + montoMora),
-                                "mora" to montoMora,
-                                "morasAplicadas" to (morasAplicadas + claveMora),
-                                "estado" to "mora",
-                                "fechaUltimaActualizacion" to com.google.firebase.Timestamp.now()
+                                "saldo"                    to (saldoActual + montoMora),
+                                "mora"                     to montoMora,
+                                "morasAplicadas"           to (morasAplicadas + "${clienteMora}_${System.currentTimeMillis()}"),
+                                "estado"                   to "mora",
+                                "fechaUltimaActualizacion" to Timestamp.now()
                             )
                         ).await()
-
                         Toast.makeText(context, "Mora aplicada", Toast.LENGTH_SHORT).show()
-                        cargarNotificacionesConCascada()
-
+                        cargarNotificaciones()
                     } catch (e: Exception) {
                         Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
                     } finally {
@@ -719,160 +846,106 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
     }
 }
 
-// Los demás composables permanecen igual...
+// ─────────────────────────────────────────────
+//  COMPONENTES UI
+// ─────────────────────────────────────────────
 @Composable
-fun StatCard(label: String, count: Int, color: Color, icon: ImageVector) {
+private fun ResumenRow(vencidos: Int, hoy: Int, proximos: Int, total: Int) {
+    Row(
+        modifier              = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        ResumenChip("Total",    total,    NC.Blue,   NC.BlueLight,  Modifier.weight(1f))
+        ResumenChip("Mora",     vencidos, NC.Red,    NC.RedSoft,    Modifier.weight(1f))
+        ResumenChip("Hoy",      hoy,      NC.Orange, NC.OrangeSoft, Modifier.weight(1f))
+        ResumenChip("Próximos", proximos, NC.Green,  NC.GreenSoft,  Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun ResumenChip(
+    label: String, count: Int, color: Color, bgColor: Color, modifier: Modifier = Modifier
+) {
     Card(
-        modifier = Modifier
-            .width(100.dp)
-            .height(80.dp),
-        colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.1f)),
-        shape = RoundedCornerShape(12.dp)
+        modifier  = modifier,
+        shape     = RoundedCornerShape(14.dp),
+        colors    = CardDefaults.cardColors(containerColor = bgColor),
+        elevation = CardDefaults.cardElevation(0.dp)
     ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .fillMaxWidth()
+                .padding(vertical = 12.dp, horizontal = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(20.dp))
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(count.toString(), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = color)
+            Text(count.toString(), fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = color)
             Text(
-                label,
-                fontSize = 11.sp,
-                color = color.copy(alpha = 0.8f),
-                textAlign = TextAlign.Center,
-                fontWeight = FontWeight.Medium
+                label, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                color = color.copy(alpha = 0.75f), textAlign = TextAlign.Center
             )
         }
     }
 }
 
 @Composable
-fun ResumenDelDiaCompacto(vencidos: Int, hoyCount: Int, proximos: Int, total: Int) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+private fun FiltrosTipo(filtroActual: String, onFiltroChange: (String) -> Unit) {
+    val opciones = listOf("Todos", "vencido", "hoy", "próximo", "futuro", "inactivo")
+    val labels   = mapOf(
+        "Todos"    to "Todos",
+        "vencido"  to "En mora",
+        "hoy"      to "Hoy",
+        "próximo"  to "Próximos",
+        "futuro"   to "Futuros",
+        "inactivo" to "Inactivos"
+    )
+
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding        = PaddingValues(horizontal = 0.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "Resumen",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    color = NotificationColors.DarkBlue
-                )
-                Text(
-                    "Total: $total",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    color = NotificationColors.PrimaryBlue
-                )
+        items(opciones) { opcion ->
+            val isSelected = filtroActual == opcion
+            val color = when (opcion) {
+                "vencido"  -> NC.Red
+                "hoy"      -> NC.Orange
+                "próximo"  -> NC.Green
+                "futuro"   -> NC.BlueSoft
+                "inactivo" -> NC.TextSec
+                else       -> NC.Blue
             }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                StatCard("Vencidos", vencidos, NotificationColors.DangerRed, Icons.Default.Warning)
-                StatCard("Hoy", hoyCount, NotificationColors.WarningOrange, Icons.Default.Today)
-                StatCard("Próximos", proximos, NotificationColors.SuccessGreen, Icons.Default.Schedule)
-            }
-        }
-    }
-}
-
-@Composable
-fun SistemaCascadaInfo() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF3E5F5))
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                Icons.Default.Info,
-                contentDescription = null,
-                tint = Color(0xFF7B1FA2),
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                "Sistema Cascada: Saldos calculados desde pagos reales",
-                fontSize = 13.sp,
-                color = Color(0xFF4A148C)
-            )
-        }
-    }
-}
-
-@Composable
-fun FiltrosCompactos(
-    filtroTipo: String,
-    onFiltroTipoChange: (String) -> Unit,
-    filtroEstado: String,
-    onFiltroEstadoChange: (String) -> Unit
-) {
-    val filtrosTipo = listOf("Todos", "vencido", "hoy", "próximo")
-    val filtrosEstado = listOf("Todos", "activo", "inactivo", "mora")
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text("Filtros", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                item {
-                    Text("Urgencia:", fontSize = 12.sp, color = NotificationColors.TextSecondary)
-                    Spacer(modifier = Modifier.width(4.dp))
-                }
-                items(filtrosTipo) { filtro ->
-                    FilterChip(
-                        selected = filtroTipo == filtro,
-                        onClick = { onFiltroTipoChange(filtro) },
-                        label = { Text(filtro, fontSize = 11.sp) },
-                        modifier = Modifier.height(28.dp)
+            FilterChip(
+                selected = isSelected,
+                onClick  = { onFiltroChange(opcion) },
+                label    = {
+                    Text(
+                        labels[opcion] ?: opcion,
+                        fontSize   = 13.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                     )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                item {
-                    Text("Estado:", fontSize = 12.sp, color = NotificationColors.TextSecondary)
-                    Spacer(modifier = Modifier.width(4.dp))
-                }
-                items(filtrosEstado) { filtro ->
-                    FilterChip(
-                        selected = filtroEstado == filtro,
-                        onClick = { onFiltroEstadoChange(filtro) },
-                        label = { Text(filtro, fontSize = 11.sp) },
-                        modifier = Modifier.height(28.dp)
-                    )
-                }
-            }
+                },
+                shape  = RoundedCornerShape(10.dp),
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = color.copy(alpha = 0.15f),
+                    selectedLabelColor     = color,
+                    containerColor         = NC.Card,
+                    labelColor             = NC.TextSec
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled             = true,
+                    selected            = isSelected,
+                    selectedBorderColor = color.copy(alpha = 0.4f),
+                    borderColor         = NC.Border
+                )
+            )
         }
     }
 }
 
+// ─────────────────────────────────────────────
+//  TARJETA DE NOTIFICACIÓN
+// ─────────────────────────────────────────────
 @Composable
-fun NotificacionCardCascada(
+private fun NotifCard(
     notif: NotificacionCobroCascada,
     rol: String,
     uid: String,
@@ -882,234 +955,247 @@ fun NotificacionCardCascada(
     onAplicarMora: (String, String, String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    val dec   = DecimalFormat("#,##0.00")
 
-    val (urgenciaColor, urgenciaIcon) = when {
-        notif.diferenciaDias < -3 -> NotificationColors.DangerRed to Icons.Default.ErrorOutline
-        notif.diferenciaDias < 0 -> NotificationColors.WarningOrange to Icons.Default.Warning
-        notif.diferenciaDias == 0 -> NotificationColors.InfoBlue to Icons.Default.Today
-        notif.diferenciaDias <= 3 -> NotificationColors.SuccessGreen to Icons.Default.Schedule
-        else -> NotificationColors.TextSecondary to Icons.Default.Schedule
+    val urgencia = when {
+        notif.diferenciaDias < -3 -> UrgenciaStyle(NC.Red,     NC.RedSoft,    "EN MORA",   Icons.Default.ErrorOutline, "${-notif.diferenciaDias}d")
+        notif.diferenciaDias < 0  -> UrgenciaStyle(NC.Orange,  NC.OrangeSoft, "VENCIDO",   Icons.Default.Warning,      "${-notif.diferenciaDias}d")
+        notif.diferenciaDias == 0 -> UrgenciaStyle(NC.Amber,   NC.AmberSoft,  "HOY",       Icons.Default.Today,        "Hoy")
+        notif.diferenciaDias <= 3 -> UrgenciaStyle(NC.Green,   NC.GreenSoft,  "PRÓXIMO",   Icons.Outlined.Schedule,    "${notif.diferenciaDias}d")
+        else                      -> UrgenciaStyle(NC.TextSec, NC.Surface,    "PENDIENTE", Icons.Outlined.Schedule,    "${notif.diferenciaDias}d")
     }
 
-    val estadoText = when {
-        notif.diferenciaDias < -3 -> "MORA (${-notif.diferenciaDias}d)"
-        notif.diferenciaDias < 0 -> "VENCIDO (${-notif.diferenciaDias}d)"
-        notif.diferenciaDias == 0 -> "HOY"
-        notif.diferenciaDias == 1 -> "MAÑANA"
-        else -> "${notif.diferenciaDias}d"
-    }
-
-    val progresoCuotas = if (notif.totalCuotas > 0) {
+    val progreso = if (notif.totalCuotas > 0)
         notif.cuotasCompletadas.toFloat() / notif.totalCuotas.toFloat()
-    } else 0f
+    else 0f
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 2.dp),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            .shadow(
+                elevation    = if (notif.diferenciaDias < 0) 6.dp else 2.dp,
+                shape        = RoundedCornerShape(20.dp),
+                ambientColor = urgencia.color.copy(alpha = 0.12f),
+                spotColor    = urgencia.color.copy(alpha = 0.18f)
+            ),
+        shape     = RoundedCornerShape(20.dp),
+        colors    = CardDefaults.cardColors(containerColor = NC.Card),
+        elevation = CardDefaults.cardElevation(0.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        notif.cliente,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = NotificationColors.DarkBlue,
-                        maxLines = 1
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(urgencia.color, urgencia.color.copy(alpha = 0.3f))
+                        )
                     )
-                    Text(
-                        "L. ${"%.2f".format(notif.montoSaldoPendiente)}",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = NotificationColors.PrimaryBlue
-                    )
+            )
+
+            Column(modifier = Modifier.padding(16.dp)) {
+
+                Row(
+                    modifier              = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment     = Alignment.Top
+                ) {
+                    Column(modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)) {
+                        Text(
+                            notif.cliente,
+                            fontSize   = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            color      = NC.TextPrimary,
+                            maxLines   = 1,
+                            overflow   = TextOverflow.Ellipsis
+                        )
+                        if (notif.numeroPrestamo != "N/D") {
+                            Text(
+                                "# ${notif.numeroPrestamo}",
+                                fontSize   = 12.sp,
+                                color      = NC.TextMuted,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(urgencia.bgColor)
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment     = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(urgencia.icon, contentDescription = null,
+                            tint = urgencia.color, modifier = Modifier.size(13.dp))
+                        Text(urgencia.label, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
+                            color = urgencia.color, letterSpacing = 0.3.sp)
+                        Text(urgencia.dias, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                            color = urgencia.color.copy(alpha = 0.8f))
+                    }
                 }
 
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = urgenciaColor.copy(alpha = 0.1f)
-                    ),
-                    shape = RoundedCornerShape(12.dp)
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Row(
+                    modifier              = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment     = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            urgenciaIcon,
-                            contentDescription = null,
-                            tint = urgenciaColor,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
+                    Column {
+                        Text("Saldo pendiente", fontSize = 11.sp, color = NC.TextMuted, fontWeight = FontWeight.Medium)
                         Text(
-                            estadoText,
-                            color = urgenciaColor,
+                            "L. ${dec.format(notif.montoSaldoPendiente)}",
+                            fontSize   = 20.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color      = NC.TextPrimary
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("Próxima cuota", fontSize = 11.sp, color = NC.TextMuted, fontWeight = FontWeight.Medium)
+                        Text(
+                            notif.fechaProximaCuota,
+                            fontSize   = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
+                            color      = urgencia.color
                         )
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
+                Row(
+                    modifier              = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment     = Alignment.CenterVertically
+                ) {
                     Text(
-                        "Cuota ${notif.proximaCuotaNumero}/${notif.totalCuotas}",
-                        fontSize = 13.sp,
-                        color = NotificationColors.TextSecondary,
+                        "Cuota ${notif.proximaCuotaNumero} de ${notif.totalCuotas}",
+                        fontSize   = 12.sp,
+                        color      = NC.TextSec,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        notif.fechaProximaCuota,
-                        fontSize = 14.sp,
+                        "${(progreso * 100).toInt()}%",
+                        fontSize   = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = NotificationColors.DarkBlue
+                        color      = urgencia.color
                     )
                 }
 
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        "${(progresoCuotas * 100).toInt()}% completo",
-                        fontSize = 12.sp,
-                        color = NotificationColors.TextSecondary
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    LinearProgressIndicator(
-                        progress = progresoCuotas,
-                        modifier = Modifier
-                            .width(80.dp)
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(3.dp)),
-                        color = urgenciaColor,
-                        trackColor = Color.LightGray.copy(alpha = 0.3f)
-                    )
-                }
-            }
+                Spacer(modifier = Modifier.height(6.dp))
 
-            if (!notif.ultimoPago.isNullOrBlank()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    "Último pago: ${notif.ultimoPago}",
-                    fontSize = 12.sp,
-                    color = NotificationColors.TextSecondary
+                LinearProgressIndicator(
+                    progress   = progreso,
+                    modifier   = Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color      = urgencia.color,
+                    trackColor = NC.Border
                 )
-            }
 
-            if (notif.estado != "inactivo") {
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                try {
-                                    val prestamoDoc = db.collection("prestamos").document(notif.prestamoId).get().await()
-                                    val clienteId = prestamoDoc.getString("clienteId")
-
-                                    if (!clienteId.isNullOrEmpty()) {
-                                        navController.navigate("RegistrarPagoScreen/${clienteId}/${notif.prestamoId}/${notif.montoSaldoPendiente}/$rol")
-                                    } else {
-                                        Toast.makeText(context, "Cliente no encontrado", Toast.LENGTH_SHORT).show()
-                                    }
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(40.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = NotificationColors.PrimaryBlue),
-                        shape = RoundedCornerShape(12.dp)
+                if (!notif.ultimoPago.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        verticalAlignment     = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Icon(
-                            Icons.Default.Payment,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Pagar", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Default.CheckCircle, contentDescription = null,
+                            tint = NC.Green, modifier = Modifier.size(12.dp))
+                        Text("Último pago: ${notif.ultimoPago}", fontSize = 11.sp, color = NC.TextMuted)
                     }
+                }
 
-                    OutlinedButton(
-                        onClick = {
-                            navController.navigate("CuotasPrestamoScreen/${notif.prestamoId}/${uid}/${rol}")
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(40.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.5.dp, NotificationColors.PrimaryBlue)
+                if (notif.estado != "inactivo") {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Divider(color = NC.Border, thickness = 0.5.dp)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier              = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment     = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            Icons.Default.List,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = NotificationColors.PrimaryBlue
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            "Cuotas",
-                            fontSize = 13.sp,
-                            color = NotificationColors.PrimaryBlue,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-
-                    OutlinedButton(
-                        onClick = {
-                            scope.launch {
-                                enviarMensajeWhatsAppConNumero(context, notif.cliente, db)
-                            }
-                        },
-                        modifier = Modifier.size(40.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.5.dp, Color(0xFF25D366)),
-                        contentPadding = PaddingValues(0.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Message,
-                            contentDescription = "WhatsApp",
-                            modifier = Modifier.size(16.dp),
-                            tint = Color(0xFF25D366)
-                        )
-                    }
-
-                    if ((rol == "admin" || rol == "cobrador") && notif.diferenciaDias < -3) {
-                        val diasMoraReales = -notif.diferenciaDias
-                        val moraSugerida = "%.2f".format(notif.montoSaldoPendiente * 0.005 * diasMoraReales)
-
                         Button(
                             onClick = {
-                                onAplicarMora(notif.prestamoId, notif.cliente, moraSugerida)
+                                scope.launch {
+                                    try {
+                                        val prestamoDoc = db.collection("prestamos")
+                                            .document(notif.prestamoId).get().await()
+                                        val clienteId = prestamoDoc.getString("clienteId")
+                                        if (!clienteId.isNullOrEmpty()) {
+                                            navController.navigate(
+                                                "RegistrarPagoScreen/${clienteId}/${notif.prestamoId}/${notif.montoSaldoPendiente}/$rol"
+                                            )
+                                        } else {
+                                            Toast.makeText(context, "Cliente no encontrado", Toast.LENGTH_SHORT).show()
+                                        }
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                             },
-                            modifier = Modifier.size(40.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = NotificationColors.DangerRed),
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(0.dp)
+                            modifier       = Modifier
+                                .weight(1f)
+                                .height(38.dp),
+                            colors         = ButtonDefaults.buttonColors(containerColor = NC.Blue),
+                            shape          = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp)
                         ) {
-                            Icon(
-                                Icons.Default.Warning,
-                                contentDescription = "Mora",
-                                modifier = Modifier.size(16.dp)
-                            )
+                            Icon(Icons.Default.Payment, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Pagar", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                navController.navigate("CuotasPrestamoScreen/${notif.prestamoId}/$uid/$rol")
+                            },
+                            modifier       = Modifier
+                                .weight(1f)
+                                .height(38.dp),
+                            shape          = RoundedCornerShape(10.dp),
+                            border         = BorderStroke(1.dp, NC.Border),
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                            colors         = ButtonDefaults.outlinedButtonColors(contentColor = NC.TextSec)
+                        ) {
+                            Icon(Icons.Default.List, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Cuotas", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch { enviarMensajeWhatsAppConNumero(context, notif.cliente, db) }
+                            },
+                            modifier       = Modifier.size(38.dp),
+                            shape          = RoundedCornerShape(10.dp),
+                            border         = BorderStroke(1.dp, Color(0xFF25D366).copy(alpha = 0.4f)),
+                            contentPadding = PaddingValues(0.dp),
+                            colors         = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF25D366))
+                        ) {
+                            Icon(Icons.Default.Message, contentDescription = "WhatsApp", modifier = Modifier.size(16.dp))
+                        }
+
+                        if ((rol == "admin" || rol == "cobrador") && notif.diferenciaDias < -3) {
+                            val diasMoraReales = -notif.diferenciaDias
+                            val moraSugerida   = "%.2f".format(notif.montoSaldoPendiente * 0.005 * diasMoraReales)
+                            Button(
+                                onClick        = { onAplicarMora(notif.prestamoId, notif.cliente, moraSugerida) },
+                                modifier       = Modifier.size(38.dp),
+                                colors         = ButtonDefaults.buttonColors(containerColor = NC.Red.copy(alpha = 0.1f)),
+                                shape          = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(0.dp),
+                                elevation      = ButtonDefaults.buttonElevation(0.dp)
+                            ) {
+                                Icon(Icons.Default.Warning, contentDescription = "Mora",
+                                    modifier = Modifier.size(16.dp), tint = NC.Red)
+                            }
                         }
                     }
                 }
@@ -1118,6 +1204,108 @@ fun NotificacionCardCascada(
     }
 }
 
+private data class UrgenciaStyle(
+    val color: Color, val bgColor: Color, val label: String,
+    val icon: ImageVector, val dias: String
+)
+
+// ─────────────────────────────────────────────
+//  ESTADOS: CARGA / ERROR / VACÍO
+// ─────────────────────────────────────────────
+@Composable
+private fun LoadingView() {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(
+                modifier    = Modifier.size(48.dp),
+                color       = NC.Blue,
+                strokeWidth = 3.dp
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+            Text(
+                "Cargando notificaciones...",
+                fontSize   = 15.sp,
+                color      = NC.TextSec,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+private fun ErrorView(mensaje: String, onRetry: () -> Unit) {
+    Box(
+        modifier         = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                modifier         = Modifier
+                    .size(80.dp)
+                    .clip(CircleShape)
+                    .background(NC.RedSoft),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.ErrorOutline, contentDescription = null,
+                    modifier = Modifier.size(40.dp), tint = NC.Red)
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+            Text("Algo salió mal", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = NC.TextPrimary)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(mensaje, fontSize = 14.sp, color = NC.TextSec, textAlign = TextAlign.Center)
+            Spacer(modifier = Modifier.height(28.dp))
+            Button(
+                onClick  = onRetry,
+                colors   = ButtonDefaults.buttonColors(containerColor = NC.Blue),
+                shape    = RoundedCornerShape(12.dp),
+                modifier = Modifier.height(44.dp)
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Reintentar", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun EstadoVacio() {
+    Box(
+        modifier         = Modifier
+            .fillMaxWidth()
+            .height(220.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier         = Modifier
+                    .size(64.dp)
+                    .clip(CircleShape)
+                    .background(NC.BlueLight),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.NotificationsNone, contentDescription = null,
+                    modifier = Modifier.size(32.dp), tint = NC.BlueSoft)
+            }
+            Text("Sin resultados", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = NC.TextPrimary)
+            Text(
+                "No hay préstamos que coincidan\ncon los filtros seleccionados.",
+                fontSize  = 13.sp,
+                color     = NC.TextSec,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────
+//  DIÁLOGO MORA
+// ─────────────────────────────────────────────
 @Composable
 fun DialogoAplicarMora(
     cliente: String,
@@ -1131,19 +1319,48 @@ fun DialogoAplicarMora(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Aplicar mora") },
+        containerColor   = NC.Card,
+        shape            = RoundedCornerShape(20.dp),
+        title = {
+            Row(
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Default.Warning, contentDescription = null,
+                    tint = NC.Red, modifier = Modifier.size(22.dp))
+                Text("Aplicar mora", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            }
+        },
         text = {
-            Column {
-                Text("Cliente: $cliente")
-                Text("Días de mora: $diasMora")
-                Spacer(modifier = Modifier.height(16.dp))
-
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(NC.RedSoft)
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text("Cliente", fontSize = 11.sp, color = NC.TextMuted)
+                        Text(cliente, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = NC.TextPrimary)
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("Días de mora", fontSize = 11.sp, color = NC.TextMuted)
+                        Text("$diasMora días", fontWeight = FontWeight.Bold, color = NC.Red, fontSize = 14.sp)
+                    }
+                }
                 OutlinedTextField(
-                    value = moraTexto,
-                    onValueChange = { moraTexto = it },
-                    label = { Text("Monto de mora (L)") },
+                    value           = moraTexto,
+                    onValueChange   = { moraTexto = it },
+                    label           = { Text("Monto de mora (L)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier        = Modifier.fillMaxWidth(),
+                    shape           = RoundedCornerShape(12.dp),
+                    colors          = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = NC.Red,
+                        focusedLabelColor  = NC.Red
+                    )
                 )
             }
         },
@@ -1151,22 +1368,25 @@ fun DialogoAplicarMora(
             Button(
                 onClick = {
                     val monto = moraTexto.toDoubleOrNull()
-                    if (monto != null && monto > 0) {
-                        onConfirmar(monto)
-                    }
-                }
-            ) {
-                Text("Aplicar")
-            }
+                    if (monto != null && monto > 0) onConfirmar(monto)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = NC.Red),
+                shape  = RoundedCornerShape(10.dp)
+            ) { Text("Aplicar mora", fontWeight = FontWeight.Bold) }
         },
         dismissButton = {
-            OutlinedButton(onClick = onDismiss) {
-                Text("Cancelar")
-            }
+            OutlinedButton(
+                onClick = onDismiss,
+                shape   = RoundedCornerShape(10.dp),
+                border  = BorderStroke(1.dp, NC.Border)
+            ) { Text("Cancelar", color = NC.TextSec) }
         }
     )
 }
 
+// ─────────────────────────────────────────────
+//  WHATSAPP
+// ─────────────────────────────────────────────
 suspend fun enviarMensajeWhatsAppConNumero(
     context: Context,
     clienteNombre: String,
@@ -1189,20 +1409,17 @@ suspend fun enviarMensajeWhatsAppConNumero(
         val nombre = doc.getString("nombre") ?: "cliente"
 
         if (numero.isBlank()) {
-            Toast.makeText(context, "Número de teléfono no encontrado", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Número de teléfono no registrado", Toast.LENGTH_SHORT).show()
             return
         }
 
         val mensaje = "Estimado/a $nombre, le recordamos que tiene un pago pendiente con Capital Express. ¡Gracias!"
-        val url = "https://wa.me/504$numero?text=${Uri.encode(mensaje)}"
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-
+        val url     = "https://wa.me/504$numero?text=${Uri.encode(mensaje)}"
         try {
-            context.startActivity(intent)
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
         } catch (e: Exception) {
             Toast.makeText(context, "WhatsApp no está instalado", Toast.LENGTH_SHORT).show()
         }
-
     } catch (e: Exception) {
         Toast.makeText(context, "Error: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
     }

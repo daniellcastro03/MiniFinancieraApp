@@ -26,6 +26,7 @@ import com.example.capitalexpressapp.ui.screens.NotificacionesScreen
 import com.example.capitalexpressapp.ui.screens.PerfilClienteScreen
 import com.example.capitalexpressapp.ui.screens.PrestamoAdminScreen
 import com.example.capitalexpressapp.ui.screens.ReporteClientesScreen
+import com.example.capitalexpressapp.ui.screens.SolicitudesAdminScreen
 import com.example.capitalexpressapp.ui.screens.VerPrestamoScreen
 import com.example.capitalexpressapp.ui.theme.CapitalExpressAppTheme
 import com.example.minifinancieraapp.ui.screens.*
@@ -232,26 +233,15 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
+                        // ✅ RUTA SIMPLIFICADA PARA SOLICITUD DE PRÉSTAMO (desde cobrador)
                         composable("solicitudPrestamo/{cobradorUid}") { backStackEntry ->
                             val cobradorUid = backStackEntry.arguments?.getString("cobradorUid") ?: ""
                             SolicitudPrestamoScreen(navController)
                         }
 
-                        composable(
-                            route = "SolicitudesAdminScreen/{uid}/{rol}",
-                            arguments = listOf(
-                                navArgument("uid") { type = NavType.StringType },
-                                navArgument("rol") { type = NavType.StringType }
-                            )
-                        ) { backStackEntry ->
-                            val uid = backStackEntry.arguments?.getString("uid") ?: ""
-                            val rol = backStackEntry.arguments?.getString("rol") ?: ""
-
-                            SolicitudesAdminScreen(
-                                navController = navController,
-                                uid = uid,
-                                rol = rol
-                            )
+                        // ✅ RUTA SIMPLIFICADA PARA ADMIN (sin parámetros innecesarios)
+                        composable("solicitudesAdmin") {
+                            SolicitudesAdminScreen(navController)
                         }
 
                         composable("BackupScreen") {
@@ -309,9 +299,6 @@ class MainActivity : ComponentActivity() {
                             )
                         ) { backStackEntry ->
                             val rol = backStackEntry.arguments?.getString("rol") ?: "admin"
-                            // Si luego quieres usar los otros parámetros para fijar filtros iniciales:
-                            // val pref = backStackEntry.arguments?.getString("prefCobradorId") ?: "none"
-                            // val initialEstado = backStackEntry.arguments?.getString("initialEstado") ?: "Todos"
 
                             ReporteClientesScreen(
                                 navController = navController,
@@ -319,24 +306,9 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
-
-                        composable("solicitudesAdmin") {
-                            SolicitudesAdminScreen(navController)
-                        }
-
                         composable("DetalleClienteScreen/{clienteId}") { backStackEntry ->
                             val clienteId = backStackEntry.arguments?.getString("clienteId") ?: return@composable
                             DetalleClienteScreen(navController, clienteId)
-                        }
-
-                        composable(
-                            route = "HistorialPagosScreen/{rol}",
-                            arguments = listOf(
-                                navArgument("rol") { type = NavType.StringType }
-                            )
-                        ) { backStackEntry ->
-                            val rol = backStackEntry.arguments?.getString("rol") ?: "user"
-                            HistorialPagosScreen(navController = navController, rol = rol)
                         }
 
                         composable("InformeClienteScreen/{clienteId}") { backStackEntry ->

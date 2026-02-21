@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.example.capitalexpressapp.util.ReciboHelper
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -75,6 +76,17 @@ private fun calcularFechaCuota(fechaInicio: Date, plazo: String, numeroCuota: In
     }
 
     return dateFormat.format(calendar.time)
+}
+
+fun DocumentSnapshot.getNumeroPrestamoSafeCuotas(): String {
+    return try {
+        this.getString("numeroPrestamo")?.takeIf { it.isNotBlank() }
+            ?: this.getLong("numeroPrestamo")?.toString()
+            ?: "N/D"
+    } catch (e: Exception) {
+        Log.w("CuotasHelper", "Error al obtener numeroPrestamo en ${this.id}: ${e.message}")
+        "N/D"
+    }
 }
 
 private suspend fun obtenerEstadoCuotasConCascada(
@@ -260,9 +272,7 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
             totalCapital = monto
             totalInteres = interesTotal
 
-            numeroPrestamo = prestamoDoc.getString("numeroPrestamo") ?:
-                    prestamoDoc.getLong("numeroPrestamo")?.toString() ?:
-                    "N/D"
+            numeroPrestamo = prestamoDoc.getNumeroPrestamoSafeCuotas()
             numeroPrestamoDisplay = if (numeroPrestamo != "N/D") "Préstamo N° $numeroPrestamo" else "Préstamo ID: $prestamoId"
 
             descripcionPlazo = when (plazo.lowercase()) {
@@ -736,9 +746,7 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                                             val totalPagar = prestamoSnap.getDouble("totalPagar")
                                                 ?: (monto + interesTotal)
                                             val moraActual = prestamoSnap.getDouble("mora") ?: 0.0
-                                            val numeroPrestamoActual = prestamoSnap.getString("numeroPrestamo")
-                                                ?: prestamoSnap.getLong("numeroPrestamo")?.toString()
-                                                ?: "N/D"
+                                            val numeroPrestamoActual = prestamoSnap.getNumeroPrestamoSafeCuotas()
                                             val plazo = prestamoSnap.getString("plazo") ?: "semanal"
                                             val fechaInicio = prestamoSnap.getTimestamp("fecha")?.toDate() ?: Date()
 

@@ -126,46 +126,33 @@ fun PerfilClienteScreen(
 
             prestamos = prestamosSnap.documents.mapNotNull { doc ->
                 try {
-                    // Helper para parsear proximoPago
                     val proximoPago = when (val value = doc.get("proximoPago")) {
                         is Timestamp -> value
                         is String -> {
                             try {
                                 val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
                                 sdf.parse(value)?.let { Timestamp(it) }
-                            } catch (e: Exception) {
-                                null
-                            }
+                            } catch (e: Exception) { null }
                         }
                         else -> null
                     }
-
-                    // Helper para parsear fechaCreacion con compatibilidad mixta
                     val fechaCreacion = when (val value = doc.get("fechaCreacion")) {
                         is Timestamp -> value
                         is String -> {
                             try {
                                 val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-                                val date = sdf.parse(value)
-                                date?.let { Timestamp(it) }
-                            } catch (e: Exception) {
-                                null
-                            }
+                                sdf.parse(value)?.let { Timestamp(it) }
+                            } catch (e: Exception) { null }
                         }
                         else -> null
                     }
-
-                    // Helper para parsear fechaUltimaActualizacion con compatibilidad mixta
                     val fechaUltimaActualizacion = when (val value = doc.get("fechaUltimaActualizacion")) {
                         is Timestamp -> value
                         is String -> {
                             try {
                                 val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-                                val date = sdf.parse(value)
-                                date?.let { Timestamp(it) }
-                            } catch (e: Exception) {
-                                null
-                            }
+                                sdf.parse(value)?.let { Timestamp(it) }
+                            } catch (e: Exception) { null }
                         }
                         else -> null
                     }
@@ -199,18 +186,56 @@ fun PerfilClienteScreen(
                         proximoPago = proximoPago
                     )
                 } catch (e: Exception) {
-                    null // Ignorar préstamos con errores
+                    null
                 }
             }
 
-            // 🔹 Cargar Pagos con manejo de errores
+            // 🔹 Cargar Pagos
+            // ✅ FIX DOBLE QUERY: Los préstamos aprobados desde solicitudes pueden no
+            // tener "clienteId" en el doc de pago. Se busca por ambas vías y se deduplica.
+            val pagosPorPrestamo = mutableMapOf<String, MutableList<com.google.firebase.firestore.DocumentSnapshot>>()
+            val todosLosPagosDocs = mutableListOf<com.google.firebase.firestore.DocumentSnapshot>()
+
             try {
-                val pagosSnap = db.collection("pagos")
+                // Query 1: pagos con clienteId (flujo normal)
+                val pagosClienteSnap = db.collection("pagos")
                     .whereEqualTo("clienteId", clienteId)
                     .get()
                     .await()
+                todosLosPagosDocs.addAll(pagosClienteSnap.documents)
 
-                pagos = pagosSnap.documents.map { doc ->
+                // Query 2: pagos por prestamoId de cada préstamo del cliente
+                // ✅ FIX línea 216: prestamoId puede ser nulo en Prestamo si el doc no lo tiene.
+                // Usamos ?.takeIf { it.isNotBlank() } en vez de isNotBlank() directo
+                // para evitar el NPE en receptores nullable.
+                val prestamoIds = prestamos
+                    .filter { it.eliminado != true }
+                    .mapNotNull { it.prestamoId?.takeIf { id -> id.isNotBlank() } }
+
+                // Firestore limita whereIn a 30 → chunkeamos
+                prestamoIds.chunked(30).forEach { chunk ->
+                    if (chunk.isNotEmpty()) {
+                        val pagosPorIdSnap = db.collection("pagos")
+                            .whereIn("prestamoId", chunk)
+                            .get()
+                            .await()
+
+                        // Deduplicar por doc.id
+                        val idsExistentes = todosLosPagosDocs.map { it.id }.toSet()
+                        pagosPorIdSnap.documents.forEach { doc ->
+                            if (doc.id !in idsExistentes) {
+                                todosLosPagosDocs.add(doc)
+                            }
+                        }
+                    }
+                }
+
+                // Construir índice prestamoId→docs y lista final de PagoItem
+                pagos = todosLosPagosDocs.map { doc ->
+                    val pid = doc.getString("prestamoId")
+                    if (!pid.isNullOrBlank()) {
+                        pagosPorPrestamo.getOrPut(pid) { mutableListOf() }.add(doc)
+                    }
                     PagoItem(
                         docId = doc.id,
                         cliente = doc.getString("clienteNombre") ?: "",
@@ -230,35 +255,64 @@ fun PerfilClienteScreen(
                         numeroPrestamo = doc.getString("numeroPrestamo")?.toString() ?: ""
                     )
                 }
+
             } catch (e: Exception) {
-                // Si falla cargar pagos, continuar con lista vacía
                 pagos = emptyList()
             }
 
-            // 🔹 Calcular totales con validaciones seguras
-            totalPrestado = prestamos.sumOf { p ->
-                when {
+            // ✅ totalAbonado = suma real de monto + mora de todos los pagos
+            totalAbonado = pagos.sumOf { it.monto + (it.mora ?: 0.0) }
+
+            // ✅ Recalcular saldos REALES por préstamo desde Firestore
+            val epsilon = 0.01
+            val prestamosNoEliminados = prestamos.filter { it.eliminado != true }
+
+            var pendiente    = 0.0
+            var activos      = 0
+            var saldados     = 0
+            var prestado     = 0.0
+            var montoSaldado = 0.0
+
+            prestamosNoEliminados.forEach { p ->
+                val totalAPagar = when {
                     p.totalPagar > 0 -> p.totalPagar
                     else -> p.monto + (p.interesTotal ?: p.interes)
                 }
-            }
+                prestado += totalAPagar
 
-            totalPendiente = prestamos.sumOf { p ->
-                when {
-                    p.saldo > 0 -> p.saldo
-                    else -> {
-                        val totalAPagar = if (p.totalPagar > 0) p.totalPagar
-                        else p.monto + (p.interesTotal ?: p.interes)
-                        maxOf(0.0, totalAPagar - p.montoPagado)
-                    }
+                // Usar prestamoId con null-safety
+                val pid = p.prestamoId?.takeIf { it.isNotBlank() } ?: ""
+                val pagosDelPrestamo = if (pid.isNotBlank()) pagosPorPrestamo[pid] ?: emptyList() else emptyList()
+                var montoPagadoReal = 0.0
+                pagosDelPrestamo.forEach { pagoDoc ->
+                    montoPagadoReal += (pagoDoc.getDouble("monto") ?: 0.0) +
+                            (pagoDoc.getDouble("mora") ?: 0.0)
+                }
+
+                val totalConMora   = totalAPagar + (p.mora ?: 0.0)
+                val saldoCalculado = totalConMora - montoPagadoReal
+                val saldoReal      = if (saldoCalculado <= epsilon) 0.0 else saldoCalculado
+
+                val estadoDoc = p.estado.lowercase()
+                val esSaldado = saldoReal <= epsilon ||
+                        montoPagadoReal >= totalConMora - epsilon ||
+                        estadoDoc == "saldado" ||
+                        estadoDoc == "completado"
+
+                if (esSaldado) {
+                    saldados++
+                    montoSaldado += totalAPagar
+                } else {
+                    activos++
+                    pendiente += saldoReal
                 }
             }
 
-            totalAbonado = pagos.sumOf { it.monto }
-            prestamosActivos = prestamos.count { it.estado.equals("activo", true) }
-            prestamosSaldados = prestamos.count { it.estado.equals("saldado", true) }
-            totalSaldado = prestamos.filter { it.estado.equals("saldado", true) }
-                .sumOf { if (it.totalPagar > 0) it.totalPagar else it.monto + (it.interesTotal ?: it.interes) }
+            totalPrestado    = prestado
+            totalPendiente   = pendiente
+            totalSaldado     = montoSaldado
+            prestamosActivos  = activos
+            prestamosSaldados = saldados
 
         } catch (e: Exception) {
             Toast.makeText(context, "Error cargando datos: ${e.message}", Toast.LENGTH_LONG).show()
@@ -271,9 +325,7 @@ fun PerfilClienteScreen(
     fun borrarCliente() {
         scope.launch {
             try {
-                // Borrar el cliente de Firestore
                 db.collection("clientes").document(clienteId).delete().await()
-
                 Toast.makeText(context, "Cliente eliminado correctamente", Toast.LENGTH_SHORT).show()
                 navController.popBackStack()
             } catch (e: Exception) {
@@ -452,23 +504,15 @@ fun PerfilClienteScreen(
                                 modifier = Modifier.weight(1f)
                             ) {
                                 if (clienteData.telefono.isNotEmpty()) {
-                                    // Obtener la hora actual para personalizar el saludo
                                     val currentHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
                                     val saludo = when {
                                         currentHour < 12 -> "Buenos días"
                                         currentHour < 18 -> "Buenas tardes"
                                         else -> "Buenas noches"
                                     }
-
-                                    // Crear el mensaje personalizado
                                     val mensaje = "$saludo ${clienteData.nombre}, le hablamos desde Capital Express"
-
-                                    // Codificar el mensaje para URL
                                     val mensajeCodificado = java.net.URLEncoder.encode(mensaje, "UTF-8")
-
-                                    // Crear la URL de WhatsApp con el mensaje
                                     val url = "https://wa.me/504${clienteData.telefono}?text=$mensajeCodificado"
-
                                     val intent = Intent(Intent.ACTION_VIEW).apply {
                                         data = Uri.parse(url)
                                     }

@@ -89,6 +89,21 @@ private fun PrestamoHistorial.estadoEfectivo(): String {
     }
 }
 
+// ⭐ FUNCIÓN HELPER SEGURA PARA OBTENER NÚMERO DE PRÉSTAMO
+fun DocumentSnapshot.getNumeroPrestamoSafe(): String {
+    return try {
+        // Intenta obtener como String primero
+        this.getString("numeroPrestamo")?.takeIf { it.isNotBlank() }
+            ?: // Si no existe o está vacío, intenta como Long
+            this.getLong("numeroPrestamo")?.toString()
+            ?: // Si tampoco existe, retorna vacío
+            ""
+    } catch (e: Exception) {
+        Log.w("FirestoreHelper", "Error al obtener numeroPrestamo en ${this.id}: ${e.message}")
+        ""
+    }
+}
+
 fun DocumentSnapshot.getTimestampSafeHistorial(field: String): Timestamp? {
     return try {
         this.getTimestamp(field)
@@ -182,7 +197,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                 true
             } else {
                 prestamo.cliente.contains(busqueda, ignoreCase = true) ||
-                        prestamo.numeroPrestamo.contains(busqueda, ignoreCase = true) // ⭐ String contains
+                        prestamo.numeroPrestamo.contains(busqueda, ignoreCase = true)
             }
 
             val coincideEstado = if (filtroEstado == "Todos") {
@@ -318,10 +333,8 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                             val cobradorAsignado = doc.getString("cobradorAsignado") ?: ""
                             if (cobradorAsignado.isNotBlank() && !cobradores.contains(cobradorAsignado)) cobradores.add(cobradorAsignado)
 
-                            // ⭐ OBTENER NÚMERO DE PRÉSTAMO COMO STRING
-                            val numeroPrestamoStr = doc.getString("numeroPrestamo")
-                                ?: doc.getLong("numeroPrestamo")?.toString()
-                                ?: ""
+                            // ⭐ USO DE LA FUNCIÓN SEGURA
+                            val numeroPrestamoStr = doc.getNumeroPrestamoSafe()
 
                             PrestamoHistorial(
                                 id = doc.id,
@@ -342,7 +355,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                 estado = estadoCalculado,
                                 observaciones = doc.getString("observaciones") ?: "",
                                 diasEfectivos = doc.getLong("diasEfectivos")?.toInt() ?: 0,
-                                numeroPrestamo = numeroPrestamoStr, // ⭐ STRING
+                                numeroPrestamo = numeroPrestamoStr, // ⭐ STRING SEGURO
                                 prestamoId = doc.getString("prestamoId") ?: "",
                                 mora = doc.getDouble("mora") ?: 0.0,
                                 telefonoCobrador = doc.getString("telefonoCobrador") ?: "",
@@ -359,7 +372,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                 }
                             )
                         } catch (e: Exception) {
-                            Log.e("HistorialPrestamos", "Error al procesar documento ${doc.id}: ${e.message}")
+                            Log.e("HistorialPrestamos", "Error al procesar documento ${doc.id}: ${e.message}", e)
                             null
                         }
                     }
@@ -473,7 +486,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                                 "montoPagado" to prestamo.montoPagado,
                                                 "saldo" to prestamo.saldo,
                                                 "estado" to prestamo.estadoEfectivo(),
-                                                "numeroPrestamo" to prestamo.numeroPrestamo, // ⭐ STRING
+                                                "numeroPrestamo" to prestamo.numeroPrestamo,
                                                 "fecha" to prestamo.fecha,
                                                 "totalPagar" to prestamo.totalPagar,
                                                 "cuotas" to prestamo.cuotas,
@@ -1065,7 +1078,6 @@ fun PrestamoCardHistorial(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(text = "👤 ${prestamo.cliente}", fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = Color(0xFF333333))
-                        // ⭐ MOSTRAR NÚMERO DE PRÉSTAMO (STRING)
                         if (prestamo.numeroPrestamo.isNotEmpty()) {
                             Text(text = "📋 Préstamo #${prestamo.numeroPrestamo}", fontSize = 11.sp, color = Color(0xFF666666))
                         }
@@ -1170,7 +1182,7 @@ fun PrestamoCardHistorial(
                                                         fecha = prestamo.fecha,
                                                         lugar = prestamo.lugar.ifBlank { "No especificado" },
                                                         numeroCobrador = prestamo.telefonoCobrador,
-                                                        numeroPrestamo = if (prestamo.numeroPrestamo.isNotEmpty()) "Préstamo N° ${prestamo.numeroPrestamo}" else "Préstamo", // ⭐ STRING
+                                                        numeroPrestamo = if (prestamo.numeroPrestamo.isNotEmpty()) "Préstamo N° ${prestamo.numeroPrestamo}" else "Préstamo",
                                                         nombreCobrador = prestamo.cobrador,
                                                         fechaProximoPago = prestamo.proximoPago
                                                     )

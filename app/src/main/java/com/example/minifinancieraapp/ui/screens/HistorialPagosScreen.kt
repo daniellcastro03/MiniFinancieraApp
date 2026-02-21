@@ -629,7 +629,20 @@ private suspend fun reimprimirRecibo(context: Context, pago: PagoItem) {
         val fecha = pago.fecha
         val montoPagado = pago.monto.toString()
         val saldoAnterior = (pago.saldoRestante ?: 0.0) + pago.monto + pago.mora
-        val proximoPago = prestamoDoc.getString("proximoPago") ?: ""
+
+        // 🔥 FIX: Convertir proximoPago de forma segura
+        val proximoPagoRaw = prestamoDoc.get("proximoPago")
+        val proximoPago = when (proximoPagoRaw) {
+            null -> ""
+            is String -> proximoPagoRaw
+            is Number -> proximoPagoRaw.toString()
+            is com.google.firebase.Timestamp -> {
+                val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                dateFormat.format(proximoPagoRaw.toDate())
+            }
+            else -> proximoPagoRaw.toString()
+        }
+
         val cuota = pago.numeroCuota?.toString() ?: pago.cuota.ifEmpty { "1" }
         val cobrador = pago.cobrador
         val lugar = pago.lugar.ifEmpty { "Capital Express" }

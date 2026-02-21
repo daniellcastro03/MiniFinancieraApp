@@ -696,399 +696,283 @@ object ReciboHelper {
         nombreCobrador: String = "Cobrador",
         fechaProximoPago: String = ""
     ): File? {
-
         return try {
-
-            // ==== CONFIG BÁSICA PARA TÉRMICA ====
-            val pageWidth = 384              // mantenemos ancho térmico
-            val pageHeight = 1300            // MÁS LARGO para que no corte
-            val leftMargin = 20f
-            val rightMargin = pageWidth - 20f
-            val contentWidth = rightMargin - leftMargin
+            // Dimensiones: 5cm ancho x 20cm alto
+            val pageWidth = 189    // 5cm = 189 puntos (REDUCIDO)
+            val pageHeight = 756   // 20cm = 756 puntos
+            val margin = 15f       // Márgenes ajustados
+            val contentWidth = pageWidth - (margin * 2)
 
             val pdfDocument = PdfDocument()
             val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create()
             val page = pdfDocument.startPage(pageInfo)
             val canvas = page.canvas
 
-            // ==== COLORES ====
-            val colorPrimario = Color.parseColor("#1565C0")
-            val colorSecundario = Color.parseColor("#2E7D32")
-            val colorTexto = Color.parseColor("#212121")
-            val colorFondo = Color.parseColor("#F5F5F5")
+            canvas.drawColor(Color.WHITE)
 
-            // ==== PINTURAS (TAMAÑOS LEGIBLES EN TÉRMICA) ====
-            val paintTitle = Paint().apply {
-                color = colorPrimario
-                textSize = 18f
-                isFakeBoldText = true
-                typeface = Typeface.DEFAULT_BOLD
-                isAntiAlias = true
+            // Paints ajustados para 5cm de ancho
+            val paintHeader = Paint().apply {
+                color = Color.BLACK
                 textAlign = Paint.Align.CENTER
+                textSize = 14f  // Reducido para caber en 5cm
+                typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                isAntiAlias = true
             }
 
-            val paintSubtitle = Paint().apply {
-                color = colorPrimario
-                textSize = 15f
-                isFakeBoldText = true
+            val paintSmall = Paint().apply {
+                color = Color.BLACK
+                textAlign = Paint.Align.CENTER
+                textSize = 9f  // Reducido
+                typeface = Typeface.MONOSPACE
                 isAntiAlias = true
-                textAlign = Paint.Align.LEFT
             }
 
             val paintLabel = Paint().apply {
-                color = colorTexto
-                textSize = 13f
-                typeface = Typeface.DEFAULT
-                isAntiAlias = true
+                color = Color.BLACK
                 textAlign = Paint.Align.LEFT
+                textSize = 8f
+                typeface = Typeface.MONOSPACE
+                isAntiAlias = true
             }
 
             val paintValue = Paint().apply {
-                color = colorTexto
-                textSize = 13f
-                isFakeBoldText = true
+                color = Color.BLACK
+                textAlign = Paint.Align.RIGHT
+                textSize = 8f
+                typeface = Typeface.MONOSPACE
                 isAntiAlias = true
-                textAlign = Paint.Align.LEFT
             }
 
-            val paintMoney = Paint().apply {
-                color = colorSecundario
-                textSize = 14f
-                isFakeBoldText = true
+            val paintAmount = Paint().apply {
+                color = Color.BLACK
+                textAlign = Paint.Align.CENTER
+                textSize = 16f  // Destacado pero que quepa
+                typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
                 isAntiAlias = true
-                textAlign = Paint.Align.RIGHT
-            }
-
-            val paintTotal = Paint().apply {
-                color = colorSecundario
-                textSize = 16f
-                isFakeBoldText = true
-                typeface = Typeface.DEFAULT_BOLD
-                isAntiAlias = true
-                textAlign = Paint.Align.RIGHT
             }
 
             val paintLine = Paint().apply {
-                color = colorPrimario
-                strokeWidth = 2f
-                isAntiAlias = true
+                color = Color.BLACK
+                strokeWidth = 1.5f
+                style = Paint.Style.STROKE
             }
 
-            val paintBackground = Paint().apply {
-                color = colorFondo
+            fun fmt(n: Double): String {
+                val formatter = java.text.DecimalFormat("#,##0.00",
+                    java.text.DecimalFormatSymbols(Locale.US).apply {
+                        groupingSeparator = ','
+                        decimalSeparator = '.'
+                    })
+                return "L${formatter.format(n)}"
             }
 
-            // ==== HELPERS ====
-            val lineSpacing = 18f
+            // Función para dividir texto
+            fun splitText(text: String, maxWidth: Float, paint: Paint): List<String> {
+                if (paint.measureText(text) <= maxWidth) return listOf(text)
 
-            fun wrapText(texto: String, paint: Paint, maxWidth: Float): List<String> {
-                if (texto.isBlank()) return listOf("")
-                val palabras = texto.trim().split(" ")
-                val lineas = mutableListOf<String>()
-                var actual = ""
-                for (w in palabras) {
-                    val intento = if (actual.isEmpty()) w else "$actual $w"
-                    if (paint.measureText(intento) > maxWidth) {
-                        if (actual.isNotEmpty()) lineas.add(actual)
-                        actual = w
+                val words = text.split(" ")
+                val lines = mutableListOf<String>()
+                var currentLine = ""
+
+                for (word in words) {
+                    val testLine = if (currentLine.isEmpty()) word else "$currentLine $word"
+                    if (paint.measureText(testLine) <= maxWidth) {
+                        currentLine = testLine
                     } else {
-                        actual = intento
+                        if (currentLine.isNotEmpty()) lines.add(currentLine)
+                        currentLine = word
                     }
                 }
-                if (actual.isNotEmpty()) lineas.add(actual)
-                return lineas
+                if (currentLine.isNotEmpty()) lines.add(currentLine)
+                return lines.ifEmpty { listOf(text) }
             }
 
-            // Dibuja varias líneas y devuelve el Y final después de todo el bloque
-            fun drawWrappedText(
-                texto: String,
-                x: Float,
-                yStart: Float,
-                paint: Paint,
-                maxWidth: Float
-            ): Float {
-                val lines = wrapText(texto, paint, maxWidth)
-                var yCur = yStart
-                lines.forEach { linea ->
-                    canvas.drawText(linea, x, yCur, paint)
-                    yCur += lineSpacing
-                }
-                return yCur
-            }
+            val lineSpacing = 12f
+            var y = 20f
 
-            // etiqueta + valor multilínea alineados tipo:
-            // [Etiqueta:] [valor en varias líneas]
-            fun drawLabelValueBlock(
-                etiqueta: String,
-                valor: String,
-                yStart: Float,
-                labelPaint: Paint = paintLabel,
-                valuePaint: Paint = paintValue,
-                minGapAfterLabel: Float = 100f
-            ): Float {
-                val xLabel = leftMargin
-                val xValue = xLabel + maxOf(minGapAfterLabel, labelPaint.measureText(etiqueta) + 10f)
-                val maxValueWidth = rightMargin - xValue
-
-                // primera línea: dibujar etiqueta
-                canvas.drawText(etiqueta, xLabel, yStart, labelPaint)
-
-                // valor puede ser multilínea
-                val lines = wrapText(valor, valuePaint, maxValueWidth)
-                var yCur = yStart
-                lines.forEachIndexed { idx, linea ->
-                    if (idx == 0) {
-                        canvas.drawText(linea, xValue, yCur, valuePaint)
-                    } else {
-                        yCur += lineSpacing
-                        canvas.drawText(linea, xValue, yCur, valuePaint)
-                    }
-                }
-
-                // devolución: dejamos un espacio extra al final del bloque
-                return yCur + lineSpacing
-            }
-
-            // ==== COMENZAMOS A PINTAR ====
-            var y = 25f
-
-            // Header gris con logo
-            canvas.drawRect(
-                leftMargin,
-                y,
-                rightMargin,
-                y + 90f,
-                paintBackground
-            )
-
-            // Logo centrado (safe try)
+            // Logo ajustado
             runCatching {
-                val logoBitmap = BitmapFactory.decodeResource(context.resources, R.drawable.logo_capital)
-                val logoScaled = Bitmap.createScaledBitmap(logoBitmap, 60, 60, true)
-                val logoX = (pageWidth - logoScaled.width) / 2f
-                val logoY = y + 10f
-                canvas.drawBitmap(logoScaled, logoX, logoY, null)
-            }
-
-            y += 70f
-            canvas.drawText(
-                "CAPITAL EXPRESS",
-                pageWidth / 2f,
-                y,
-                paintTitle
-            )
-
-            y += 30f
-
-            // Lugar y fecha (lugar envuelto si es largo)
-            y = drawWrappedText(
-                texto = "📍 $lugar",
-                x = leftMargin,
-                yStart = y,
-                paint = paintLabel,
-                maxWidth = contentWidth * 0.6f
-            )
-
-            // fecha en la misma fila inicial (arriba), la dibujamos alineada a la derecha del recibo
-            canvas.drawText(
-                "📅 $fecha",
-                rightMargin,
-                y - (lineSpacing), // subirla a la primera línea del bloque anterior
-                paintLabel.apply { textAlign = Paint.Align.RIGHT }
-            )
-            paintLabel.textAlign = Paint.Align.LEFT
-
-            // Próximo pago (centrado, con wrap si largo)
-            if (fechaProximoPago.isNotBlank()) {
-                val proxTexto = "📆 Próximo pago: $fechaProximoPago"
-                val proxLines = wrapText(proxTexto, paintLabel, contentWidth)
-                proxLines.forEach { linea ->
-                    canvas.drawText(
-                        linea,
-                        pageWidth / 2f,
-                        y,
-                        paintLabel.apply { textAlign = Paint.Align.CENTER }
-                    )
-                    y += lineSpacing
+                BitmapFactory.decodeResource(context.resources, R.drawable.logo_capital)?.let {
+                    val logoSize = 45
+                    val scaled = Bitmap.createScaledBitmap(it, logoSize, logoSize, true)
+                    canvas.drawBitmap(scaled, (pageWidth - logoSize) / 2f, y, null)
+                    y += logoSize + 10f
                 }
-                paintLabel.textAlign = Paint.Align.LEFT
+            }.onFailure {
+                y += 10f
             }
 
-            // separador
-            canvas.drawLine(leftMargin, y, rightMargin, y, paintLine)
-            y += 25f
+            // Encabezado
+            canvas.drawText("CAPITAL", pageWidth / 2f, y, paintHeader)
+            y += 16f
+            canvas.drawText("EXPRESS", pageWidth / 2f, y, paintHeader)
+            y += 14f
+            canvas.drawText("FINANCIERA", pageWidth / 2f, y, paintSmall)
+            y += 12f
 
-            // título recibo
-            canvas.drawText(
-                "RECIBO DE PRÉSTAMO",
-                pageWidth / 2f,
-                y,
-                paintSubtitle.apply { textAlign = Paint.Align.CENTER }
-            )
-            y += 30f
-            paintSubtitle.textAlign = Paint.Align.LEFT
+            // Número de cobrador
+            canvas.drawText(numeroCobrador, pageWidth / 2f, y, paintSmall)
+            y += 14f
 
-            // ==== DATOS DEL CLIENTE ====
-            canvas.drawRect(
-                leftMargin,
-                y,
-                rightMargin,
-                y + 80f,
-                paintBackground
-            )
+            // Línea
+            canvas.drawLine(margin, y, pageWidth - margin, y, paintLine)
+            y += 14f
 
-            y += 20f
-            canvas.drawText("DATOS DEL CLIENTE", leftMargin + 5f, y, paintSubtitle)
-            y += 25f
+            // Lugar
+            paintSmall.textAlign = Paint.Align.CENTER
+            val lugarLines = splitText(lugar, contentWidth, paintSmall)
+            lugarLines.forEach { line ->
+                canvas.drawText(line, pageWidth / 2f, y, paintSmall)
+                y += 11f
+            }
+            y += 4f
 
-            y = drawLabelValueBlock(
-                etiqueta = "👤 Nombre:",
-                valor = cliente.nombre,
-                yStart = y
-            )
-
-            if (cliente.telefono.isNotBlank()) {
-                y = drawLabelValueBlock(
-                    etiqueta = "📱 Teléfono:",
-                    valor = cliente.telefono,
-                    yStart = y
-                )
+            // Información del préstamo
+            val prestamoLines = splitText("Prestamo N° $numeroPrestamo", contentWidth, paintSmall)
+            prestamoLines.forEach { line ->
+                canvas.drawText(line, pageWidth / 2f, y, paintSmall)
+                y += 11f
             }
 
-            if (cliente.direccionCasa.isNotBlank()) {
-                y = drawLabelValueBlock(
-                    etiqueta = "🏠 Dirección:",
-                    valor = cliente.direccionCasa,
-                    yStart = y
-                )
+            val docNumber = fecha.replace("/", "")
+            canvas.drawText("Doc $docNumber", pageWidth / 2f, y, paintSmall)
+            y += 14f
+
+            // Cliente
+            val clienteLines = splitText("Sr(a) ${cliente.nombre}", contentWidth, paintSmall)
+            paintSmall.textAlign = Paint.Align.CENTER
+            clienteLines.forEach { line ->
+                canvas.drawText(line, pageWidth / 2f, y, paintSmall)
+                y += 11f
             }
+            y += 8f
 
-            // ==== DETALLES DEL PRÉSTAMO ====
-            canvas.drawText("DETALLES DEL PRÉSTAMO", leftMargin + 5f, y, paintSubtitle)
-            y += 25f
-
-            // Monto prestado
-            canvas.drawText("💲 Monto prestado:", leftMargin, y, paintLabel)
-            canvas.drawText(
-                "L. ${"%.2f".format(monto)}",
-                rightMargin,
-                y,
-                paintMoney
-            )
-            y += lineSpacing
-
-            // Interés total
-            canvas.drawText("📈 Interés total:", leftMargin, y, paintLabel)
-            canvas.drawText(
-                "L. ${"%.2f".format(interesTotal)}",
-                rightMargin,
-                y,
-                paintMoney
-            )
-            y += lineSpacing
-
-            // Nº de cuotas
-            canvas.drawText("⏳ Nº de cuotas:", leftMargin, y, paintLabel)
-            canvas.drawText(
-                cuotas.toString(),
-                rightMargin,
-                y,
-                paintValue.apply { textAlign = Paint.Align.RIGHT }
-            )
-            y += lineSpacing
-            paintValue.textAlign = Paint.Align.LEFT
-
-            // Mora
-            canvas.drawText("⚠️ Mora diaria:", leftMargin, y, paintLabel)
-            canvas.drawText(
-                "L. ${"%.2f".format(mora)}",
-                rightMargin,
-                y,
-                paintMoney
-            )
-            y += lineSpacing + 5f
-
-            // TOTAL A PAGAR con fondo
+            // Monto del préstamo
             val total = monto + interesTotal
-            canvas.drawRect(leftMargin, y, rightMargin, y + 40f, paintBackground)
-            y += 28f
-            canvas.drawText(
-                "💰 TOTAL A PAGAR:",
-                leftMargin + 5f,
-                y,
-                paintTotal.apply { textAlign = Paint.Align.LEFT }
-            )
-            canvas.drawText(
-                "L. ${"%.2f".format(total)}",
-                rightMargin - 5f,
-                y,
-                paintTotal.apply { textAlign = Paint.Align.RIGHT }
-            )
-            y += lineSpacing + 5f
+            canvas.drawText("Prestamo", pageWidth / 2f, y, paintSmall)
+            y += 14f
+            canvas.drawText(fmt(total), pageWidth / 2f, y, paintAmount)
+            y += 20f
 
-            // separador
-            canvas.drawLine(leftMargin, y, rightMargin, y, paintLine)
-            y += 25f
+            // Cuotas
+            paintSmall.textAlign = Paint.Align.CENTER
+            canvas.drawText("$cuotas cuotas", pageWidth / 2f, y, paintSmall)
+            y += 14f
 
-            // ==== INFORMACIÓN DEL COBRADOR ====
-            canvas.drawText("INFORMACIÓN DE CONTACTO", leftMargin + 5f, y, paintSubtitle)
-            y += 25f
+            // Línea
+            canvas.drawLine(margin, y, pageWidth - margin, y, paintLine)
+            y += 14f
 
-            y = drawLabelValueBlock(
-                etiqueta = "👨‍💼 Atendido por:",
-                valor = nombreCobrador,
-                yStart = y
-            )
+            // Detalles en formato compacto
+            fun drawCompactLine(label: String, value: String) {
+                paintLabel.textAlign = Paint.Align.LEFT
+                canvas.drawText(label, margin, y, paintLabel)
+                paintValue.textAlign = Paint.Align.RIGHT
+                canvas.drawText(value, pageWidth - margin, y, paintValue)
+                y += lineSpacing
+            }
 
-            y = drawLabelValueBlock(
-                etiqueta = "📱 Teléfono:",
-                valor = numeroCobrador,
-                yStart = y
-            )
+            drawCompactLine("Cuotas", "$cuotas")
+            drawCompactLine("Fecha", fecha)
+            drawCompactLine("Monto", fmt(monto))
+            drawCompactLine("Capital", fmt(monto))
+            drawCompactLine("Interes", fmt(interesTotal))
 
-            // ==== FIRMA ====
-            canvas.drawText("FIRMA DE AUTORIZACIÓN", leftMargin + 5f, y, paintSubtitle)
-            y += 30f
+            if (mora > 0.0) {
+                drawCompactLine("Mora", fmt(mora))
+            }
 
-            val firmaLineStart = pageWidth * 0.2f
-            val firmaLineEnd = pageWidth * 0.8f
-            canvas.drawLine(
-                firmaLineStart,
-                y,
-                firmaLineEnd,
-                y,
-                paintLabel
-            )
-            y += lineSpacing
+            y += 8f
+            canvas.drawLine(margin, y, pageWidth - margin, y, paintLine)
+            y += 14f
 
-            paintLabel.textAlign = Paint.Align.CENTER
-            canvas.drawText(
-                "Firma del cobrador",
-                pageWidth / 2f,
-                y,
-                paintLabel
-            )
+            // Total
             paintLabel.textAlign = Paint.Align.LEFT
-            y += lineSpacing + 10f
+            paintLabel.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            paintLabel.textSize = 9f
+            canvas.drawText("Total:", margin, y, paintLabel)
+            paintLabel.typeface = Typeface.MONOSPACE
+            paintLabel.textSize = 8f
+
+            paintAmount.textAlign = Paint.Align.RIGHT
+            paintAmount.textSize = 14f
+            canvas.drawText(fmt(total), pageWidth - margin, y, paintAmount)
+            paintAmount.textSize = 16f
+            y += 20f
+
+            // Próximo pago
+            if (fechaProximoPago.isNotBlank()) {
+                paintSmall.textAlign = Paint.Align.CENTER
+                canvas.drawText("Proximo:", pageWidth / 2f, y, paintSmall)
+                y += 11f
+                canvas.drawText(fechaProximoPago, pageWidth / 2f, y, paintSmall)
+                y += 14f
+            }
+
+            // Teléfono
+            if (cliente.telefono.isNotBlank()) {
+                paintSmall.textAlign = Paint.Align.CENTER
+                canvas.drawText("Tel:", pageWidth / 2f, y, paintSmall)
+                y += 11f
+                canvas.drawText(cliente.telefono, pageWidth / 2f, y, paintSmall)
+                y += 12f
+            }
+
+            // Dirección
+            if (cliente.direccionCasa.isNotBlank()) {
+                val direccionLines = splitText(cliente.direccionCasa, contentWidth, paintSmall)
+                paintSmall.textSize = 7f
+                direccionLines.forEach { line ->
+                    canvas.drawText(line, pageWidth / 2f, y, paintSmall)
+                    y += 10f
+                }
+                paintSmall.textSize = 9f
+                y += 8f
+            }
+
+            // Contacto
+            paintSmall.textAlign = Paint.Align.CENTER
+            paintSmall.textSize = 7f
+            val contactoLines = splitText("Consultas llamar:", contentWidth, paintSmall)
+            contactoLines.forEach { line ->
+                canvas.drawText(line, pageWidth / 2f, y, paintSmall)
+                y += 10f
+            }
+            canvas.drawText("($numeroCobrador)", pageWidth / 2f, y, paintSmall)
+            y += 14f
+            paintSmall.textSize = 9f
+
+            // Línea
+            canvas.drawLine(margin, y, pageWidth - margin, y, paintLine)
+            y += 14f
+
+            // Fecha y hora
+            val timestamp = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
+            val timeStamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            paintSmall.textAlign = Paint.Align.CENTER
+            paintSmall.textSize = 7f
+            canvas.drawText(timestamp, pageWidth / 2f, y, paintSmall)
+            y += 10f
+            canvas.drawText(timeStamp, pageWidth / 2f, y, paintSmall)
+            y += 12f
 
             // Mensaje final
-            paintLabel.textAlign = Paint.Align.CENTER
-            canvas.drawText(
-                "¡Gracias por confiar en nosotros!",
-                pageWidth / 2f,
-                y,
-                paintLabel
-            )
-            y += lineSpacing
-            canvas.drawText(
-                "Tu socio financiero en Danlí",
-                pageWidth / 2f,
-                y,
-                paintLabel
-            )
-            paintLabel.textAlign = Paint.Align.LEFT
+            paintSmall.textSize = 8f
+            paintSmall.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            val mensajeLines = splitText("CONSERVE ESTE RECIBO", contentWidth, paintSmall)
+            mensajeLines.forEach { line ->
+                canvas.drawText(line, pageWidth / 2f, y, paintSmall)
+                y += 10f
+            }
+            y += 8f
 
-            // ==== TERMINAR Y GUARDAR ====
+            // Espacio para firma
+            canvas.drawLine(margin + 20f, y, pageWidth - margin - 20f, y, paintLine)
+            y += 10f
+            paintSmall.textSize = 7f
+            canvas.drawText("Firma Cliente", pageWidth / 2f, y, paintSmall)
+
+            // Guardar PDF
             pdfDocument.finishPage(page)
 
             val file = File(
@@ -1107,7 +991,6 @@ object ReciboHelper {
             null
         }
     }
-
 
     fun generarInformeClientePDF(
         context: Context,
@@ -2140,377 +2023,280 @@ object ReciboHelper {
             val pagoIngresado = montoPagado.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
             val saldoPrevio = saldoAnterior.coerceAtLeast(0.0)
 
-            // ✅✅✅ CORRECCIÓN CRÍTICA: Priorizar saldoNuevoFijo si viene del sistema ✅✅✅
             val nuevoSaldo = if (saldoNuevoFijo != null) {
-                // Si viene el saldo nuevo desde la pantalla, úsalo directamente
                 saldoNuevoFijo.coerceAtLeast(0.0)
             } else {
-                // Fallback: calcular localmente (backward compatibility)
                 val pagoAplicado = minOf(pagoIngresado, saldoPrevio)
                 (saldoPrevio - pagoAplicado).coerceAtLeast(0.0)
             }
 
-            Log.d("ReciboPDF", """
-                💰 CÁLCULO DE SALDO:
-                - Saldo anterior: L. $saldoPrevio
-                - Pago ingresado: L. $pagoIngresado
-                - saldoNuevoFijo recibido: ${saldoNuevoFijo ?: "null"}
-                - Saldo nuevo calculado: L. $nuevoSaldo
-            """.trimIndent())
-
-            fun fmt(n: Double) = "L. %,.2f".format(Locale.getDefault(), n)
-
-            // ===== CONFIG =====
-            val lineSpacing = 18f
-            val extraBlockSpacing = 6f
-            val margenIzq = 15f
-            val margenDer = 305f
-            val espacioSeccion = 22f
-
-            // Paint base para medir
-            val paintMeasure = Paint().apply {
-                isAntiAlias = true
-                textSize = 11f
-                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            fun fmt(n: Double): String {
+                val formatter = java.text.DecimalFormat("#,##0.00",
+                    java.text.DecimalFormatSymbols(Locale.US).apply {
+                        groupingSeparator = ','
+                        decimalSeparator = '.'
+                    })
+                return "L${formatter.format(n)}"
             }
 
-            fun wrap(texto: String, ancho: Float): List<String> {
-                if (texto.isBlank()) return listOf("—")
-                val palabras = texto.split(" ")
-                val res = mutableListOf<String>()
-                var cur = ""
-                for (w in palabras) {
-                    val test = if (cur.isEmpty()) w else "$cur $w"
-                    if (paintMeasure.measureText(test) > ancho) {
-                        if (cur.isNotEmpty()) res.add(cur)
-                        cur = w
-                    } else cur = test
-                }
-                if (cur.isNotEmpty()) res.add(cur)
-                return if (res.isEmpty()) listOf("—") else res
-            }
-
-            // ⭐⭐⭐ CORRECCIÓN CRÍTICA: Determinar estado saldado basado en saldo REAL ⭐⭐⭐
-            val estaSaldado = nuevoSaldo <= 0.01
-
-            val proximoPrintable = when {
-                estaSaldado -> "✅ SALDADO"
-                proximoPago.isBlank() -> "—"
-                proximoPago.equals("saldado", ignoreCase = true) && !estaSaldado -> "Pendiente de confirmar"
-                else -> proximoPago
-            }
-
-            val clientePrintable  = cliente.ifBlank { "—" }
-            val cobradorPrintable = (cobrador ?: "").ifBlank { "—" }
-            val cuotaPrintable    = cuota.ifBlank { "—" }
-            val tipoPagoPrintable = tipoPago.ifBlank { "—" }
-            val firmaPrintable    = firma.ifBlank { "—" }
-
-            // Cálculo de altura dinámica más generosa
-            val anchoValor = (margenDer - (margenIzq + 80f) - 5f)
-
-            val lineasCliente  = wrap(clientePrintable, anchoValor).size
-            val lineasCobrador = wrap(cobradorPrintable, anchoValor).size
-            val lineasCuota    = wrap(cuotaPrintable, anchoValor).size
-            val lineasLugar    = wrap(lugar, margenDer - margenIzq - 100f).size
-            val lineasProx     = wrap(proximoPrintable, anchoValor).size
-            val lineasTipo     = wrap(tipoPagoPrintable, anchoValor).size
-
-            val alturaBase = 620f
-            val alturaDinamica =
-                alturaBase +
-                        (lineasLugar - 1) * (lineSpacing - 3f) +
-                        (lineasCliente - 1) * (lineSpacing - 3f) +
-                        (lineasCobrador - 1) * (lineSpacing - 3f) +
-                        (lineasCuota - 1) * (lineSpacing - 3f) +
-                        (lineasProx - 1).coerceAtLeast(0) * (lineSpacing - 3f) +
-                        (lineasTipo - 1) * (lineSpacing - 3f) +
-                        140f
-
-            val pageWidth = 320
-            val pageHeight = alturaDinamica.toInt().coerceAtLeast(900)
+            // Dimensiones: 5cm ancho x 20cm alto
+            val pageWidth = 189    // 5cm = 189 puntos (REDUCIDO)
+            val pageHeight = 756   // 20cm = 756 puntos
+            val margin = 15f       // Márgenes ajustados para ancho reducido
+            val contentWidth = pageWidth - (margin * 2)
 
             val pdfDocument = PdfDocument()
             val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create()
             val page = pdfDocument.startPage(pageInfo)
             val canvas = page.canvas
 
-            // ===== COLORES / PAINTS =====
-            val colorPrimario = Color.parseColor("#1565C0")
-            val colorSecundario = Color.parseColor("#2E7D32")
-            val colorMora = Color.parseColor("#D32F2F")
-            val colorTexto = Color.parseColor("#212121")
-            val colorFondo = Color.parseColor("#F8F9FA")
+            canvas.drawColor(Color.WHITE)
 
-            val paintTitle = Paint().apply {
-                isAntiAlias = true
-                color = colorPrimario
+            // Paints ajustados para 5cm de ancho
+            val paintHeader = Paint().apply {
+                color = Color.BLACK
                 textAlign = Paint.Align.CENTER
-                textSize = 16f
-                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            }
-            val paintSubtitle = Paint().apply {
+                textSize = 14f  // Reducido para caber en 5cm
+                typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
                 isAntiAlias = true
-                color = colorPrimario
-                textAlign = Paint.Align.CENTER
-                textSize = 14f
-                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
+
+            val paintSmall = Paint().apply {
+                color = Color.BLACK
+                textAlign = Paint.Align.CENTER
+                textSize = 9f  // Reducido para caber
+                typeface = Typeface.MONOSPACE
+                isAntiAlias = true
+            }
+
             val paintLabel = Paint().apply {
-                isAntiAlias = true
-                color = colorTexto
+                color = Color.BLACK
                 textAlign = Paint.Align.LEFT
-                textSize = 11f
-                typeface = Typeface.DEFAULT
+                textSize = 8f  // Reducido para etiquetas
+                typeface = Typeface.MONOSPACE
+                isAntiAlias = true
             }
+
             val paintValue = Paint().apply {
-                isAntiAlias = true
-                color = colorTexto
-                textAlign = Paint.Align.LEFT
-                textSize = 11f
-                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            }
-            val paintMoney = Paint().apply {
-                isAntiAlias = true
-                color = colorSecundario
+                color = Color.BLACK
                 textAlign = Paint.Align.RIGHT
-                textSize = 12f
-                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            }
-            val paintMoraPaint = Paint().apply {
+                textSize = 8f  // Reducido para valores
+                typeface = Typeface.MONOSPACE
                 isAntiAlias = true
-                color = colorMora
-                textAlign = Paint.Align.RIGHT
-                textSize = 11f
-                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
+
+            val paintAmount = Paint().apply {
+                color = Color.BLACK
+                textAlign = Paint.Align.CENTER
+                textSize = 16f  // Destacado pero que quepa
+                typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                isAntiAlias = true
+            }
+
             val paintLine = Paint().apply {
-                isAntiAlias = true
-                color = colorPrimario
+                color = Color.BLACK
                 strokeWidth = 1.5f
-            }
-            val paintBackground = Paint().apply {
-                isAntiAlias = true
-                color = colorFondo
+                style = Paint.Style.STROKE
             }
 
-            var y = 15f
+            // Función para dividir texto adaptada
+            fun splitText(text: String, maxWidth: Float, paint: Paint): List<String> {
+                if (paint.measureText(text) <= maxWidth) return listOf(text)
 
-            // ===== HEADER =====
-            canvas.drawRect(5f, y, 315f, y + 80f, paintBackground)
+                val words = text.split(" ")
+                val lines = mutableListOf<String>()
+                var currentLine = ""
+
+                for (word in words) {
+                    val testLine = if (currentLine.isEmpty()) word else "$currentLine $word"
+                    if (paint.measureText(testLine) <= maxWidth) {
+                        currentLine = testLine
+                    } else {
+                        if (currentLine.isNotEmpty()) lines.add(currentLine)
+                        currentLine = word
+                    }
+                }
+                if (currentLine.isNotEmpty()) lines.add(currentLine)
+                return lines.ifEmpty { listOf(text) }
+            }
+
+            val lineSpacing = 12f
+            var y = 20f
+
+            // Logo ajustado
             runCatching {
                 BitmapFactory.decodeResource(context.resources, R.drawable.logo_capital)?.let {
-                    val scaled = Bitmap.createScaledBitmap(it, 50, 50, false)
-                    canvas.drawBitmap(scaled, 135f, y + 5f, null)
+                    val logoSize = 45  // Más pequeño para 5cm
+                    val scaled = Bitmap.createScaledBitmap(it, logoSize, logoSize, true)
+                    canvas.drawBitmap(scaled, (pageWidth - logoSize) / 2f, y, null)
+                    y += logoSize + 10f
                 }
-            }
-            y += 60f
-            canvas.drawText("CAPITAL EXPRESS", 160f, y, paintTitle)
-            y += 25f
-
-            fun wrapText(texto: String, paint: Paint, anchoMax: Float) = wrap(texto, anchoMax)
-
-            fun drawMultiline(
-                texto: String,
-                x: Float,
-                yStart: Float,
-                paint: Paint,
-                anchoMax: Float
-            ): Float {
-                val lines = wrapText(texto, paint, anchoMax)
-                var yCur = yStart
-                lines.forEachIndexed { i, l ->
-                    canvas.drawText(l, x, yCur, paint)
-                    if (i < lines.lastIndex) yCur += (lineSpacing - 3f)
-                }
-                return yCur
+            }.onFailure {
+                y += 10f
             }
 
-            // Lugar (multilínea) + fecha (alineada a la derecha en la primera línea)
-            paintLabel.textAlign = Paint.Align.LEFT
-            val yLugarFin = drawMultiline(
-                "📍 $lugar",
-                margenIzq,
-                y,
-                paintLabel,
-                margenDer - margenIzq - 100f
-            )
+            // Encabezado
+            canvas.drawText("CAPITAL", pageWidth / 2f, y, paintHeader)
+            y += 16f
+            canvas.drawText("EXPRESS", pageWidth / 2f, y, paintHeader)
+            y += 14f
+            canvas.drawText("FINANCIERA", pageWidth / 2f, y, paintSmall)
+            y += 16f
 
-            paintLabel.textAlign = Paint.Align.RIGHT
-            canvas.drawText("📅 $fecha", margenDer, y, paintLabel)
-            paintLabel.textAlign = Paint.Align.LEFT
+            // Línea
+            canvas.drawLine(margin, y, pageWidth - margin, y, paintLine)
+            y += 14f
 
-            y = maxOf(yLugarFin, y) + espacioSeccion
+            // Lugar
+            paintSmall.textAlign = Paint.Align.CENTER
+            val lugarLines = splitText(lugar, contentWidth, paintSmall)
+            lugarLines.forEach { line ->
+                canvas.drawText(line, pageWidth / 2f, y, paintSmall)
+                y += 11f
+            }
+            y += 4f
 
-            // Línea separadora
-            canvas.drawLine(10f, y, 310f, y, paintLine)
-            y += espacioSeccion
+            // Información del préstamo
+            val prestamoLines = splitText("Prestamo N° $prestamoId", contentWidth, paintSmall)
+            prestamoLines.forEach { line ->
+                canvas.drawText(line, pageWidth / 2f, y, paintSmall)
+                y += 11f
+            }
 
-            // Título del recibo
-            canvas.drawText("RECIBO DE PAGO", 160f, y, paintSubtitle)
-            y += espacioSeccion
+            canvas.drawText("Doc ${fecha.replace("/", "")}", pageWidth / 2f, y, paintSmall)
+            y += 14f
 
-            fun dibujarCampoMultilinea(
-                etiqueta: String,
-                valor: String,
-                yPos: Float
-            ): Float {
-                val xLabel = margenIzq
-                val minGap = 125f
-                val gap = paintLabel.measureText(etiqueta) + 10f
-                val xValue = xLabel + max(minGap, gap)
+            // Cliente
+            val clienteLines = splitText("Sr(a) $cliente", contentWidth, paintSmall)
+            paintSmall.textAlign = Paint.Align.CENTER
+            clienteLines.forEach { line ->
+                canvas.drawText(line, pageWidth / 2f, y, paintSmall)
+                y += 11f
+            }
+            y += 8f
 
-                val anchoDisp = (margenDer - xValue - 10f).coerceAtLeast(60f)
+            // Monto del abono
+            canvas.drawText("Abono", pageWidth / 2f, y, paintSmall)
+            y += 14f
+            canvas.drawText(fmt(pagoIngresado), pageWidth / 2f, y, paintAmount)
+            y += 20f
 
-                // etiqueta
+            // Cuotas
+            val cuotasPagadas = cuota.split(" de ").firstOrNull() ?: cuota
+            paintSmall.textAlign = Paint.Align.CENTER
+            val cuotasLines = splitText("$cuotasPagadas completas", contentWidth, paintSmall)
+            cuotasLines.forEach { line ->
+                canvas.drawText(line, pageWidth / 2f, y, paintSmall)
+                y += 11f
+            }
+            y += 8f
+
+            // Línea
+            canvas.drawLine(margin, y, pageWidth - margin, y, paintLine)
+            y += 14f
+
+            // Detalles en formato compacto
+            fun drawCompactLine(label: String, value: String) {
                 paintLabel.textAlign = Paint.Align.LEFT
-                canvas.drawText(etiqueta, xLabel, yPos, paintLabel)
-
-                // valor multilínea
-                val lineas = wrapText(valor.ifBlank { "—" }, paintValue, anchoDisp)
-
-                var yCur = yPos
-                lineas.forEachIndexed { idx, linea ->
-                    if (idx > 0) yCur += (lineSpacing - 3f)
-                    canvas.drawText(linea, xValue, yCur, paintValue)
-                }
-
-                // espacio extra entre bloques
-                return yCur + lineSpacing + extraBlockSpacing
-            }
-
-            // Caja gris con datos básicos
-            canvas.drawRect(10f, y, 310f, y + 55f, paintBackground)
-            y += 15f
-            y = dibujarCampoMultilinea("👤 Cliente:", clientePrintable, y)
-            y = dibujarCampoMultilinea("👨‍💼 Cobrador:", cobradorPrintable, y)
-            y = dibujarCampoMultilinea("🔢 Cuota No.:", cuotaPrintable, y)
-
-            // Título detalles del pago
-            paintSubtitle.textAlign = Paint.Align.LEFT
-            canvas.drawText("DETALLES DEL PAGO", margenIzq, y, paintSubtitle)
-            paintSubtitle.textAlign = Paint.Align.CENTER
-            y += espacioSeccion
-
-            fun dibujarMonto(
-                etiqueta: String,
-                monto: Double,
-                p: Paint = paintMoney
-            ): Float {
-                paintLabel.textAlign = Paint.Align.LEFT
-                canvas.drawText(etiqueta, margenIzq, y, paintLabel)
-
-                canvas.drawText(fmt(monto), margenDer, y, p)
+                canvas.drawText(label, margin, y, paintLabel)
+                paintValue.textAlign = Paint.Align.RIGHT
+                canvas.drawText(value, pageWidth - margin, y, paintValue)
                 y += lineSpacing
-                return y
             }
 
-            // Monto abonado
-            y = dibujarMonto("💰 Monto abonado:", pagoIngresado)
+            // Dividir cuota si es muy larga
+            val cuotaDisplay = if (cuota.length > 15) {
+                cuota.take(12) + "..."
+            } else {
+                cuota
+            }
 
-            // Mora si aplica
+            drawCompactLine("Cuotas", cuotaDisplay)
+            drawCompactLine("Fecha", fecha)
+            drawCompactLine("Saldo", fmt(saldoPrevio))
+            drawCompactLine("Abono", fmt(pagoIngresado))
+
             if (mora > 0.0) {
-                y = dibujarMonto("⚠️ Incluye mora:", mora, paintMoraPaint)
+                drawCompactLine("Interes", fmt(mora))
             }
 
-            // Línea interna
-            y += 5f
-            canvas.drawLine(margenIzq, y, margenDer, y, paintLine)
+            y += 8f
+            canvas.drawLine(margin, y, pageWidth - margin, y, paintLine)
+            y += 14f
+
+            // Saldo nuevo
+            paintLabel.textAlign = Paint.Align.LEFT
+            paintLabel.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            paintLabel.textSize = 9f
+            canvas.drawText("Saldo:", margin, y, paintLabel)
+            paintLabel.typeface = Typeface.MONOSPACE
+            paintLabel.textSize = 8f
+
+            paintAmount.textAlign = Paint.Align.RIGHT
+            paintAmount.textSize = 14f
+            canvas.drawText(fmt(nuevoSaldo), pageWidth - margin, y, paintAmount)
+            paintAmount.textSize = 16f
+            y += 20f
+
+            // Próximo pago
+            if (proximoPago.isNotBlank() && !proximoPago.equals("saldado", ignoreCase = true)) {
+                paintSmall.textAlign = Paint.Align.CENTER
+                canvas.drawText("Proximo:", pageWidth / 2f, y, paintSmall)
+                y += 11f
+                canvas.drawText(proximoPago, pageWidth / 2f, y, paintSmall)
+                y += 14f
+            }
+
+            // Contacto
+            paintSmall.textAlign = Paint.Align.CENTER
+            paintSmall.textSize = 7f
+            val contactoLines = splitText("Consultas llamar:", contentWidth, paintSmall)
+            contactoLines.forEach { line ->
+                canvas.drawText(line, pageWidth / 2f, y, paintSmall)
+                y += 10f
+            }
+
+            cobrador?.let {
+                canvas.drawText("($it)", pageWidth / 2f, y, paintSmall)
+                y += 14f
+            } ?: run { y += 10f }
+            paintSmall.textSize = 9f
+
+            // Línea
+            canvas.drawLine(margin, y, pageWidth - margin, y, paintLine)
+            y += 14f
+
+            // Fecha y hora
+            val timestamp = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
+            val timeStamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            paintSmall.textAlign = Paint.Align.CENTER
+            paintSmall.textSize = 7f
+            canvas.drawText(timestamp, pageWidth / 2f, y, paintSmall)
+            y += 10f
+            canvas.drawText(timeStamp, pageWidth / 2f, y, paintSmall)
             y += 12f
 
-            // Saldos
-            y = dibujarMonto("💵 Saldo anterior:", saldoPrevio)
-            y = dibujarMonto("💳 Saldo nuevo:", nuevoSaldo)
-
-            // Próximo pago - CON COLOR ESPECIAL SI ESTÁ SALDADO
-            val paintProximoPago = if (estaSaldado) {
-                Paint().apply {
-                    isAntiAlias = true
-                    color = colorSecundario  // Verde para saldado
-                    textAlign = Paint.Align.LEFT
-                    textSize = 11f
-                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                }
-            } else {
-                paintValue
-            }
-
-            paintLabel.textAlign = Paint.Align.LEFT
-            canvas.drawText("📆 Próximo pago:", margenIzq, y, paintLabel)
-
-            val xValue = margenIzq + 125f
-            val anchoDisp = (margenDer - xValue - 10f).coerceAtLeast(60f)
-            val lineasProximo = wrapText(proximoPrintable, paintProximoPago, anchoDisp)
-
-            var yCur = y
-            lineasProximo.forEachIndexed { idx, linea ->
-                if (idx > 0) yCur += (lineSpacing - 3f)
-                canvas.drawText(linea, xValue, yCur, paintProximoPago)
-            }
-
-            y = yCur + lineSpacing + extraBlockSpacing
-
-            // Línea separadora entre Próximo pago y Método de pago
-            canvas.drawLine(margenIzq, y - (extraBlockSpacing + 4f), margenDer, y - (extraBlockSpacing + 4f), paintLine)
-
-            // Método de pago
-            y = dibujarCampoMultilinea("💳 Método de pago:", tipoPagoPrintable, y)
-
-            // Bloque autorización / firma
-            canvas.drawLine(10f, y, 310f, y, paintLine)
-            y += espacioSeccion
-
-            canvas.drawRect(10f, y, 310f, y + 55f, paintBackground)
-            y += 15f
-
-            paintSubtitle.textAlign = Paint.Align.LEFT
-            canvas.drawText("AUTORIZACIÓN", margenIzq, y, paintSubtitle)
-            paintSubtitle.textAlign = Paint.Align.CENTER
-            y += espacioSeccion
-
-            // Firma cliente
-            paintLabel.textAlign = Paint.Align.LEFT
-            canvas.drawText("✍️ Firma del cliente:", margenIzq, y, paintLabel)
-            y += lineSpacing
-
-            paintLine.strokeWidth = 1f
-            canvas.drawLine(margenIzq, y, margenDer - 50f, y, paintLine)
-            paintLine.strokeWidth = 1.5f
-
-            y += 10f
-            if (firmaPrintable != "—") {
-                paintValue.textSize = 10f
-                canvas.drawText(firmaPrintable, margenIzq, y, paintValue)
-                paintValue.textSize = 11f
-            }
-            y += espacioSeccion
-
             // Mensaje final
-            canvas.drawLine(10f, y, 310f, y, paintLine)
-            y += 15f
+            paintSmall.textSize = 8f
+            paintSmall.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            val mensajeLines = splitText("CONSERVE ESTE RECIBO", contentWidth, paintSmall)
+            mensajeLines.forEach { line ->
+                canvas.drawText(line, pageWidth / 2f, y, paintSmall)
+                y += 10f
+            }
 
-            paintTitle.textSize = 12f
-            paintTitle.color = colorSecundario
-            canvas.drawText("🌟 ¡Gracias por su pago! 🌟", 160f, y, paintTitle)
-            y += 15f
-
-            paintLabel.textAlign = Paint.Align.CENTER
-            paintLabel.textSize = 10f
-            canvas.drawText("Su confianza es nuestro compromiso", 160f, y, paintLabel)
-            paintLabel.textAlign = Paint.Align.LEFT
-
-            // ===== GUARDAR PDF =====
+            // Guardar PDF
             pdfDocument.finishPage(page)
 
-            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-            val fileName = "recibo_${prestamoId.replace(" ", "_")}_$timestamp.pdf"
+            val timestampFile = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val fileName = "recibo_${prestamoId.replace(" ", "_")}_$timestampFile.pdf"
             val outputDir = context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) ?: context.filesDir
             if (!outputDir.exists()) outputDir.mkdirs()
             val file = File(outputDir, fileName)
             FileOutputStream(file).use { pdfDocument.writeTo(it) }
             pdfDocument.close()
 
-            Log.d("ReciboPDF", "✅ PDF generado exitosamente: ${file.absolutePath}")
+            Log.d("ReciboPDF", "✅ PDF generado: ${file.absolutePath}")
             file
 
         } catch (e: Exception) {

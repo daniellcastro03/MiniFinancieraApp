@@ -44,6 +44,26 @@ data class ResultadoDistribucion(
     val totalCuotasCompletas: Int
 )
 
+// ✅✅✅ FUNCIÓN HELPER PARA OBTENER numeroPrestamo DE FORMA SEGURA ✅✅✅
+fun obtenerNumeroPrestamoSafe(doc: com.google.firebase.firestore.DocumentSnapshot): String {
+    return try {
+        when (val campo = doc.get("numeroPrestamo")) {
+            is String -> campo.takeIf { it.isNotBlank() } ?: "0"
+            is Long -> campo.toString()
+            is Int -> campo.toString()
+            is Number -> campo.toLong().toString()
+            null -> "0"
+            else -> {
+                Log.w("NumeroPrestamo", "Tipo inesperado: ${campo::class.java.simpleName}")
+                "0"
+            }
+        }
+    } catch (e: Exception) {
+        Log.e("NumeroPrestamo", "Error al obtener numeroPrestamo: ${e.message}", e)
+        "0"
+    }
+}
+
 private suspend fun resolverNombreCobrador(
     context: Context,
     db: FirebaseFirestore,
@@ -372,7 +392,7 @@ fun RegistrarPagoScreen(
     var cuotaEstimada by remember { mutableStateOf(0.0) }
     var cuotasTotales by remember { mutableStateOf(1) }
     var plazo by remember { mutableStateOf("Semanal") }
-    var numeroPrestamo by remember { mutableStateOf("") } // ⭐ CAMBIADO A STRING
+    var numeroPrestamo by remember { mutableStateOf("") }
     var montoPagadoActual by remember { mutableStateOf(0.0) }
     var saldoActualizado by remember { mutableStateOf(saldoActual) }
     var proximaCuotaPendiente by remember { mutableStateOf(1) }
@@ -424,10 +444,8 @@ fun RegistrarPagoScreen(
             cuotasTotales = prestamoDoc.getLong("cuotas")?.toInt() ?: 1
             plazo = prestamoDoc.getString("plazo") ?: "Semanal"
 
-            // ⭐ LEER NÚMERO DE PRÉSTAMO COMO STRING CON COMPATIBILIDAD
-            numeroPrestamo = prestamoDoc.getString("numeroPrestamo")
-                ?: prestamoDoc.getLong("numeroPrestamo")?.toString()
-                        ?: "0"
+            // ✅ LEER NÚMERO DE PRÉSTAMO DE FORMA SEGURA
+            numeroPrestamo = obtenerNumeroPrestamoSafe(prestamoDoc)
 
             val pagosSnapshot = db.collection("pagos")
                 .whereEqualTo("prestamoId", prestamoId)
@@ -623,10 +641,8 @@ fun RegistrarPagoScreen(
                                 ?: (montoBase + interesTotalBase)
                             val moraActual = prestamoDoc.getDouble("mora") ?: 0.0
 
-                            // ⭐ LEER NÚMERO DE PRÉSTAMO CON COMPATIBILIDAD
-                            val numeroPrestamoActual = prestamoDoc.getString("numeroPrestamo")
-                                ?: prestamoDoc.getLong("numeroPrestamo")?.toString()
-                                ?: "0"
+                            // ✅ LEER NÚMERO DE PRÉSTAMO DE FORMA SEGURA
+                            val numeroPrestamoActual = obtenerNumeroPrestamoSafe(prestamoDoc)
 
                             val pagosSnapshot = db.collection("pagos")
                                 .whereEqualTo("prestamoId", prestamoId)
@@ -791,7 +807,7 @@ fun RegistrarPagoScreen(
                                 "clienteId" to clienteId,
                                 "clienteNombre" to nombreCliente,
                                 "prestamoId" to prestamoId,
-                                "numeroPrestamo" to numeroPrestamoActual, // ⭐ STRING
+                                "numeroPrestamo" to numeroPrestamoActual,
                                 "monto" to abono,
                                 "mora" to 0.0,
                                 "fechaPago" to fechaActual,

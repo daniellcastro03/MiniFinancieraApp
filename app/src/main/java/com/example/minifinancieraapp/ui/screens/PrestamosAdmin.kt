@@ -68,7 +68,7 @@ data class PrestamoAdmin(
     val fotos: List<String> = emptyList(),
     val diasEfectivos: Int = 0,
     val cobradores: List<String> = emptyList(),
-    val numeroPrestamo: String = "", // ⭐ CAMBIADO A STRING
+    val numeroPrestamo: String = "", // ⭐ STRING
     val prestamoId: String = "",
     val id: String = "",
     val eliminado: Boolean = false,
@@ -76,6 +76,21 @@ data class PrestamoAdmin(
     val fechaEliminacionTimestamp: Timestamp? = null,
     val eliminadoPor: String = ""
 )
+
+// ⭐ FUNCIÓN HELPER SEGURA PARA OBTENER NÚMERO DE PRÉSTAMO (IGUAL QUE EN HISTORIAL)
+fun DocumentSnapshot.getNumeroPrestamoSafeAdmin(): String {
+    return try {
+        // Intenta obtener como String primero
+        this.getString("numeroPrestamo")?.takeIf { it.isNotBlank() }
+            ?: // Si no existe o está vacío, intenta como Long
+            this.getLong("numeroPrestamo")?.toString()
+            ?: // Si tampoco existe, retorna vacío
+            ""
+    } catch (e: Exception) {
+        Log.w("FirestoreHelperAdmin", "Error al obtener numeroPrestamo en ${this.id}: ${e.message}")
+        ""
+    }
+}
 
 private fun calcularFechaCuotaAdmin(fechaInicio: Date, plazo: String, numeroCuota: Int): String {
     val calendar = Calendar.getInstance().apply { time = fechaInicio }
@@ -218,7 +233,7 @@ fun FiltrosCompactos(
             OutlinedTextField(
                 value = search,
                 onValueChange = onSearchChange,
-                placeholder = { Text("Buscar cliente...", fontSize = 14.sp) },
+                placeholder = { Text("Buscar cliente o número...", fontSize = 14.sp) },
                 leadingIcon = {
                     Icon(Icons.Default.Search, null, tint = Color(0xFF0061A7))
                 },
@@ -403,7 +418,7 @@ fun TarjetaPrestamo(
                 }
 
                 Column(horizontalAlignment = Alignment.End) {
-                    // ⭐ MOSTRAR NÚMERO DE PRÉSTAMO (STRING)
+                    // ⭐ MOSTRAR NÚMERO DE PRÉSTAMO (STRING SEGURO)
                     if (prestamo.numeroPrestamo.isNotEmpty()) {
                         Text(
                             "#${prestamo.numeroPrestamo}",
@@ -771,10 +786,8 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                                     else -> estadoFirestore
                                 }
 
-                                // ⭐ OBTENER NÚMERO DE PRÉSTAMO COMO STRING
-                                val numeroPrestamoStr = doc.getString("numeroPrestamo")
-                                    ?: doc.getLong("numeroPrestamo")?.toString()
-                                    ?: ""
+                                // ⭐ OBTENER NÚMERO DE PRÉSTAMO COMO STRING (USANDO LA FUNCIÓN SEGURA)
+                                val numeroPrestamoStr = doc.getNumeroPrestamoSafeAdmin()
 
                                 val prestamoAdmin = PrestamoAdmin(
                                     cliente = cliente,
@@ -795,7 +808,7 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                                     estado = estadoReal,
                                     observaciones = doc.getString("observaciones") ?: "",
                                     diasEfectivos = doc.getLong("diasEfectivos")?.toInt() ?: 0,
-                                    numeroPrestamo = numeroPrestamoStr, // ⭐ STRING
+                                    numeroPrestamo = numeroPrestamoStr, // ⭐ STRING SEGURO
                                     prestamoId = doc.id,
                                     fechaTimestamp = doc.getTimestampSafe("fecha"),
                                     fechaCreacionTimestamp = doc.getTimestampSafe("fechaCreacion"),
@@ -890,9 +903,12 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                 val coincideEstado = estadoSeleccionado == "Todos" ||
                         prestamo.estado.equals(estadoSeleccionado, ignoreCase = true)
 
-                val coincideCliente = prestamo.cliente.contains(search, ignoreCase = true)
+                // ⭐ BÚSQUEDA POR CLIENTE Y NÚMERO DE PRÉSTAMO
+                val coincideBusqueda = search.isBlank() ||
+                        prestamo.cliente.contains(search, ignoreCase = true) ||
+                        prestamo.numeroPrestamo.contains(search, ignoreCase = true)
 
-                coincideEliminado && coincideEstado && coincideCliente
+                coincideEliminado && coincideEstado && coincideBusqueda
             }
             .sortedWith(compareBy<PrestamoAdmin> { it.cobradores.isEmpty() }
                 .thenByDescending { it.fechaCreacionTimestamp?.toDate() })

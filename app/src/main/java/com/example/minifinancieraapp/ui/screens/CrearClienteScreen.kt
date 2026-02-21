@@ -35,6 +35,8 @@ import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -98,10 +100,23 @@ fun CrearClienteScreen(navController: NavController) {
 
     val snackbar = remember { SnackbarHostState() }
     var isLoading by remember { mutableStateOf(false) }
+    var progreso by remember { mutableStateOf("") }
 
     // Variables para cámara
     var fotoUriCamara by remember { mutableStateOf<Uri?>(null) }
     var tagActual by remember { mutableStateOf("") }
+
+    // ✅ OPTIMIZACIÓN 1: Autenticar una sola vez al inicio
+    LaunchedEffect(Unit) {
+        val auth = FirebaseAuth.getInstance()
+        if (auth.currentUser == null) {
+            try {
+                auth.signInAnonymously().await()
+            } catch (e: Exception) {
+                // Manejar error silenciosamente
+            }
+        }
+    }
 
     // Función para validar campos obligatorios
     fun validarCamposObligatorios(): Boolean {
@@ -111,7 +126,7 @@ fun CrearClienteScreen(navController: NavController) {
         return !nombreError && !identidadError && !telefonoError
     }
 
-    // 🆕 Función para verificar si la identidad ya existe
+    // Verificar si la identidad ya existe
     suspend fun verificarIdentidadDuplicada(): Boolean {
         return try {
             val query = db.collection("clientes")
@@ -484,29 +499,52 @@ fun CrearClienteScreen(navController: NavController) {
                 )
             }
 
+            // ✅ OPTIMIZACIÓN 2: Mostrar progreso detallado
+            if (isLoading && progreso.isNotEmpty()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            progreso,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
+            }
+
             // Botón de guardar
             Button(
                 onClick = {
                     if (validarCamposObligatorios()) {
                         isLoading = true
+                        progreso = "Verificando identidad..."
+
                         scope.launch {
                             try {
-                                // 🆕 Verificar si la identidad ya existe
+                                // Verificar si la identidad ya existe
                                 val identidadExiste = verificarIdentidadDuplicada()
                                 if (identidadExiste) {
                                     identidadDuplicadaError = true
                                     isLoading = false
+                                    progreso = ""
                                     snackbar.showSnackbar("⚠️ Ya existe un cliente con este número de identidad")
                                     return@launch
                                 }
 
-                                // 👇 AUTENTICAR SOLO PARA STORAGE
-                                val auth = FirebaseAuth.getInstance()
-                                if (auth.currentUser == null) {
-                                    auth.signInAnonymously().await()
-                                }
+                                // ✅ OPTIMIZACIÓN 3: Subir fotos en paralelo
+                                progreso = "Subiendo fotos..."
 
-                                // Función para subir fotos
                                 suspend fun subirFoto(uri: Uri?, nombreArchivo: String): String {
                                     return uri?.let {
                                         try {
@@ -517,13 +555,23 @@ fun CrearClienteScreen(navController: NavController) {
                                             ref.putFile(it).await()
                                             ref.downloadUrl.await().toString()
                                         } catch (e: Exception) {
-                                            Toast.makeText(context, "Error subiendo $nombreArchivo", Toast.LENGTH_SHORT).show()
                                             ""
                                         }
                                     } ?: ""
                                 }
 
-                                // Preparar datos del cliente
+                                // 🚀 SUBIR TODAS LAS FOTOS EN PARALELO
+                                val fotosUrls = campos.map { (tag, _) ->
+                                    async {
+                                        tag to subirFoto(uris[tag], tag)
+                                    }
+                                }.awaitAll().toMap()
+
+                                val fotosSubidas = fotosUrls.values.count { it.isNotEmpty() }
+
+                                // ✅ OPTIMIZACIÓN 4: Preparar datos primero, guardar después
+                                progreso = "Guardando datos..."
+
                                 val data = mutableMapOf<String, Any>(
                                     "nombre" to nombre,
                                     "identidad" to identidad.trim(),
@@ -560,12 +608,9 @@ fun CrearClienteScreen(navController: NavController) {
                                     )
                                 }
 
-                                // Subir todas las fotos
-                                var fotosSubidas = 0
-                                for ((tag, _) in campos) {
-                                    val url = subirFoto(uris[tag], tag)
+                                // Añadir URLs de fotos
+                                fotosUrls.forEach { (tag, url) ->
                                     data[tag] = url
-                                    if (url.isNotEmpty()) fotosSubidas++
                                 }
 
                                 // Guardar en Firestore
@@ -573,6 +618,7 @@ fun CrearClienteScreen(navController: NavController) {
                                 data["uid"] = docRef.id
                                 docRef.set(data).await()
 
+                                progreso = "¡Completado!"
                                 Toast.makeText(context, "✅ Cliente creado exitosamente con $fotosSubidas fotos", Toast.LENGTH_SHORT).show()
                                 navController.popBackStack()
 
@@ -581,6 +627,7 @@ fun CrearClienteScreen(navController: NavController) {
                                 snackbar.showSnackbar("❌ Error: ${e.message}")
                             } finally {
                                 isLoading = false
+                                progreso = ""
                             }
                         }
                     } else {
@@ -668,7 +715,6 @@ fun FotoPickerAvanzado(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
             } else {
-                // Placeholder cuando no hay foto
                 Box(
                     modifier = Modifier
                         .size(120.dp)

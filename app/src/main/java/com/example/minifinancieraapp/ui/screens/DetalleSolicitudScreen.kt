@@ -2,6 +2,7 @@ package com.example.minifinancieraapp.ui.screens
 
 import com.example.minifinancieraapp.ui.models.SolicitudModel
 import android.content.Context
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -47,7 +48,9 @@ import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.BorderStroke
 
-// 🔽 FUNCIÓN PARA MAPEAR DESDE FIRESTORE - CORREGIDA
+// ─────────────────────────────────────────────
+//  MAPPER DESDE FIRESTORE
+// ─────────────────────────────────────────────
 fun Map<String, Any>.toSolicitudModel(): SolicitudModel {
     return SolicitudModel(
         id = this["id"] as? String ?: "",
@@ -77,8 +80,9 @@ fun Map<String, Any>.toSolicitudModel(): SolicitudModel {
     )
 }
 
-
-// 🔽 FUNCIONES DE CÁLCULO - CORREGIDAS
+// ─────────────────────────────────────────────
+//  FUNCIONES DE CÁLCULO
+// ─────────────────────────────────────────────
 fun calcularProximoPagoDesdeHoy(plazo: String): Timestamp {
     val proximaFecha = Calendar.getInstance()
     when (plazo) {
@@ -138,8 +142,9 @@ fun calcularInteresTotal(
     }
 }
 
-// 🔽 FUNCIÓN PARA ACEPTAR SOLICITUD Y GENERAR RECIBO - CORREGIDA
-// Reemplaza tu versión actual por esta
+// ─────────────────────────────────────────────
+//  FUNCIÓN PARA ACEPTAR SOLICITUD Y GENERAR RECIBO
+// ─────────────────────────────────────────────
 suspend fun aceptarSolicitudYGenerarRecibo(
     solicitud: SolicitudModel,
     context: Context,
@@ -147,7 +152,7 @@ suspend fun aceptarSolicitudYGenerarRecibo(
     onSuccess: () -> Unit
 ) {
     try {
-        // Contador para numeroPrestamo (opcionalmente filtra eliminados)
+        // Contador para numeroPrestamo
         val prestamosSnapshot = db.collection("prestamos").get().await()
 
         // Fecha inicio desde la solicitud (o ahora)
@@ -175,17 +180,25 @@ suspend fun aceptarSolicitudYGenerarRecibo(
         val cuota = if (solicitud.cuotas > 0) (totalPagar / solicitud.cuotas).roundToInt() else 0
         val proximoPago = calcularProximoPagoDesdeHoy(solicitud.plazo)
 
-        // 👇 nombre/uid del cobrador que hizo la solicitud
+        // Nombre y UID del cobrador solicitante
         val cobradorNombre = when {
             !solicitud.cobrador.isNullOrBlank() -> solicitud.cobrador!!
             !solicitud.cobradorSolicitante.isNullOrBlank() -> solicitud.cobradorSolicitante
             else -> "Administrador"
         }
-        val cobradorUid = solicitud.cobradorUid ?: ""
+        val cobradorUid = solicitud.cobradorUid?.trim() ?: ""
 
-        // Crear préstamo
+        // 🔍 Log para detectar si el UID llega vacío
+        Log.d("AceptarSolicitud", "cobradorNombre=$cobradorNombre | cobradorUid='$cobradorUid'")
+
+        // Crear referencia del préstamo
         val nuevoPrestamoRef = db.collection("prestamos").document()
         val prestamoId = nuevoPrestamoRef.id
+
+        // Lista de cobradores (sin vacíos)
+        val cobradoresAsignados = listOfNotNull(
+            cobradorUid.takeIf { it.isNotBlank() }
+        )
 
         val nuevoPrestamo = hashMapOf(
             "id" to prestamoId,
@@ -210,10 +223,11 @@ suspend fun aceptarSolicitudYGenerarRecibo(
             "observaciones" to solicitud.observaciones,
             "firma" to (solicitud.firma ?: ""),
 
-            // ✅ asignación automática del cobrador solicitante
+            // ✅ Cobrador asignado correctamente en todos los campos que usa la app
             "cobrador" to cobradorNombre,
             "cobradorAsignado" to cobradorUid,
-            "cobradoresAsignados" to listOfNotNull(solicitud.cobradorUid),
+            "cobradorUid" to cobradorUid,
+            "cobradoresAsignados" to cobradoresAsignados,
 
             "fecha" to com.google.firebase.Timestamp.now(),
             "fechaCreacion" to com.google.firebase.Timestamp.now(),
@@ -231,25 +245,44 @@ suspend fun aceptarSolicitudYGenerarRecibo(
         // Guardar préstamo
         nuevoPrestamoRef.set(nuevoPrestamo).await()
 
-        // (Recomendado) sincronizar el cliente con la asignación y el préstamo activo
+        // ✅ CORRECCIÓN PRINCIPAL: Reasignar cliente al cobrador con TODOS los campos necesarios
         if (solicitud.clienteId.isNotBlank()) {
-            db.collection("clientes").document(solicitud.clienteId).update(
-                mapOf(
-                    "cobradorAsignado" to cobradorUid,
-                    "tienePrestamo" to true,
-                    "prestamoActivoId" to prestamoId
+            val updateMap = mutableMapOf<String, Any>(
+                "tienePrestamo"    to true,
+                "prestamoActivoId" to prestamoId,
+                "cobrador"         to cobradorNombre   // nombre visible en UI
+            )
+
+            // Solo actualizar campos de UID si el cobrador tiene UID válido
+            if (cobradorUid.isNotBlank()) {
+                updateMap["cobradorAsignado"]    = cobradorUid   // campo string que usa ClientesVista
+                updateMap["cobradoresAsignados"] = cobradoresAsignados  // campo array que usa ClientesVista
+            } else {
+                // ⚠️ Si no hay UID, loguear para detectar el problema en la solicitud
+                Log.w("AceptarSolicitud",
+                    "⚠️ cobradorUid vacío para solicitud ${solicitud.id}. " +
+                            "El cobrador '${cobradorNombre}' NO podrá ver este préstamo. " +
+                            "Revisa que al crear la solicitud se guarde el campo 'cobradorUid'."
                 )
-            ).await()
+            }
+
+            db.collection("clientes").document(solicitud.clienteId)
+                .update(updateMap)
+                .await()
+
+            Log.d("AceptarSolicitud",
+                "✅ Cliente ${solicitud.clienteId} reasignado a cobrador '$cobradorNombre' (uid='$cobradorUid')"
+            )
         }
 
-        // Recibo (si quieres conservar esta salida tipo pago inicial)
+        // Generar recibo
         ReciboHelper.generarReciboPDF(
             context = context,
             cliente = solicitud.cliente,
             prestamoId = prestamoId,
             fecha = solicitud.fecha,
             montoPagado = solicitud.monto.toString(),
-            saldoAnterior = totalPagar,           // <-- si quieres, aquí puedes ajustar según tu lógica de recibo
+            saldoAnterior = totalPagar,
             proximoPago = proximoPago.toString(),
             cuota = "1",
             cobrador = cobradorNombre,
@@ -259,16 +292,20 @@ suspend fun aceptarSolicitudYGenerarRecibo(
             mora = 0.0
         )
 
-        // Cerrar solicitud (si prefieres histórico, marca estado="aprobado" en vez de borrar)
+        // Cerrar solicitud
         db.collection("solicitudes_prestamo").document(solicitud.id).delete().await()
 
         onSuccess()
+
     } catch (e: Exception) {
+        Log.e("AceptarSolicitud", "Error al aceptar solicitud: ${e.message}", e)
         Toast.makeText(context, "Error al aceptar: ${e.message}", Toast.LENGTH_LONG).show()
     }
 }
 
-// 🔽 COMPOSABLE PRINCIPAL - CORREGIDO
+// ─────────────────────────────────────────────
+//  COMPOSABLE PRINCIPAL
+// ─────────────────────────────────────────────
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DetalleSolicitudScreen(
@@ -297,7 +334,6 @@ fun DetalleSolicitudScreen(
                 val data = snapshot.data ?: emptyMap()
                 val solicitudData = data.toMutableMap().apply {
                     put("id", snapshot.id)
-                    // Asegurar que clienteId esté presente
                     if (!containsKey("clienteId")) {
                         put("clienteId", this["cliente"] as? String ?: "")
                     }
@@ -313,7 +349,7 @@ fun DetalleSolicitudScreen(
         }
     }
 
-    // Validar que la solicitud esté cargada
+    // Mostrar estado de carga / error si aún no hay solicitud
     val solicitudActual = solicitud ?: run {
         Scaffold(
             topBar = {
@@ -408,22 +444,20 @@ fun DetalleSolicitudScreen(
     }
 
     val descripcionPlazo = when (solicitudActual.plazo) {
-        "Diario" -> "Incluye domingos"
+        "Diario"         -> "Incluye domingos"
         "Lunes a Sábado" -> "Excluye domingos"
-        "Semanal" -> "Cada 7 días"
-        "Quincenal" -> "Cada 15 días"
-        "Mensual" -> "Cada 30 días"
-        "Bimestral" -> "Cada 60 días"
-        else -> ""
+        "Semanal"        -> "Cada 7 días"
+        "Quincenal"      -> "Cada 15 días"
+        "Mensual"        -> "Cada 30 días"
+        "Bimestral"      -> "Cada 60 días"
+        else             -> ""
     }
 
-    val fotosUrl = solicitudActual.fotos.filter { it.isNotBlank() && it.trim().isNotEmpty() }
+    val fotosUrl = solicitudActual.fotos.filter { it.isNotBlank() }
 
-    // Dialog para mostrar imagen ampliada
+    // ── Dialog imagen ampliada ────────────────────────────────────────────
     selectedImageUrl?.let { imageUrl ->
-        Dialog(
-            onDismissRequest = { selectedImageUrl = null }
-        ) {
+        Dialog(onDismissRequest = { selectedImageUrl = null }) {
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -445,16 +479,13 @@ fun DetalleSolicitudScreen(
                             placeholder = painterResource(id = android.R.drawable.ic_menu_gallery)
                         )
                     }
-
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(16.dp),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        TextButton(
-                            onClick = { selectedImageUrl = null }
-                        ) {
+                        TextButton(onClick = { selectedImageUrl = null }) {
                             Text("Cerrar")
                         }
                     }
@@ -463,14 +494,12 @@ fun DetalleSolicitudScreen(
         }
     }
 
+    // ── Scaffold principal ────────────────────────────────────────────────
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        "Detalle de Solicitud",
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text("Detalle de Solicitud", fontWeight = FontWeight.Bold)
                 },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
@@ -490,7 +519,8 @@ fun DetalleSolicitudScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(16.dp)
         ) {
-            // Información del cliente
+
+            // ── Información del cliente ───────────────────────────────────
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -519,8 +549,7 @@ fun DetalleSolicitudScreen(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
-
+                        Spacer(modifier = Modifier.height(4.dp))
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
 
                         InfoRow(label = "Cliente", value = solicitudActual.cliente)
@@ -534,6 +563,18 @@ fun DetalleSolicitudScreen(
                         if (solicitudActual.cobradorSolicitante.isNotBlank()) {
                             InfoRow(label = "Cobrador solicitante", value = solicitudActual.cobradorSolicitante)
                         }
+                        // ✅ Mostrar UID del cobrador para depuración (quitar en producción si se prefiere)
+                        val cobradorUidDisplay = solicitudActual.cobradorUid
+                        if (!cobradorUidDisplay.isNullOrBlank()) {
+                            InfoRow(label = "UID cobrador", value = cobradorUidDisplay)
+                        } else {
+                            InfoRow(
+                                label = "UID cobrador",
+                                value = "⚠️ No registrado",
+                                valueColor = Color(0xFFD32F2F)
+                            )
+                        }
+
                         if (solicitudActual.observaciones.isNotBlank()) {
                             InfoRow(label = "Observaciones", value = solicitudActual.observaciones)
                         }
@@ -541,7 +582,7 @@ fun DetalleSolicitudScreen(
                 }
             }
 
-            // Detalles del préstamo
+            // ── Detalles del préstamo ─────────────────────────────────────
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -586,7 +627,7 @@ fun DetalleSolicitudScreen(
                 }
             }
 
-            // Resumen financiero
+            // ── Resumen financiero ────────────────────────────────────────
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -638,7 +679,6 @@ fun DetalleSolicitudScreen(
                             valueColor = Color(0xFF1976D2)
                         )
 
-                        // Mostrar advertencia si los cálculos parecen incorrectos
                         if (totalAPagar <= solicitudActual.monto) {
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
@@ -668,7 +708,7 @@ fun DetalleSolicitudScreen(
                 }
             }
 
-            // Evidencia fotográfica
+            // ── Evidencia fotográfica ─────────────────────────────────────
             if (fotosUrl.isNotEmpty()) {
                 item {
                     Card(
@@ -713,24 +753,33 @@ fun DetalleSolicitudScreen(
                 }
             }
 
-            // Botones de acción
+            // ── Botones de acción ─────────────────────────────────────────
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // APROBAR
                     Button(
                         onClick = {
                             scope.launch {
                                 isProcessing = true
                                 try {
                                     aceptarSolicitudYGenerarRecibo(solicitudActual, context, db) {
-                                        Toast.makeText(context, "Solicitud aprobada y recibo generado!", Toast.LENGTH_LONG).show()
+                                        Toast.makeText(
+                                            context,
+                                            "¡Solicitud aprobada y recibo generado!",
+                                            Toast.LENGTH_LONG
+                                        ).show()
                                         navController.popBackStack()
                                     }
                                 } catch (e: Exception) {
-                                    Toast.makeText(context, "Error al aprobar solicitud: ${e.message}", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(
+                                        context,
+                                        "Error al aprobar solicitud: ${e.message}",
+                                        Toast.LENGTH_LONG
+                                    ).show()
                                 } finally {
                                     isProcessing = false
                                 }
@@ -738,9 +787,7 @@ fun DetalleSolicitudScreen(
                         },
                         enabled = !isProcessing,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF4CAF50)
-                        )
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
                     ) {
                         if (isProcessing) {
                             CircularProgressIndicator(
@@ -760,16 +807,28 @@ fun DetalleSolicitudScreen(
                         Text("Aprobar")
                     }
 
+                    // RECHAZAR
                     OutlinedButton(
                         onClick = {
                             scope.launch {
                                 isProcessing = true
                                 try {
-                                    db.collection("solicitudes_prestamo").document(solicitudActual.id).delete().await()
-                                    Toast.makeText(context, "Solicitud rechazada y eliminada", Toast.LENGTH_LONG).show()
+                                    db.collection("solicitudes_prestamo")
+                                        .document(solicitudActual.id)
+                                        .delete()
+                                        .await()
+                                    Toast.makeText(
+                                        context,
+                                        "Solicitud rechazada y eliminada",
+                                        Toast.LENGTH_LONG
+                                    ).show()
                                     navController.popBackStack()
                                 } catch (e: Exception) {
-                                    Toast.makeText(context, "Error al rechazar solicitud: ${e.message}", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(
+                                        context,
+                                        "Error al rechazar solicitud: ${e.message}",
+                                        Toast.LENGTH_LONG
+                                    ).show()
                                 } finally {
                                     isProcessing = false
                                 }
@@ -800,6 +859,9 @@ fun DetalleSolicitudScreen(
     }
 }
 
+// ─────────────────────────────────────────────
+//  COMPONENTES REUTILIZABLES
+// ─────────────────────────────────────────────
 @Composable
 fun PhotoCard(imageUrl: String, onClick: () -> Unit) {
     Card(
@@ -823,10 +885,7 @@ fun PhotoCard(imageUrl: String, onClick: () -> Unit) {
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(6.dp)
-                    .background(
-                        Color.Black.copy(alpha = 0.7f),
-                        shape = CircleShape
-                    )
+                    .background(Color.Black.copy(alpha = 0.7f), shape = CircleShape)
                     .padding(4.dp)
             ) {
                 Icon(
@@ -858,7 +917,6 @@ fun InfoRow(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f)
         )
-
         Text(
             text = value,
             style = if (isHighlighted) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyMedium,

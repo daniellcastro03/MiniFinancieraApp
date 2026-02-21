@@ -5,7 +5,6 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,12 +20,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -59,22 +56,12 @@ fun LoginScreen(navController: NavController) {
     // Estados de animación
     val logoVisible = remember { mutableStateOf(false) }
     val contentVisible = remember { mutableStateOf(false) }
-    val backgroundAnimation = remember { mutableStateOf(0f) }
 
-    // Animaciones infinitas
-    val infiniteTransition = rememberInfiniteTransition(label = "background")
-    val animatedOffset by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(20000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ), label = "rotate"
-    )
-
+    // Animación de pulso suave
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseAnimation by infiniteTransition.animateFloat(
-        initialValue = 0.8f,
-        targetValue = 1.2f,
+        initialValue = 0.95f,
+        targetValue = 1.05f,
         animationSpec = infiniteRepeatable(
             animation = tween(2000, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -82,7 +69,6 @@ fun LoginScreen(navController: NavController) {
     )
 
     LaunchedEffect(Unit) {
-        // Animación secuencial de entrada
         logoVisible.value = true
         delay(300)
         contentVisible.value = true
@@ -105,8 +91,8 @@ fun LoginScreen(navController: NavController) {
                     Snackbar(
                         snackbarData = snackbarData,
                         shape = RoundedCornerShape(12.dp),
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer
+                        containerColor = Color(0xFF1565C0),
+                        contentColor = Color.White
                     )
                 }
             )
@@ -116,20 +102,54 @@ fun LoginScreen(navController: NavController) {
             modifier = Modifier
                 .fillMaxSize()
                 .background(
-                    Brush.radialGradient(
+                    Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xFF0D47A1),
-                            Color(0xFF1565C0),
-                            Color(0xFF1976D2),
-                            Color(0xFF0D47A1)
-                        ),
-                        radius = 1000f
+                            Color(0xFF1565C0), // Azul primario
+                            Color(0xFF0D47A1), // Azul más oscuro
+                            Color(0xFF01579B)  // Azul profundo
+                        )
                     )
                 )
                 .padding(padding)
         ) {
-            // Elementos de fondo animados
-            AnimatedBackgroundElements(animatedOffset, pulseAnimation)
+            // Elementos decorativos de fondo
+            Box(modifier = Modifier.fillMaxSize()) {
+                // Círculos decorativos con blur
+                Box(
+                    modifier = Modifier
+                        .size(300.dp)
+                        .offset(x = (-100).dp, y = (-50).dp)
+                        .blur(80.dp)
+                        .background(
+                            Color(0xFF42A5F5).copy(alpha = 0.3f),
+                            shape = CircleShape
+                        )
+                )
+
+                Box(
+                    modifier = Modifier
+                        .size(250.dp)
+                        .align(Alignment.BottomEnd)
+                        .offset(x = 100.dp, y = 100.dp)
+                        .blur(70.dp)
+                        .background(
+                            Color(0xFF1E88E5).copy(alpha = 0.3f),
+                            shape = CircleShape
+                        )
+                )
+
+                Box(
+                    modifier = Modifier
+                        .size(200.dp)
+                        .align(Alignment.CenterEnd)
+                        .offset(x = 50.dp)
+                        .blur(60.dp)
+                        .background(
+                            Color(0xFF2196F3).copy(alpha = 0.2f),
+                            shape = CircleShape
+                        )
+                )
+            }
 
             Column(
                 modifier = Modifier
@@ -146,63 +166,76 @@ fun LoginScreen(navController: NavController) {
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(bottom = 32.dp)
+                        modifier = Modifier.padding(bottom = 40.dp)
                     ) {
                         Box(
-                            modifier = Modifier
-                                .size(140.dp)
-                                .shadow(
-                                    elevation = 20.dp,
-                                    shape = CircleShape,
-                                    spotColor = Color.White.copy(alpha = 0.3f)
-                                )
-                                .clip(CircleShape)
-                                .background(
-                                    Brush.radialGradient(
-                                        colors = listOf(
-                                            Color.White.copy(alpha = 0.2f),
-                                            Color.White.copy(alpha = 0.1f)
-                                        )
-                                    )
-                                ),
                             contentAlignment = Alignment.Center
                         ) {
-                            Image(
-                                painter = painterResource(id = R.drawable.logo_capital),
-                                contentDescription = "Logo Capital Express",
+                            // Resplandor detrás del logo
+                            Box(
                                 modifier = Modifier
-                                    .size(100.dp)
-                                    .scale(pulseAnimation * 0.1f + 0.9f)
+                                    .size(180.dp)
+                                    .scale(pulseAnimation * 0.15f + 0.85f)
+                                    .blur(40.dp)
+                                    .background(
+                                        Brush.radialGradient(
+                                            colors = listOf(
+                                                Color(0xFF64B5F6).copy(alpha = 0.6f),
+                                                Color.Transparent
+                                            )
+                                        ),
+                                        shape = CircleShape
+                                    )
                             )
+
+                            // Logo con sombra elegante
+                            Box(
+                                modifier = Modifier
+                                    .size(140.dp)
+                                    .shadow(
+                                        elevation = 30.dp,
+                                        shape = CircleShape,
+                                        spotColor = Color(0xFF90CAF9).copy(alpha = 0.8f)
+                                    )
+                                    .clip(CircleShape)
+                                    .background(Color.White),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Image(
+                                    painter = painterResource(id = R.drawable.logo_capital),
+                                    contentDescription = "Logo Capital Express",
+                                    modifier = Modifier
+                                        .size(100.dp)
+                                        .scale(pulseAnimation * 0.05f + 0.95f)
+                                )
+                            }
                         }
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(32.dp))
 
+                        // Título elegante
                         Text(
                             text = "CAPITAL EXPRESS",
                             fontSize = 32.sp,
                             color = Color.White,
                             fontWeight = FontWeight.Black,
                             letterSpacing = 2.sp,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.shadow(
-                                elevation = 8.dp,
-                                spotColor = Color.Black.copy(alpha = 0.5f)
-                            )
+                            textAlign = TextAlign.Center
                         )
+
+                        Spacer(modifier = Modifier.height(8.dp))
 
                         Text(
                             text = "Tu socio financiero de confianza",
                             fontSize = 14.sp,
-                            color = Color.White.copy(alpha = 0.8f),
+                            color = Color.White.copy(alpha = 0.9f),
                             fontWeight = FontWeight.Medium,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(top = 4.dp)
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
 
-                // Formulario de login
+                // Formulario de login moderno
                 AnimatedVisibility(
                     visible = contentVisible.value,
                     enter = slideInVertically(
@@ -214,27 +247,30 @@ fun LoginScreen(navController: NavController) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .shadow(
-                                elevation = 25.dp,
-                                shape = RoundedCornerShape(24.dp),
-                                spotColor = Color.Black.copy(alpha = 0.3f)
+                                elevation = 40.dp,
+                                shape = RoundedCornerShape(32.dp),
+                                spotColor = Color.Black.copy(alpha = 0.25f)
                             ),
-                        shape = RoundedCornerShape(24.dp),
+                        shape = RoundedCornerShape(32.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = Color.White.copy(alpha = 0.95f)
+                            containerColor = Color.White
                         )
                     ) {
                         Column(
                             modifier = Modifier.padding(32.dp),
-                            verticalArrangement = Arrangement.spacedBy(20.dp)
+                            verticalArrangement = Arrangement.spacedBy(24.dp)
                         ) {
+                            // Título del formulario
                             Text(
                                 text = "Iniciar Sesión",
-                                fontSize = 24.sp,
+                                fontSize = 28.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0D47A1),
+                                color = Color(0xFF1565C0),
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth()
                             )
+
+                            Spacer(modifier = Modifier.height(8.dp))
 
                             // Campo de código
                             OutlinedTextField(
@@ -245,12 +281,12 @@ fun LoginScreen(navController: NavController) {
                                     Icon(
                                         imageVector = Icons.Default.Person,
                                         contentDescription = null,
-                                        tint = Color(0xFF0D47A1)
+                                        tint = Color(0xFF1565C0)
                                     )
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                colors = customTextFieldColors(),
+                                colors = modernTextFieldColors(),
                                 shape = RoundedCornerShape(16.dp),
                                 singleLine = true
                             )
@@ -264,7 +300,7 @@ fun LoginScreen(navController: NavController) {
                                     Icon(
                                         imageVector = Icons.Default.Lock,
                                         contentDescription = null,
-                                        tint = Color(0xFF0D47A1)
+                                        tint = Color(0xFF1565C0)
                                     )
                                 },
                                 trailingIcon = {
@@ -280,7 +316,7 @@ fun LoginScreen(navController: NavController) {
                                                 "Ocultar contraseña"
                                             else
                                                 "Mostrar contraseña",
-                                            tint = Color(0xFF0D47A1)
+                                            tint = Color(0xFF1565C0)
                                         )
                                     }
                                 },
@@ -289,14 +325,14 @@ fun LoginScreen(navController: NavController) {
                                 else
                                     PasswordVisualTransformation(),
                                 modifier = Modifier.fillMaxWidth(),
-                                colors = customTextFieldColors(),
+                                colors = modernTextFieldColors(),
                                 shape = RoundedCornerShape(16.dp),
                                 singleLine = true
                             )
 
                             Spacer(modifier = Modifier.height(8.dp))
 
-                            // Botón de login
+                            // Botón de login moderno
                             Button(
                                 onClick = {
                                     val code = codigo.value.trim()
@@ -357,11 +393,15 @@ fun LoginScreen(navController: NavController) {
                                     .fillMaxWidth()
                                     .height(56.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF0D47A1),
-                                    disabledContainerColor = Color(0xFF0D47A1).copy(alpha = 0.6f)
+                                    containerColor = Color(0xFF1565C0),
+                                    disabledContainerColor = Color(0xFF1565C0).copy(alpha = 0.6f)
                                 ),
                                 shape = RoundedCornerShape(16.dp),
-                                enabled = !isLoading.value
+                                enabled = !isLoading.value,
+                                elevation = ButtonDefaults.buttonElevation(
+                                    defaultElevation = 4.dp,
+                                    pressedElevation = 8.dp
+                                )
                             ) {
                                 if (isLoading.value) {
                                     Row(
@@ -399,73 +439,12 @@ fun LoginScreen(navController: NavController) {
 }
 
 @Composable
-private fun AnimatedBackgroundElements(rotation: Float, pulse: Float) {
-    // Círculos de fondo animados
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .blur(50.dp)
-    ) {
-        // Círculo grande giratorio
-        Box(
-            modifier = Modifier
-                .size(300.dp)
-                .offset(x = (-100).dp, y = (-150).dp)
-                .rotate(rotation)
-                .background(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = 0.1f),
-                            Color.Transparent
-                        )
-                    ),
-                    shape = CircleShape
-                )
-        )
-
-        // Círculo mediano pulsante
-        Box(
-            modifier = Modifier
-                .size(200.dp)
-                .offset(x = 150.dp, y = 100.dp)
-                .scale(pulse * 0.2f + 0.8f)
-                .background(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = 0.08f),
-                            Color.Transparent
-                        )
-                    ),
-                    shape = CircleShape
-                )
-        )
-
-        // Círculo pequeño
-        Box(
-            modifier = Modifier
-                .size(150.dp)
-                .offset(x = 250.dp, y = (-50).dp)
-                .rotate(-rotation * 0.5f)
-                .background(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = 0.06f),
-                            Color.Transparent
-                        )
-                    ),
-                    shape = CircleShape
-                )
-        )
-    }
-}
-
-@Composable
-private fun customTextFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = Color(0xFF0D47A1),
-    unfocusedBorderColor = Color.Gray.copy(alpha = 0.5f),
-    cursorColor = Color(0xFF0D47A1),
-    focusedLabelColor = Color(0xFF0D47A1),
-    unfocusedLabelColor = Color.Gray,
-    focusedTextColor = Color(0xFF0D47A1),
-    unfocusedTextColor = Color.Black
+private fun modernTextFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = Color(0xFF1565C0),
+    unfocusedBorderColor = Color(0xFFBDBDBD),
+    cursorColor = Color(0xFF1565C0),
+    focusedLabelColor = Color(0xFF1565C0),
+    unfocusedLabelColor = Color(0xFF757575),
+    focusedTextColor = Color(0xFF212121),
+    unfocusedTextColor = Color(0xFF212121)
 )
