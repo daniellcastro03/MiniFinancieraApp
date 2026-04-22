@@ -15,7 +15,7 @@ Desarrollada para [Capital Express](/) · Enero 2025
 
 ## 📋 Descripción
 
-**LoanControl** es una aplicación Android nativa desarrollada para automatizar la gestión de préstamos personales en empresas financieras. Elimina el control manual en hojas de cálculo y centraliza toda la operación de cobranza en tiempo real, con acceso diferenciado por rol de usuario.
+**MiniFinanciera** es una aplicación Android nativa desarrollada para automatizar la gestión de préstamos personales en empresas financieras. Elimina el control manual en hojas de cálculo y centraliza toda la operación de cobranza en tiempo real, con acceso diferenciado por rol de usuario.
 
 La app permite registrar préstamos, generar tablas de amortización automáticas, enviar recordatorios de pago y consultar el historial completo de cada cliente desde cualquier dispositivo Android.
 
