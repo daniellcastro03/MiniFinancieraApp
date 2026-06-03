@@ -1351,234 +1351,259 @@ object ReciboHelper {
         fechaFin: Date,
         periodo: String
     ): File? {
-        val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+
+        // Formatters locales, thread-safe
+        val sdf     = SimpleDateFormat("dd/MM/yyyy",       Locale.getDefault())
         val sdfHora = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
 
-        if (pagos.isEmpty()) return null
+        if (pagos.isEmpty()) {
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, "No hay pagos para generar el reporte", Toast.LENGTH_SHORT).show()
+            }
+            return null
+        }
 
-        // 🔥 ESTRUCTURA DE DATOS con fechaCancelacion
+        // ── Parser robusto de fecha (reutiliza el mismo orden que la pantalla) ──
+        val formattersParse = listOf(
+            SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()),
+            SimpleDateFormat("dd/MM/yyyy HH:mm",    Locale.getDefault()),
+            SimpleDateFormat("dd/MM/yyyy",           Locale.getDefault()),
+            SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()),
+            SimpleDateFormat("yyyy-MM-dd",           Locale.getDefault())
+        ).also { list -> list.forEach { it.isLenient = false } }
+
+        fun parsearFecha(fechaStr: String): Date {
+            val limpia = fechaStr.trim()
+            for (fmt in formattersParse) {
+                try {
+                    val d = fmt.parse(limpia)
+                    if (d != null) return d
+                } catch (_: Exception) { }
+            }
+            Log.w("GenerarPDF", "No se pudo parsear fecha '$fechaStr', usando Date()")
+            return Date()
+        }
+
+        fun soloFecha(fechaStr: String): String {
+            return try { sdf.format(parsearFecha(fechaStr)) } catch (_: Exception) { fechaStr }
+        }
+
+        // ── Estructura interna de fila ─────────────────────────────────────────
         data class Row(
-            val cliente: String,
+            val cliente:        String,
             val numeroPrestamo: String,
-            val fechaPago: Date,
-            val fechaPagoStr: String,
-            val fechaCancelacion: String, // 🔥 NUEVO CAMPO
-            val monto: Double,
-            val mora: Double,
-            val cuota: String,
-            val cobrador: String,
-            val prestamoId: String
+            val fechaPago:      Date,
+            val fechaPagoStr:   String,
+            val fechaCancel:    String,
+            val monto:          Double,
+            val mora:           Double,
+            val cuota:          String,
+            val cobrador:       String,
+            val prestamoId:     String
         )
 
-        fun parseFechaDePago(pago: PagoItem): Pair<Date, String> {
-            return try {
-                val fechaStr = pago.fecha.split(" ")[0]
-                val fechaDate = sdf.parse(fechaStr) ?: Date()
-                fechaDate to fechaStr
+        // ── Obtener fechas de cancelación con timeout individual ───────────────
+        Log.d("GenerarPDF", "🔄 Obteniendo fechas de cancelación para ${pagos.distinctBy { it.prestamoId }.size} préstamos...")
+
+        val fechasCancelacion = mutableMapOf<String, String>()
+        for (pago in pagos.distinctBy { it.prestamoId }) {
+            try {
+                val fecha = obtenerFechaCancelacionPrestamo(pago.prestamoId, pagos)
+                fechasCancelacion[pago.prestamoId] = fecha
             } catch (e: Exception) {
-                Log.e("GenerarPDF", "Error parseando fecha '${pago.fecha}': ${e.message}")
-                Date() to sdf.format(Date())
+                Log.e("GenerarPDF", "Error obteniendo cancelación de ${pago.prestamoId}: ${e.message}")
+                fechasCancelacion[pago.prestamoId] = "-"
             }
         }
 
-        // 🔥 PASO CRÍTICO: Obtener fechas de cancelación ANTES de crear las filas
-        Log.d("GenerarPDF", "🔄 Obteniendo fechas de cancelación...")
-
-        val prestamosUnicos = pagos.distinctBy { it.prestamoId }
-        val fechasCancelacion = mutableMapOf<String, String>()
-
-        // Obtener la fecha de cancelación para cada préstamo
-        for (pago in prestamosUnicos) {
-            val fecha = obtenerFechaCancelacionPrestamo(pago.prestamoId, pagos)
-            fechasCancelacion[pago.prestamoId] = fecha
-            Log.d("GenerarPDF", "  • ${pago.cliente}: $fecha")
-        }
-
-        Log.d("GenerarPDF", "✅ Fechas obtenidas para ${fechasCancelacion.size} préstamos")
-
-        // 🔥 Convertir pagos a rows CON las fechas de cancelación correctas
-        val rows = pagos.map { pago ->
-            val (fechaReal, fechaFmt) = parseFechaDePago(pago)
-            val fechaCancelacion = fechasCancelacion[pago.prestamoId] ?: "Sin cancelar"
-
+        // ── Construir filas ordenadas ──────────────────────────────────────────
+        val rows: List<Row> = pagos.map { pago ->
+            val fechaDate = parsearFecha(pago.fecha)
             Row(
-                cliente = pago.cliente,
+                cliente        = pago.cliente,
                 numeroPrestamo = pago.numeroPrestamo.ifEmpty { "-" },
-                fechaPago = fechaReal,
-                fechaPagoStr = fechaFmt,
-                fechaCancelacion = fechaCancelacion, // 🔥 USAR LA FECHA OBTENIDA
-                monto = pago.monto,
-                mora = pago.mora,
-                cuota = pago.cuota,
-                cobrador = pago.cobrador,
-                prestamoId = pago.prestamoId
+                fechaPago      = fechaDate,
+                fechaPagoStr   = soloFecha(pago.fecha),
+                fechaCancel    = fechasCancelacion[pago.prestamoId] ?: "-",
+                monto          = pago.monto,
+                mora           = pago.mora,
+                cuota          = pago.cuota,
+                cobrador       = pago.cobrador,
+                prestamoId     = pago.prestamoId
             )
         }.sortedBy { it.fechaPago }
 
-        // Configuración de página
-        val pageWidth = 595
+        Log.d("GenerarPDF", "📊 Generando PDF con ${rows.size} filas...")
+
+        // ── Configuración de página ────────────────────────────────────────────
+        val pageWidth  = 595
         val pageHeight = 842
-        val margin = 32f
-        val headerY = 120f
-        val rowH = 18f
+        val margin     = 32f
+        val headerY    = 120f
+        val rowH       = 18f
 
         val colorPrimario = Color.parseColor("#1E3A8A")
-        val colorTexto = Color.parseColor("#1F2937")
-        val colorLinea = Color.parseColor("#E5E7EB")
+        val colorTexto    = Color.parseColor("#1F2937")
+        val colorLinea    = Color.parseColor("#E5E7EB")
 
         val titlePaint = Paint().apply {
-            isAntiAlias = true
-            textSize = 18f
+            isAntiAlias = true; textSize = 18f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             color = Color.BLACK
         }
         val subPaint = Paint().apply {
-            isAntiAlias = true
-            textSize = 12f
-            color = Color.DKGRAY
+            isAntiAlias = true; textSize = 11f; color = Color.DKGRAY
         }
         val headerPaint = Paint().apply {
-            isAntiAlias = true
-            textSize = 10f
+            isAntiAlias = true; textSize = 9f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             color = Color.WHITE
         }
         val cellPaint = Paint().apply {
-            isAntiAlias = true
-            textSize = 9f
-            color = colorTexto
+            isAntiAlias = true; textSize = 8.5f; color = colorTexto
         }
-        val linePaint = Paint().apply {
-            color = colorLinea
-            strokeWidth = 1f
-        }
-        val headerBg = Paint().apply {
-            color = colorPrimario
-        }
+        val linePaint = Paint().apply { color = colorLinea; strokeWidth = 1f }
+        val headerBg  = Paint().apply { color = colorPrimario }
 
-        // Posiciones de columnas
+        // Columnas: Cliente | N° | F.Pago | F.Cancel | Monto | Mora | Cuota | Cobrador
         val colXs = floatArrayOf(
-            margin,              // Cliente
-            margin + 130f,       // Nº Préstamo
-            margin + 180f,       // Fecha Pago
-            margin + 245f,       // Fecha Cancelación
-            margin + 320f,       // Monto
-            margin + 380f,       // Mora
-            margin + 430f,       // Cuota
-            margin + 470f        // Cobrador
+            margin,           // Cliente
+            margin + 120f,    // N° Préstamo
+            margin + 172f,    // Fecha Pago
+            margin + 238f,    // Fecha Cancelación
+            margin + 310f,    // Monto
+            margin + 368f,    // Mora
+            margin + 416f,    // Cuota
+            margin + 456f     // Cobrador
         )
+        val headers = arrayOf("Cliente", "N° Prést", "F. Pago", "F. Cancel.", "Monto", "Mora", "Cuota", "Cobrador")
 
         val pdf = PdfDocument()
         var pageNum = 1
-        var y = 0f
+        var y       = 0f
 
         fun newPage(): PdfDocument.Page {
-            val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNum).create()
-            val page = pdf.startPage(pageInfo)
-            val c = page.canvas
+            val pi   = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNum).create()
+            val pg   = pdf.startPage(pi)
+            val c    = pg.canvas
 
-            c.drawText("Resumen de Pagos", margin, 40f, titlePaint)
-            c.drawText("Periodo: $periodo", margin, 58f, subPaint)
+            c.drawText("Resumen de Pagos – Cobrador",       margin, 38f, titlePaint)
+            c.drawText("Periodo: $periodo",                  margin, 56f, subPaint)
             c.drawText(
                 "Rango: ${sdf.format(fechaInicio)} a ${sdf.format(fechaFin)}   |   Generado: ${sdfHora.format(Date())}",
-                margin, 74f, subPaint
+                margin, 72f, subPaint
             )
+            c.drawText("Total registros: ${rows.size}", margin, 88f, subPaint)
 
-            // Encabezados
-            c.drawRect(margin, headerY - 14f, pageWidth - margin, headerY + 6f, headerBg)
-            val headers = arrayOf("Cliente", "N° Prést", "F. Pago", "F. Cancel.", "Monto", "Mora", "Cuota", "Cobrador")
+            // Cabecera de tabla
+            c.drawRect(margin, headerY - 14f, (pageWidth - margin), headerY + 6f, headerBg)
             for (i in headers.indices) {
                 c.drawText(headers[i], colXs[i] + 2f, headerY, headerPaint)
             }
-            c.drawLine(margin, headerY + 8f, pageWidth - margin, headerY + 8f, linePaint)
+            c.drawLine(margin, headerY + 8f, (pageWidth - margin).toFloat(), headerY + 8f, linePaint)
 
-            y = headerY + 24f
-            return page
+            y = headerY + 22f
+            return pg
         }
 
         fun footer(canvas: Canvas) {
-            val p = Paint().apply {
-                isAntiAlias = true
-                textSize = 10f
-                color = Color.GRAY
-            }
-            canvas.drawText("Página $pageNum", pageWidth / 2f - 20f, pageHeight - 24f, p)
+            val p = Paint().apply { isAntiAlias = true; textSize = 9f; color = Color.GRAY }
+            canvas.drawText("Página $pageNum", pageWidth / 2f - 20f, (pageHeight - 20).toFloat(), p)
         }
 
-        var page = newPage()
+        var page   = newPage()
         var canvas = page.canvas
 
         var totalMonto = 0.0
-        var totalMora = 0.0
+        var totalMora  = 0.0
 
-        rows.forEach { r ->
-            if (y + rowH > pageHeight - 60f) {
+        // ── Pintar filas ────────────────────────────────────────────────────────
+        rows.forEachIndexed { idx, r ->
+            if (y + rowH > pageHeight - 55f) {
                 footer(canvas)
                 pdf.finishPage(page)
                 pageNum++
-                page = newPage()
+                page   = newPage()
                 canvas = page.canvas
             }
 
-            // 🔥 AQUÍ ESTÁ LA CLAVE: USAR r.fechaCancelacion
+            // Fondo alternado
+            if (idx % 2 == 0) {
+                canvas.drawRect(
+                    margin, y - rowH + 4f,
+                    (pageWidth - margin).toFloat(), y + 4f,
+                    Paint().apply { color = Color.parseColor("#F8FAFF") }
+                )
+            }
+
             val cols = arrayOf(
-                r.cliente,
+                r.cliente.take(18),
                 r.numeroPrestamo,
                 r.fechaPagoStr,
-                r.fechaCancelacion, // 🔥 ESTA ES LA LÍNEA CRÍTICA
-                "L. %,.2f".format(Locale.getDefault(), r.monto),
-                if (r.mora > 0) "L. %,.2f".format(Locale.getDefault(), r.mora) else "-",
-                r.cuota,
-                r.cobrador
+                r.fechaCancel,
+                "L %,.2f".format(r.monto),
+                if (r.mora > 0) "L %,.2f".format(r.mora) else "-",
+                r.cuota.take(8),
+                r.cobrador.take(14)
             )
 
             for (i in cols.indices) {
                 canvas.drawText(cols[i], colXs[i] + 2f, y, cellPaint)
             }
-            canvas.drawLine(margin, y + 4f, pageWidth - margin, y + 4f, linePaint)
+            canvas.drawLine(margin, y + 4f, (pageWidth - margin).toFloat(), y + 4f, linePaint)
             y += rowH
 
             totalMonto += r.monto
-            totalMora += r.mora
+            totalMora  += r.mora
         }
 
-        // Totales
-        if (y + 2 * rowH > pageHeight - 60f) {
+        // ── Fila de totales ─────────────────────────────────────────────────────
+        if (y + 2 * rowH > pageHeight - 55f) {
             footer(canvas)
             pdf.finishPage(page)
             pageNum++
-            page = newPage()
+            page   = newPage()
             canvas = page.canvas
         }
 
-        val totalsY = y + 10f
-        canvas.drawText("Registros: ${rows.size}", margin, totalsY, subPaint)
+        val totalY = y + 12f
+        val totPaint = Paint().apply {
+            isAntiAlias = true; textSize = 11f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            color = colorPrimario
+        }
+        canvas.drawRect(
+            margin, totalY - 14f,
+            (pageWidth - margin).toFloat(), totalY + 6f,
+            Paint().apply { color = Color.parseColor("#EEF2FF") }
+        )
+        canvas.drawText("Registros: ${rows.size}", margin + 4f, totalY, totPaint)
         canvas.drawText(
-            "Total Mora: L. %,.2f   •   Total Pagado: L. %,.2f".format(
-                Locale.getDefault(),
-                totalMora,
-                totalMonto
-            ),
-            margin + 200f, totalsY, subPaint
+            "Total Mora: L %,.2f   •   Total Pagado: L %,.2f".format(totalMora, totalMonto),
+            margin + 180f, totalY, totPaint
         )
 
         footer(canvas)
         pdf.finishPage(page)
 
+        // ── Guardar ─────────────────────────────────────────────────────────────
         return try {
-            val file = File(
-                context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS),
-                "reporte_pagos_${System.currentTimeMillis()}.pdf"
-            )
+            val outputDir = context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
+                ?: context.filesDir
+            if (!outputDir.exists()) outputDir.mkdirs()
+
+            val file = File(outputDir, "reporte_cobrador_${System.currentTimeMillis()}.pdf")
             FileOutputStream(file).use { pdf.writeTo(it) }
             pdf.close()
 
-            Log.d("GenerarPDF", "✅ PDF generado exitosamente: ${file.absolutePath}")
+            Log.d("GenerarPDF", "✅ PDF generado: ${file.absolutePath} (${file.length()} bytes)")
             file
         } catch (e: Exception) {
-            Log.e("GenerarPDF", "❌ Error al guardar PDF: ${e.message}", e)
+            Log.e("GenerarPDF", "❌ Error guardando PDF: ${e.message}", e)
             pdf.close()
-            Toast.makeText(context, "Error al generar PDF: ${e.message}", Toast.LENGTH_LONG).show()
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, "Error al guardar PDF: ${e.message}", Toast.LENGTH_LONG).show()
+            }
             null
         }
     }
@@ -2039,10 +2064,9 @@ object ReciboHelper {
                 return "L${formatter.format(n)}"
             }
 
-            // Dimensiones: 5cm ancho x 20cm alto
-            val pageWidth = 189    // 5cm = 189 puntos (REDUCIDO)
-            val pageHeight = 756   // 20cm = 756 puntos
-            val margin = 15f       // Márgenes ajustados para ancho reducido
+            val pageWidth = 189
+            val pageHeight = 756
+            val margin = 15f
             val contentWidth = pageWidth - (margin * 2)
 
             val pdfDocument = PdfDocument()
@@ -2052,11 +2076,10 @@ object ReciboHelper {
 
             canvas.drawColor(Color.WHITE)
 
-            // Paints ajustados para 5cm de ancho
             val paintHeader = Paint().apply {
                 color = Color.BLACK
                 textAlign = Paint.Align.CENTER
-                textSize = 14f  // Reducido para caber en 5cm
+                textSize = 14f
                 typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
                 isAntiAlias = true
             }
@@ -2064,7 +2087,7 @@ object ReciboHelper {
             val paintSmall = Paint().apply {
                 color = Color.BLACK
                 textAlign = Paint.Align.CENTER
-                textSize = 9f  // Reducido para caber
+                textSize = 9f
                 typeface = Typeface.MONOSPACE
                 isAntiAlias = true
             }
@@ -2072,7 +2095,7 @@ object ReciboHelper {
             val paintLabel = Paint().apply {
                 color = Color.BLACK
                 textAlign = Paint.Align.LEFT
-                textSize = 8f  // Reducido para etiquetas
+                textSize = 8f
                 typeface = Typeface.MONOSPACE
                 isAntiAlias = true
             }
@@ -2080,7 +2103,7 @@ object ReciboHelper {
             val paintValue = Paint().apply {
                 color = Color.BLACK
                 textAlign = Paint.Align.RIGHT
-                textSize = 8f  // Reducido para valores
+                textSize = 8f
                 typeface = Typeface.MONOSPACE
                 isAntiAlias = true
             }
@@ -2088,7 +2111,7 @@ object ReciboHelper {
             val paintAmount = Paint().apply {
                 color = Color.BLACK
                 textAlign = Paint.Align.CENTER
-                textSize = 16f  // Destacado pero que quepa
+                textSize = 16f
                 typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
                 isAntiAlias = true
             }
@@ -2099,7 +2122,6 @@ object ReciboHelper {
                 style = Paint.Style.STROKE
             }
 
-            // Función para dividir texto adaptada
             fun splitText(text: String, maxWidth: Float, paint: Paint): List<String> {
                 if (paint.measureText(text) <= maxWidth) return listOf(text)
 
@@ -2123,10 +2145,10 @@ object ReciboHelper {
             val lineSpacing = 12f
             var y = 20f
 
-            // Logo ajustado
+            // Logo
             runCatching {
                 BitmapFactory.decodeResource(context.resources, R.drawable.logo_capital)?.let {
-                    val logoSize = 45  // Más pequeño para 5cm
+                    val logoSize = 45
                     val scaled = Bitmap.createScaledBitmap(it, logoSize, logoSize, true)
                     canvas.drawBitmap(scaled, (pageWidth - logoSize) / 2f, y, null)
                     y += logoSize + 10f
@@ -2181,7 +2203,7 @@ object ReciboHelper {
             canvas.drawText(fmt(pagoIngresado), pageWidth / 2f, y, paintAmount)
             y += 20f
 
-            // Cuotas
+            // Cuotas completadas (centrado, sin truncar)
             val cuotasPagadas = cuota.split(" de ").firstOrNull() ?: cuota
             paintSmall.textAlign = Paint.Align.CENTER
             val cuotasLines = splitText("$cuotasPagadas completas", contentWidth, paintSmall)
@@ -2204,14 +2226,17 @@ object ReciboHelper {
                 y += lineSpacing
             }
 
-            // Dividir cuota si es muy larga
-            val cuotaDisplay = if (cuota.length > 15) {
-                cuota.take(12) + "..."
-            } else {
-                cuota
+            // ✅ CAMBIO: Cuotas completas sin truncar, en líneas separadas
+            paintLabel.textAlign = Paint.Align.LEFT
+            canvas.drawText("Cuotas:", margin, y, paintLabel)
+            y += lineSpacing
+
+            val cuotaLines = splitText(cuota, contentWidth, paintLabel)
+            cuotaLines.forEach { line ->
+                canvas.drawText(line, margin, y, paintLabel)
+                y += lineSpacing
             }
 
-            drawCompactLine("Cuotas", cuotaDisplay)
             drawCompactLine("Fecha", fecha)
             drawCompactLine("Saldo", fmt(saldoPrevio))
             drawCompactLine("Abono", fmt(pagoIngresado))
@@ -3748,54 +3773,6 @@ object ReciboHelper {
     }
 
 
-    fun generarResumenPagosPDF(context: Context, pagos: List<PagoItem>): File? {
-        return try {
-            val doc = Document()
-            val path = context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
-            val file = File(path, "HistorialPrestamos.pdf")
-
-            PdfWriter.getInstance(doc, FileOutputStream(file))
-            doc.open()
-
-            val titleFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 18f)
-            val textFont = FontFactory.getFont(FontFactory.HELVETICA, 13f)
-
-            doc.add(Paragraph("CAPITAL EXPRESS", titleFont))
-            doc.add(Paragraph("HISTORIAL DE PRÉSTAMOS", titleFont))
-            doc.add(Paragraph("\n"))
-
-            var total = 0.0
-            pagos.forEach { pago ->
-                doc.add(Paragraph("Cliente: ${pago.cliente}", textFont))
-                doc.add(Paragraph("Préstamo ID: ${pago.prestamoId}", textFont))
-                doc.add(Paragraph("Fecha: ${pago.fecha}", textFont))
-                doc.add(Paragraph("Monto: L. %.2f".format(pago.monto), textFont))
-                if (pago.interesTotal > 0.0) doc.add(
-                    Paragraph(
-                        "Interés: L. %.2f".format(pago.interesTotal),
-                        textFont
-                    )
-                )
-                if (pago.mora > 0.0) doc.add(Paragraph("Mora: L. %.2f".format(pago.mora), textFont))
-                if (pago.cuota.isNotBlank()) doc.add(Paragraph("Cuota: ${pago.cuota}", textFont))
-                if (pago.cobrador.isNotBlank()) doc.add(
-                    Paragraph(
-                        "Cobrador: ${pago.cobrador}",
-                        textFont
-                    )
-                )
-                doc.add(Paragraph("------------------------------", textFont))
-                total += pago.monto
-            }
-
-            doc.add(Paragraph("TOTAL PAGADO: L. %.2f".format(total), titleFont))
-            doc.close()
-            file
-        } catch (e: Exception) {
-            Toast.makeText(context, "Error al generar PDF: ${e.message}", Toast.LENGTH_LONG).show()
-            null
-        }
-    }
 
     fun compartirReciboPDF(context: Context, file: File) {
         try {

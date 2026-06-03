@@ -4,6 +4,7 @@ import android.app.DatePickerDialog
 import android.content.Context
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -36,6 +37,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.*
+
+// ✅ NUEVO: Caché en memoria — evita recargar Firestore cada vez que el usuario entra a la pantalla.
+// TTL de 2 minutos. Para forzar recarga usa PagosCache.invalidate()
+private object PagosCache {
+    var pagos: List<PagoItem> = emptyList()
+    var lastFetch: Long = 0L
+    private const val TTL_MS = 2 * 60 * 1000L
+    fun isValid() = pagos.isNotEmpty() && (System.currentTimeMillis() - lastFetch) < TTL_MS
+    fun invalidate() { lastFetch = 0L }
+}
 
 enum class EstadoFiltro { TODOS, ACTIVOS, SALDADOS }
 
@@ -226,52 +237,114 @@ private suspend fun obtenerCuotasPendientes(
     }
 }
 
+// ✅ BLOQUE 4: Traer TODOS los pagos de una vez, luego agrupar en memoria
 private suspend fun obtenerTodasLasCuotasPendientes(
     db: FirebaseFirestore,
     filtroCliente: String = "",
     filtroCobradorId: String = ""
 ): List<Pair<String, List<CuotaPendiente>>> {
     return try {
-        val prestamosSnapshot = db.collection("prestamos")
-            .whereEqualTo("estado", "activo")
-            .get().await()
+        // ✅ Dos queries en paralelo en vez de N+1 secuenciales
+        val prestamosDeferred = kotlinx.coroutines.coroutineScope {
+            async { db.collection("prestamos").whereEqualTo("estado", "activo").get().await() }
+        }
+        val todosPagosDeferred = kotlinx.coroutines.coroutineScope {
+            async { db.collection("pagos").get().await() }
+        }
+
+        val prestamosSnap = prestamosDeferred.await()
+        val todosPagosSnap = todosPagosDeferred.await()
+
+        // Agrupar pagos por prestamoId en memoria (O(n), no N queries)
+        val pagosPorPrestamo = todosPagosSnap.documents.groupBy {
+            it.getString("prestamoId") ?: ""
+        }
 
         val resultado = mutableListOf<Pair<String, List<CuotaPendiente>>>()
 
-        for (prestamoDoc in prestamosSnapshot.documents) {
-            val prestamoId = prestamoDoc.id
-            val clienteNombre = prestamoDoc.getString("cliente") ?: continue
-            val cobradorAsignadoId = prestamoDoc.getString("cobrador") ?: ""
+        for (prestamoDoc in prestamosSnap.documents) {
+            val prestamoId     = prestamoDoc.id
+            val clienteNombre  = prestamoDoc.getString("cliente") ?: continue
+            val cobradorAsignado = prestamoDoc.getString("cobrador") ?: ""
 
-            // Aplicar filtro de cliente
-            val cumpleFiltroCliente = filtroCliente.isBlank() ||
-                    clienteNombre.contains(filtroCliente, ignoreCase = true)
+            if (filtroCliente.isNotBlank() &&
+                !clienteNombre.contains(filtroCliente, ignoreCase = true)) continue
+            if (filtroCobradorId.isNotBlank() &&
+                cobradorAsignado != filtroCobradorId) continue
 
-            if (!cumpleFiltroCliente) continue
-
-            // Comparar el cobradorId del préstamo con el filtro
-            val cumpleFiltroCobrador = if (filtroCobradorId.isBlank()) {
-                true
-            } else {
-                cobradorAsignadoId == filtroCobradorId
-            }
-
-            if (!cumpleFiltroCobrador) continue
-
-            // Obtener cuotas pendientes del préstamo
-            val cuotasPendientes = obtenerCuotasPendientes(db, prestamoId)
-
-            if (cuotasPendientes.isNotEmpty()) {
-                resultado.add(Pair(clienteNombre, cuotasPendientes))
-            }
+            // ✅ Pasar el subconjunto ya filtrado — sin query adicional
+            val pagosDelPrestamo = pagosPorPrestamo[prestamoId] ?: emptyList()
+            val cuotas = calcularCuotasPendientesDesdeDocumentos(prestamoDoc, pagosDelPrestamo)
+            if (cuotas.isNotEmpty()) resultado.add(Pair(clienteNombre, cuotas))
         }
 
         resultado
-
     } catch (e: Exception) {
         Log.e("TodasCuotasPendientes", "Error: ${e.message}", e)
         emptyList()
     }
+}
+
+// Nueva función auxiliar que recibe los documentos ya cargados (sin queries adicionales)
+private fun calcularCuotasPendientesDesdeDocumentos(
+    prestamoDoc: com.google.firebase.firestore.DocumentSnapshot,
+    pagosDoc: List<com.google.firebase.firestore.DocumentSnapshot>
+): List<CuotaPendiente> {
+    val cuotasTotales = prestamoDoc.getLong("cuotas")?.toInt() ?: return emptyList()
+    val cuotaMonto    = prestamoDoc.getDouble("cuota") ?: return emptyList()
+    val plazo         = prestamoDoc.getString("plazo") ?: "semanal"
+    val fechaInicio   = prestamoDoc.getTimestamp("fecha")?.toDate() ?: Date()
+    val estado        = prestamoDoc.getString("estado") ?: "activo"
+    val proximoPago   = prestamoDoc.getString("proximoPago") ?: ""
+
+    if (estado.equals("saldado", ignoreCase = true) ||
+        proximoPago.equals("saldado", ignoreCase = true)) return emptyList()
+
+    // Calcular montos pagados por cuota (igual que antes, pero sin query)
+    val cuotasPagadas = mutableMapOf<Int, Double>()
+    for (pago in pagosDoc) {
+        val cuotasCubiertas = pago.get("cuotasCubiertas") as? List<*>
+        if (!cuotasCubiertas.isNullOrEmpty()) {
+            cuotasCubiertas.forEach { data ->
+                if (data is Map<*, *>) {
+                    val num   = (data["numeroCuota"] as? Number)?.toInt() ?: return@forEach
+                    val monto = (data["montoAplicado"] as? Number)?.toDouble() ?: 0.0
+                    if (num > 0) cuotasPagadas[num] = (cuotasPagadas[num] ?: 0.0) + monto
+                }
+            }
+        } else {
+            val num   = (pago.getLong("numeroCuota") ?: pago.getLong("cuota"))?.toInt() ?: 1
+            val monto = (pago.getDouble("monto") ?: 0.0) + (pago.getDouble("mora") ?: 0.0)
+            cuotasPagadas[num] = (cuotasPagadas[num] ?: 0.0) + monto
+        }
+    }
+
+    val hoy = Date()
+    val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+    val pendientes  = mutableListOf<CuotaPendiente>()
+    var primeraVez  = true
+
+    for (i in 1..cuotasTotales) {
+        val pagado    = cuotasPagadas[i] ?: 0.0
+        val pendiente = (cuotaMonto - pagado).coerceAtLeast(0.0)
+        if (pendiente <= 0.01) continue
+
+        val fechaStr  = calcularFechaCuotaPendiente(fechaInicio, plazo, i)
+        val fechaDate = try { dateFormat.parse(fechaStr) ?: Date() } catch (_: Exception) { Date() }
+        val atraso    = calcularDiasAtraso(fechaDate, hoy)
+
+        pendientes.add(CuotaPendiente(
+            numeroCuota      = i,
+            fechaProgramada  = fechaStr,
+            montoPendiente   = pendiente,
+            montoPagado      = pagado,
+            porcentajePagado = if (cuotaMonto > 0) (pagado / cuotaMonto) * 100 else 0.0,
+            esVencida        = atraso > 0,
+            diasAtraso       = atraso,
+            esProxima        = primeraVez.also { primeraVez = false }
+        ))
+    }
+    return pendientes
 }
 
 fun formatearLempiras(valor: Double): String {
@@ -284,143 +357,88 @@ private fun procesarDocumentoPagoMejorado(
     prestamos: Map<String, Map<String, Any?>>,
     formatter: SimpleDateFormat
 ): PagoItem? {
-    try {
-        val prestamoId = doc.getString("prestamoId") ?: return null
-        val prestamo = prestamos[prestamoId] ?: return null
+    return try {
+        val prestamoId  = doc.getString("prestamoId") ?: return null
+        val prestamo    = prestamos[prestamoId]      ?: return null
         val clienteNombre = prestamo["cliente"] as? String ?: "Cliente Desconocido"
 
-        // 🔥 SOLUCIÓN CORRECTA: El campo se llama "nombreCobrador", no "cobrador"
-        val cobradorDelPago = doc.getString("nombreCobrador") ?: doc.getString("cobrador") ?: ""
-        val cobradorDelPrestamo = prestamo["cobrador"] as? String ?: prestamo["nombreCobrador"] as? String ?: ""
+        // ✅ SIMPLIFICADO: intentar campo nombre directo primero, luego resolver ID
+        val cobradorRaw = doc.getString("nombreCobrador")
+            ?: doc.getString("cobrador")
+            ?: prestamo["cobrador"] as? String
+            ?: ""
 
-        // Usar el del PAGO primero, si no existe usar el del préstamo
-        val cobradorValor = cobradorDelPago.ifEmpty { cobradorDelPrestamo }
-
-        // Determinar si es un ID o un nombre
-        val esUnId = cobradorValor.contains("-") && cobradorValor.length > 30
-
-        val cobradorId: String
-        val cobradorNombre: String
-
-        if (cobradorValor.isEmpty()) {
-            cobradorId = ""
-            cobradorNombre = "Sin asignar"
-        } else if (esUnId) {
-            // Es un ID, buscar el nombre
-            cobradorId = cobradorValor
-            cobradorNombre = usuariosMap[cobradorId] ?: cobradorValor
-        } else {
-            // Es un nombre, buscar el ID
-            val idEncontrado = usuariosMap.entries.find {
-                it.value.equals(cobradorValor, ignoreCase = true)
-            }?.key
-
-            cobradorId = idEncontrado ?: cobradorValor
-            cobradorNombre = cobradorValor
+        // Si es un ID (largo, con guiones) → buscar nombre. Si es nombre → buscar ID.
+        val (cobradorId, cobradorNombre) = when {
+            cobradorRaw.isEmpty() -> Pair("", "Sin asignar")
+            cobradorRaw.length > 20 && cobradorRaw.contains("-") -> {
+                // Parece un UID de Firebase
+                Pair(cobradorRaw, usuariosMap[cobradorRaw] ?: cobradorRaw)
+            }
+            else -> {
+                // Parece un nombre legible
+                val id = usuariosMap.entries
+                    .firstOrNull { it.value.equals(cobradorRaw, ignoreCase = true) }?.key
+                    ?: cobradorRaw
+                Pair(id, cobradorRaw)
+            }
         }
 
-        val saldoActual = when (val saldoVal = prestamo["saldo"]) {
-            is Double -> saldoVal
-            is Long -> saldoVal.toDouble()
-            is String -> saldoVal.toDoubleOrNull() ?: 0.0
+        val saldoActual = when (val s = prestamo["saldo"]) {
+            is Double -> s
+            is Long   -> s.toDouble()
+            is String -> s.toDoubleOrNull() ?: 0.0
             else -> 0.0
         }
 
-        // 🔥 CORRECCIÓN CRÍTICA: El campo puede llamarse "fechaPago" o "fecha"
-        // Intentar primero "fechaPago", luego "fecha" como fallback
+        // ✅ Timestamp: prioridad fechaPago → fecha → ahora
         val timestamp = doc.getTimestamp("fechaPago")
             ?: doc.getTimestamp("fecha")
-            ?: run {
-                Log.w("ProcesarPago", "⚠️ Pago ${doc.id} no tiene campo 'fechaPago' ni 'fecha', usando fecha actual")
-                Timestamp.now()
-            }
+            ?: Timestamp.now()
 
         val fechaDate = timestamp.toDate()
-        val fechaStr = formatter.format(fechaDate)
-        val horaFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
-        val horaStr = horaFormat.format(fechaDate)
-        val fechaCompleta = "$fechaStr $horaStr"
+        val fechaStr  = formatter.format(fechaDate)
+        val horaStr   = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(fechaDate)
 
-        // 🔥 LOG DE DEBUGGING (descomentar si necesitas verificar)
-        /*
-        Log.d("ProcesarPago", """
-            📋 Pago procesado:
-            • ID: ${doc.id}
-            • Cliente: $clienteNombre
-            • Fecha original (Timestamp): $timestamp
-            • Fecha formateada: $fechaCompleta
-            • Cobrador: $cobradorNombre
-        """.trimIndent())
-        */
-
-        val numeroCuotaVal = try {
-            when {
-                doc.contains("numeroCuota") -> {
-                    when (val valor = doc.get("numeroCuota")) {
-                        is Long -> valor.toInt()
-                        is Int -> valor
-                        is Double -> valor.toInt()
-                        is String -> valor.toIntOrNull()
-                        else -> null
-                    }
-                }
-                doc.contains("cuota") -> {
-                    when (val valor = doc.get("cuota")) {
-                        is Long -> valor.toInt()
-                        is Int -> valor
-                        is Double -> valor.toInt()
-                        is String -> valor.toIntOrNull()
-                        else -> null
-                    }
-                }
+        val numeroCuotaVal: Int? = listOf("numeroCuota", "cuota").firstNotNullOfOrNull { campo ->
+            when (val v = doc.get(campo)) {
+                is Long   -> v.toInt()
+                is Int    -> v
+                is Double -> v.toInt()
+                is String -> v.toIntOrNull()
                 else -> null
             }
-        } catch (e: Exception) {
-            null
         }
 
-        val metodoPagoStr = doc.getString("metodoPago") ?: doc.getString("tipoPago") ?: "Efectivo"
+        val metodoPago = doc.getString("metodoPago") ?: doc.getString("tipoPago") ?: "Efectivo"
 
-        val numeroPrestamoStr = try {
-            when (val valor = doc.get("numeroPrestamo") ?: prestamo["numeroPrestamo"]) {
-                is String -> valor
-                is Long -> valor.toString()
-                is Int -> valor.toString()
-                is Double -> valor.toInt().toString()
-                null -> ""
-                else -> valor.toString()
-            }
-        } catch (e: Exception) {
-            ""
+        val numeroPrestamo = when (val v = doc.get("numeroPrestamo") ?: prestamo["numeroPrestamo"]) {
+            is String -> v
+            is Number -> v.toInt().toString()
+            else -> ""
         }
 
-        // 🔥 OBTENER EL MONTO (puede estar en "monto" o en otro campo)
-        val monto = doc.getDouble("monto") ?: run {
-            Log.w("ProcesarPago", "⚠️ Pago ${doc.id} no tiene campo 'monto'")
-            0.0
-        }
-
-        return PagoItem(
-            docId = doc.id,
-            cliente = clienteNombre,
-            cobrador = cobradorNombre,
-            cobradorId = cobradorId,
-            monto = monto,
-            mora = doc.getDouble("mora") ?: 0.0,
-            fecha = fechaCompleta,
-            prestamoId = prestamoId,
-            numeroCuota = numeroCuotaVal,
-            cuota = numeroCuotaVal?.toString() ?: "",
-            metodoPago = metodoPagoStr,
-            tipoPago = metodoPagoStr,
-            notas = doc.getString("notas"),
-            timestamp = timestamp,
-            saldoRestante = saldoActual,
-            numeroPrestamo = numeroPrestamoStr
+        PagoItem(
+            docId          = doc.id,
+            cliente        = clienteNombre,
+            cobrador       = cobradorNombre,
+            cobradorId     = cobradorId,
+            monto          = doc.getDouble("monto") ?: 0.0,
+            mora           = doc.getDouble("mora")  ?: 0.0,
+            fecha          = "$fechaStr $horaStr",
+            prestamoId     = prestamoId,
+            numeroCuota    = numeroCuotaVal,
+            cuota          = numeroCuotaVal?.toString() ?: "",
+            metodoPago     = metodoPago,
+            tipoPago       = metodoPago,
+            notas          = doc.getString("notas"),
+            timestamp      = timestamp,
+            saldoRestante  = saldoActual,
+            numeroPrestamo = numeroPrestamo
         )
     } catch (e: Exception) {
-        Log.e("ProcesarPago", "❌ Error procesando pago ${doc.id}: ${e.message}", e)
-        return null
+        Log.e("ProcesarPago", "Error en ${doc.id}: ${e.message}")
+        null
     }
 }
 
@@ -591,6 +609,8 @@ private suspend fun eliminarPagoCorregido(
         }.await() // ✅ AWAIT en la transacción
 
         // 9. Notificar actualización del estado
+        // ✅ NUEVO: Invalidar caché para que la próxima carga traiga datos frescos
+        PagosCache.invalidate()
         PrestamoStateManager.notifyPrestamoUpdate(pago.prestamoId, db, context)
 
         Log.d("EliminarPago", "🎉 Pago eliminado correctamente")
@@ -700,6 +720,7 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
     var filtroCobradorId by remember { mutableStateOf("") }
     var filtroCobradorNombre by remember { mutableStateOf("") }
     var fechaInicio by remember { mutableStateOf<Date?>(null) }
+    var exportandoPDF by remember { mutableStateOf(false) }
     var fechaFin by remember { mutableStateOf<Date?>(null) }
     var cargando by remember { mutableStateOf(true) }
     var mostrarFiltros by remember { mutableStateOf(false) }
@@ -871,181 +892,69 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
         pagosFiltrados = pagos
     }
 
-    fun cargarUsuarios() {
-        scope.launch {
-            try {
-                if (isInternetAvailable(context)) {
-                    val snapshot = db.collection("usuarios").get().await()
-                    usuarios = snapshot.documents.mapNotNull { doc ->
-                        val nombre = doc.getString("nombre") ?: return@mapNotNull null
-                        val rolUsuario = doc.getString("rol") ?: return@mapNotNull null
-                        if (rolUsuario in listOf("cobrador", "admin")) {
-                            UsuarioItem(id = doc.id, nombre = nombre, rol = rolUsuario)
-                        } else null
-                    }.sortedBy { it.nombre }
-
-                    // 🔥 LOG DE USUARIOS CARGADOS
-                    Log.d("CargarUsuarios", """
-                    👥 USUARIOS CARGADOS:
-                    ${usuarios.joinToString("\n") { usuario ->
-                        "  • ${usuario.nombre} -> ${usuario.id.take(12)}..."
-                    }}
-                """.trimIndent())
-                }
-            } catch (e: Exception) {
-                Log.e("CargarUsuarios", "Error: ${e.message}")
-            }
-        }
-    }
-
+    // ✅ BLOQUE 1 REEMPLAZADO: Una sola carga paralela, límite razonable
     fun cargarPagos() {
         scope.launch {
             try {
+                if (PagosCache.isValid()) {
+                    pagos = PagosCache.pagos
+                    pagosFiltrados = PagosCache.pagos
+                    cargando = false
+                    return@launch
+                }
+
                 cargando = true
                 val prefs = context.getSharedPreferences("offline_data", Context.MODE_PRIVATE)
 
-                if (isInternetAvailable(context)) {
-                    Log.d("CargarPagos", "🔵 Iniciando carga...")
-
-                    val usuariosDeferred = async {
-                        db.collection("usuarios").get().await()
-                            .associateBy({ it.id }, { it.getString("nombre") ?: it.id })
-                    }
-
-                    val prestamosDeferred = async {
-                        db.collection("prestamos").get().await()
-                            .associateBy({ it.id }, { it.data })
-                    }
-
-                    val pagosDeferred = async {
-                        val todosPagos = mutableListOf<com.google.firebase.firestore.DocumentSnapshot>()
-                        var lastDoc: com.google.firebase.firestore.DocumentSnapshot? = null
-                        val batchSize = 500L
-                        var hasMore = true
-
-                        while (hasMore) {
-                            val query = if (lastDoc == null) {
-                                db.collection("pagos").limit(batchSize)
-                            } else {
-                                db.collection("pagos").startAfter(lastDoc).limit(batchSize)
-                            }
-
-                            val snapshot = query.get().await()
-
-                            if (snapshot.documents.isEmpty()) {
-                                hasMore = false
-                            } else {
-                                todosPagos.addAll(snapshot.documents)
-                                lastDoc = snapshot.documents.lastOrNull()
-
-                                if (snapshot.documents.size < batchSize) {
-                                    hasMore = false
-                                }
-                            }
-                        }
-                        todosPagos
-                    }
-
-                    val usuariosMap = usuariosDeferred.await()
-                    val prestamos = prestamosDeferred.await()
-                    val todosLosDocs = pagosDeferred.await()
-
-                    Log.d("CargarPagos", """
-                    📊 DATOS CARGADOS:
-                    - Usuarios: ${usuariosMap.size}
-                    - Préstamos: ${prestamos.size}
-                    - Pagos: ${todosLosDocs.size}
-                """.trimIndent())
-
-                    // 🔥 DIAGNÓSTICO: Analizar el campo "nombreCobrador" en TODOS los pagos
-                    val valoresCobradorEnPagos = todosLosDocs
-                        .mapNotNull { it.getString("nombreCobrador") ?: it.getString("cobrador") }
-                        .filter { it.isNotEmpty() }
-                        .groupBy { it }
-                        .mapValues { it.value.size }
-                        .toList()
-                        .sortedByDescending { it.second }
-
-                    Log.d("CargarPagos", """
-                    🔍 VALORES DE 'nombreCobrador' EN PAGOS:
-                    ${if (valoresCobradorEnPagos.isEmpty()) {
-                        "¡CAMPO 'nombreCobrador' VACÍO O NO EXISTE EN TODOS LOS PAGOS!"
-                    } else {
-                        valoresCobradorEnPagos.take(10).joinToString("\n") { (cobrador, cantidad) ->
-                            "  • '$cobrador' -> $cantidad pagos"
-                        }
-                    }}
-                """.trimIndent())
-
-                    // 🔥 Buscar específicamente pagos con "Figueroa"
-                    val pagosFigueroaDirectos = todosLosDocs.filter { doc ->
-                        val cobrador = doc.getString("nombreCobrador") ?: doc.getString("cobrador") ?: ""
-                        cobrador.contains("Figueroa", ignoreCase = true)
-                    }
-
-                    Log.d("CargarPagos", """
-                    💰 PAGOS CON "FIGUEROA" EN nombreCobrador:
-                    - Total encontrados: ${pagosFigueroaDirectos.size}
-                    ${pagosFigueroaDirectos.take(3).joinToString("\n") { doc ->
-                        val prestamoId = doc.getString("prestamoId") ?: ""
-                        val cliente = prestamos[prestamoId]?.get("cliente") as? String ?: "Sin cliente"
-                        val nombreCobrador = doc.getString("nombreCobrador") ?: ""
-                        val monto = doc.getDouble("monto") ?: 0.0
-                        "  • Cliente: $cliente | Monto: L$monto | nombreCobrador: '$nombreCobrador'"
-                    }}
-                """.trimIndent())
-
-                    // 🔥 DIAGNÓSTICO: Buscar préstamos de José Figueroa
-                    val prestamosFigueroa = prestamos.filter { (_, data) ->
-                        val cobrador = data?.get("cobrador") as? String ?: ""
-                        cobrador.contains("Figueroa", ignoreCase = true) ||
-                                cobrador.contains("993c0dff", ignoreCase = true)
-                    }
-
-                    Log.d("CargarPagos", """
-                    🏦 PRÉSTAMOS CON FIGUEROA ASIGNADO:
-                    - Total préstamos: ${prestamosFigueroa.size}
-                """.trimIndent())
-
-                    pagos = todosLosDocs.mapNotNull { doc ->
-                        try {
-                            procesarDocumentoPagoMejorado(doc, usuariosMap, prestamos, formatter)
-                        } catch (e: Exception) {
-                            Log.e("CargarPagos", "Error procesando: ${e.message}")
-                            null
-                        }
-                    }.sortedByDescending {
-                        try {
-                            formatter.parse(it.fecha.split(" ")[0])?.time ?: 0L
-                        } catch (_: Exception) { 0L }
-                    }
-
-                    Log.d("CargarPagos", """
-                    ✅ PROCESAMIENTO COMPLETO:
-                    - Total pagos procesados: ${pagos.size}
-                    - Pagos de Figueroa: ${pagos.count {
-                        it.cobrador.contains("Figueroa", ignoreCase = true) ||
-                                it.cobradorId.contains("993c0dff", ignoreCase = true)
-                    }}
-                    
-                    Primeros 3 pagos de Figueroa:
-                    ${pagos.filter { it.cobrador.contains("Figueroa", ignoreCase = true) }
-                        .take(3)
-                        .joinToString("\n") { pago ->
-                            "  • Cliente: ${pago.cliente} | Cobrador: ${pago.cobrador} | ID: ${pago.cobradorId.take(12)}..."
-                        }
-                    }
-                """.trimIndent())
-
-                    prefs.edit().putString("historial_pagos", Gson().toJson(pagos)).apply()
-                } else {
+                if (!isInternetAvailable(context)) {
                     val json = prefs.getString("historial_pagos", "[]") ?: "[]"
                     pagos = try {
                         Gson().fromJson(json, Array<PagoItem>::class.java).toList()
                     } catch (_: Exception) { emptyList() }
+                    pagosFiltrados = pagos
                     Toast.makeText(context, "Modo offline", Toast.LENGTH_SHORT).show()
+                    cargando = false
+                    return@launch
                 }
 
+                // ✅ 3 queries en PARALELO
+                val usuariosDeferred = async {
+                    db.collection("usuarios").get().await()
+                        .associateBy({ it.id }, { it.getString("nombre") ?: it.id })
+                }
+                val prestamosDeferred = async {
+                    db.collection("prestamos").get().await()
+                        .associateBy({ it.id }, { it.data })
+                }
+                // ✅ SIN orderBy ni limit — trae todos los docs independiente del nombre del campo fecha
+                val pagosDeferred = async {
+                    db.collection("pagos").get().await().documents
+                }
+
+                val usuariosMap  = usuariosDeferred.await()
+                val prestamos    = prestamosDeferred.await()
+                val todosLosDocs = pagosDeferred.await()
+
+// ✅ Cargar usuarios con rol para el filtro de cobrador
+                val usuariosConRol = db.collection("usuarios").get().await()
+                usuarios = usuariosConRol.documents.mapNotNull { doc ->
+                    val nombre = doc.getString("nombre") ?: return@mapNotNull null
+                    val rolU   = doc.getString("rol")    ?: return@mapNotNull null
+                    if (rolU in listOf("cobrador", "admin"))
+                        UsuarioItem(id = doc.id, nombre = nombre, rol = rolU)
+                    else null
+                }.sortedBy { it.nombre }
+
+// ✅ Ordenar por timestamp resuelto, no por string
+                pagos = todosLosDocs.mapNotNull { doc ->
+                    procesarDocumentoPagoMejorado(doc, usuariosMap, prestamos, formatter)
+                }.sortedByDescending { it.timestamp?.toDate()?.time ?: 0L }
+
+                Log.d("CargarPagos", "✅ Total pagos cargados: ${pagos.size}")
+
+                PagosCache.pagos = pagos
+                PagosCache.lastFetch = System.currentTimeMillis()
+                prefs.edit().putString("historial_pagos", Gson().toJson(pagos)).apply()
                 pagosFiltrados = pagos
 
             } catch (e: Exception) {
@@ -1080,7 +989,6 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
     }
 
     LaunchedEffect(Unit) {
-        cargarUsuarios()
         cargarPagos()
     }
 
@@ -1100,6 +1008,8 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                         if (mostrandoPendientes) {
                             cargarCuotasPendientes()
                         } else {
+                            // ✅ NUEVO: Refresh fuerza recarga ignorando el caché
+                            PagosCache.invalidate()
                             cargarPagos()
                         }
                     }) {
@@ -1417,10 +1327,24 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                 esSaldados = estadoFiltro == EstadoFiltro.SALDADOS,
                 onCerrar = { mostrarPreview = false },
                 onExportar = { pagosAExportar, fi, ff, periodoStr, esSaldados ->
+                    exportandoPDF = true
+                    mostrarPreview = false  // ✅ cerrar dialog primero
                     scope.launch {
                         try {
+                            if (pagosAExportar.isEmpty()) {
+                                Toast.makeText(context, "No hay pagos para exportar", Toast.LENGTH_SHORT).show()
+                                return@launch
+                            }
+
+                            val fechaInicioReal: Date = fi
+                                ?: pagosAExportar.mapNotNull { it.timestamp?.toDate() }.minOrNull()
+                                ?: Date()
+
+                            val fechaFinReal: Date = ff
+                                ?: pagosAExportar.mapNotNull { it.timestamp?.toDate() }.maxOrNull()
+                                ?: Date()
+
                             val archivo = if (esSaldados) {
-                                // PDF para préstamos saldados
                                 ReciboHelper.generarResumenPrestamosSaldadosPDF(
                                     context = context,
                                     pagos = pagosAExportar,
@@ -1429,12 +1353,11 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                                     periodo = periodoStr
                                 )
                             } else {
-                                // PDF normal de pagos
                                 ReciboHelper.generarResumenPagosPDF(
                                     context = context,
                                     pagos = pagosAExportar,
-                                    fechaInicio = fi ?: Date(0),
-                                    fechaFin = ff ?: Date(),
+                                    fechaInicio = fechaInicioReal,
+                                    fechaFin = fechaFinReal,
                                     periodo = periodoStr
                                 )
                             }
@@ -1442,18 +1365,63 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                             if (archivo != null && archivo.exists()) {
                                 val printed = ReciboHelper.imprimirPDF(context, archivo)
                                 if (!printed) ReciboHelper.compartirReciboPDF(context, archivo)
-                                val mensaje = if (esSaldados) "PDF de préstamos saldados generado" else "PDF generado"
-                                Toast.makeText(context, mensaje, Toast.LENGTH_SHORT).show()
+                                Toast.makeText(
+                                    context,
+                                    if (esSaldados) "PDF saldados generado" else "PDF generado",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                             } else {
                                 Toast.makeText(context, "No se pudo generar el PDF", Toast.LENGTH_LONG).show()
                             }
                         } catch (e: Exception) {
                             Log.e("ExportarPDF", "Error: ${e.message}", e)
                             Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                        } finally {
+                            exportandoPDF = false  // ✅ siempre apagar el loading
                         }
                     }
                 }
             )
+        }
+
+        // ✅ Overlay de carga mientras se genera el PDF
+        if (exportandoPDF) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(enabled = false) {} // bloquear interacción
+                    .background(Color.Black.copy(alpha = 0.45f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            color = Color(0xFF0061A7),
+                            strokeWidth = 3.dp,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Text(
+                            "Generando PDF...",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFF0061A7)
+                        )
+                        Text(
+                            "Por favor espera",
+                            fontSize = 13.sp,
+                            color = Color.Gray
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -2876,20 +2844,38 @@ fun ReportePagosPreview(
                 }
             }
         },
+        // ✅ DESPUÉS
         confirmButton = {
+            var exportando by remember { mutableStateOf(false) }
+
             Button(
-                onClick = { onExportar(pagos, fechaInicio, fechaFin, periodo, esSaldados) },
+                onClick = {
+                    if (!exportando) {
+                        exportando = true
+                        onCerrar() // ✅ cerrar el dialog PRIMERO para liberar la UI
+                        onExportar(pagos, fechaInicio, fechaFin, periodo, esSaldados)
+                    }
+                },
+                enabled = !exportando,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (esSaldados) Color(0xFF059669) else Color(0xFF0061A7)
                 )
             ) {
-                Icon(
-                    Icons.Default.PictureAsPdf,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
+                if (exportando) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.PictureAsPdf,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Exportar PDF")
+                Text(if (exportando) "Generando..." else "Exportar PDF")
             }
         },
         dismissButton = {

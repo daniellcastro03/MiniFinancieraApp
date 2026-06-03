@@ -277,8 +277,9 @@ private suspend fun distribuirPagoEnCascada(
 
             if (montoRestanteCuota > 0.01) {
                 val montoAAplicar = minOf(montoRestante, montoRestanteCuota)
-                val cuotaCompleta =
-                    montoAAplicar >= montoRestanteCuota - 0.01
+                // DESPUÉS
+                val montoPagadoTotal = (estadoCuotas[i] ?: 0.0) + montoAAplicar
+                val cuotaCompleta = montoPagadoTotal >= cuotaEstimada - 0.01
 
                 cuotasCubiertas.add(
                     CuotaCubierta(
@@ -720,10 +721,15 @@ fun RegistrarPagoScreen(
                                 }
                                 else -> {
                                     val nums = distribucion.cuotasCubiertas.map { it.numeroCuota }
+                                    val ultima = distribucion.cuotasCubiertas.last()
+                                    val sufijo = if (!ultima.completada)
+                                        " + #${ultima.numeroCuota} parcial (L. ${"%.2f".format(ultima.montoAplicado)})"
+                                    else ""
+
                                     if (nums.size <= 3)
-                                        "Cuotas ${nums.joinToString(", ") { "#$it" }}"
+                                        "Cuotas ${nums.dropLast(if (!ultima.completada) 1 else 0).joinToString(", ") { "#$it" }}$sufijo"
                                     else
-                                        "Cuotas #${nums.first()} a #${nums.last()} (${nums.size} cuotas)"
+                                        "Cuotas #${nums.first()} a #${nums.dropLast(1).last()} + ${if (!ultima.completada) "#${ultima.numeroCuota} parcial (L. ${"%.2f".format(ultima.montoAplicado)})" else "#${ultima.numeroCuota}"}"
                                 }
                             }
 
@@ -737,10 +743,14 @@ fun RegistrarPagoScreen(
                                 }
                                 else -> {
                                     val nums = distribucion.cuotasCubiertas.map { it.numeroCuota }
-                                    if (nums.size <= 3)
-                                        nums.joinToString(", ") { "#$it" }
+                                    val ultima = distribucion.cuotasCubiertas.last()
+                                    val completadas = if (!ultima.completada) nums.dropLast(1) else nums
+                                    val parcialSufijo = if (!ultima.completada) ", #${ultima.numeroCuota}*" else ""
+
+                                    if (completadas.size <= 3)
+                                        completadas.joinToString(", ") { "#$it" } + parcialSufijo
                                     else
-                                        "#${nums.first()}-#${nums.last()}"
+                                        "#${completadas.first()}-#${completadas.last()}$parcialSufijo"
                                 }
                             }
 
