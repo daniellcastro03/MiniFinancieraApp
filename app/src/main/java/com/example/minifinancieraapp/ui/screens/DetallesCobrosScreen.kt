@@ -156,30 +156,18 @@ fun DetalleCobrosScreen(navController: NavController, cobrador: String) {
 
                                     if (moraExtra > 0) {
                                         Spacer(Modifier.height(8.dp))
-                                        Text("⚠️ Mora detectada: L. %.2f".format(moraExtra), color = MaterialTheme.colorScheme.error)
-                                        Button(
-                                            onClick = {
-                                                scope.launch {
-                                                    val nuevoSaldo = prestamo.saldo + moraExtra
-                                                    db.collection("prestamos").document(prestamo.id)
-                                                        .update(
-                                                            mapOf(
-                                                                "saldo" to nuevoSaldo,
-                                                                "moraAplicada" to true
-                                                            )
-                                                        ).await()
-                                                    Toast.makeText(context, "✅ Mora aplicada correctamente", Toast.LENGTH_SHORT).show()
-                                                    prestamos = prestamos.map {
-                                                        if (it.id == prestamo.id)
-                                                            it.copy(saldo = nuevoSaldo, moraAplicada = true)
-                                                        else it
-                                                    }
-                                                }
-                                            },
-                                            enabled = !prestamo.moraAplicada
-                                        ) {
-                                            Text("Aplicar mora de L. %.2f".format(moraExtra))
-                                        }
+                                        Text(
+                                            "⚠️ Mora detectada: L. %.2f".format(moraExtra),
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                        // ℹ️ El sistema de moras se gestiona desde la pantalla
+                                        // de Cobros (NotificacionesScreen) para mantener
+                                        // consistencia con saldo, totalPagar, saldoOriginal, etc.
+                                        Text(
+                                            "Para aplicar mora, accede a la pantalla de Cobros.",
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
                                 }
                             }

@@ -1,5 +1,3 @@
-package com.example.capitalexpressapp.ui.screens
-
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -70,10 +68,10 @@ data class NotificacionCobroCascada(
     val totalCuotas: Int = 1,
     val cuotasCompletadas: Int = 0,
     val numeroPrestamo: String = "N/D",
-    // ── NUEVO: datos para segunda mora ──────────────────────────────────
     val tieneMoraActiva: Boolean = false,
     val cantidadMorasAplicadas: Int = 0,
-    val saldoOriginal: Double = 0.0,
+    // ✅ totalPagar del préstamo — base fija para calcular mora
+    val totalPagarOriginal: Double = 0.0,
     val fechaUltimaMora: Date? = null
 )
 
@@ -240,15 +238,22 @@ suspend fun procesarPrestamoUltraOptimizado(
         val saldoPendiente = doc.getDouble("saldo") ?: 0.0
         val cuotaEstimada  = doc.getDouble("cuota") ?: 0.0
         val montoPagado    = doc.getDouble("montoPagado") ?: 0.0
-        val totalAPagar    = doc.getDouble("totalPagar") ?: 0.0
-        if (saldoPendiente <= 0.01 && montoPagado >= totalAPagar - 0.01) return null
 
-        // ── NUEVO: leer datos de mora ───────────────────────────────────────
-        val moraActual        = doc.getDouble("mora") ?: 0.0
-        val tieneMoraActiva   = moraActual > 0.0
-        val morasAplicadas    = (doc.get("morasAplicadas") as? List<*>)?.size ?: 0
-        val saldoOriginalDoc  = doc.getDouble("saldoOriginal") ?: saldoPendiente
-        val fechaUltimaMora   = doc.getTimestamp("fechaUltimaMora")?.toDate()
+        // ✅ totalPagar: base fija para la fórmula de mora
+        // Se lee directamente del documento; si no existe se reconstruye como monto+interés
+        val montoPrestamo  = doc.getDouble("monto") ?: 0.0
+        val interesTotal   = doc.getDouble("interesTotal")
+            ?: doc.getDouble("interes") ?: 0.0
+        val totalPagar     = doc.getDouble("totalPagar")
+            ?: (montoPrestamo + interesTotal)
+
+        if (saldoPendiente <= 0.01 && montoPagado >= totalPagar - 0.01) return null
+
+        // Datos de mora
+        val moraActual      = doc.getDouble("mora") ?: 0.0
+        val tieneMoraActiva = moraActual > 0.0
+        val morasAplicadas  = (doc.get("morasAplicadas") as? List<*>)?.size ?: 0
+        val fechaUltimaMora = doc.getTimestamp("fechaUltimaMora")?.toDate()
 
         val pagosDelPrestamo = pagosCache[prestamoId] ?: emptyList()
         val montoPorCuota    = mutableMapOf<Int, Double>()
@@ -307,24 +312,8 @@ suspend fun procesarPrestamoUltraOptimizado(
             else                       -> addOneInterval(fechaInicio, plazo)
         }
 
-        // ── NUEVO: calcular días desde la última mora aplicada (o desde fecha normal) ──
-        // Si hay mora activa, los días de "retraso" se cuentan desde la fecha de la última mora
-        // para que al aplicar una nueva mora se reinicie a 0
-        val fechaReferenciaParaDias = if (tieneMoraActiva && fechaUltimaMora != null) {
-            fechaUltimaMora
-        } else {
-            fechaProximaCuotaDate
-        }
-
         val fechaProximaCuota = fmtFecha.format(fechaProximaCuotaDate)
-        // diasHastaProximo: días desde HOY hasta la próxima cuota (negativo = atrasado)
         val diasHastaProximo  = daysBetween(Date(), fechaProximaCuotaDate)
-        // diasDesdeMora: días desde que se aplicó la última mora (para calcular nueva mora)
-        val diasDesdeMora = if (tieneMoraActiva && fechaUltimaMora != null) {
-            daysBetween(fechaUltimaMora, Date())
-        } else {
-            -diasHastaProximo.coerceAtMost(0)
-        }
 
         val (tipo, estadoFinal) = when {
             estadoDoc.equals("inactivo", ignoreCase = true) -> "inactivo" to "inactivo"
@@ -336,25 +325,25 @@ suspend fun procesarPrestamoUltraOptimizado(
         }
 
         NotificacionCobroCascada(
-            cliente             = cliente,
-            montoSaldoPendiente = saldoPendiente,
-            fechaProximaCuota   = fechaProximaCuota,
-            tipo                = tipo,
-            prestamoId          = prestamoId,
-            plazo               = plazo,
-            diferenciaDias      = diasHastaProximo,
-            estado              = estadoFinal,
-            ultimoPago          = ultimoPagoRealDate?.let { fmtFechaHora.format(it) }
+            cliente                = cliente,
+            montoSaldoPendiente    = saldoPendiente,
+            fechaProximaCuota      = fechaProximaCuota,
+            tipo                   = tipo,
+            prestamoId             = prestamoId,
+            plazo                  = plazo,
+            diferenciaDias         = diasHastaProximo,
+            estado                 = estadoFinal,
+            ultimoPago             = ultimoPagoRealDate?.let { fmtFechaHora.format(it) }
                 ?: obtenerUltimoPagoOptimizado(doc),
-            proximaCuotaNumero  = proximaCuotaNumero,
-            totalCuotas         = cuotasNum,
-            cuotasCompletadas   = cuotasCompletadas,
-            numeroPrestamo      = numeroPrestamo,
-            // ── NUEVO ──────────────────────────────────────────────────────
-            tieneMoraActiva     = tieneMoraActiva,
+            proximaCuotaNumero     = proximaCuotaNumero,
+            totalCuotas            = cuotasNum,
+            cuotasCompletadas      = cuotasCompletadas,
+            numeroPrestamo         = numeroPrestamo,
+            tieneMoraActiva        = tieneMoraActiva,
             cantidadMorasAplicadas = morasAplicadas,
-            saldoOriginal       = saldoOriginalDoc,
-            fechaUltimaMora     = fechaUltimaMora
+            // ✅ totalPagar sin moras acumuladas = base fija para calcular mora
+            totalPagarOriginal     = totalPagar,
+            fechaUltimaMora        = fechaUltimaMora
         )
     } catch (e: Exception) {
         Log.e("Notif", "Error en ${doc.id}: ${e.message}", e)
@@ -381,15 +370,13 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
     var filtroTipo    by rememberSaveable { mutableStateOf("Todos") }
     var textoBusqueda by rememberSaveable { mutableStateOf("") }
 
-    var mostrarDialogoMora by remember { mutableStateOf(false) }
-    var clienteMora        by remember { mutableStateOf("") }
-    var prestamoIdMora     by remember { mutableStateOf("") }
-    var moraCalculada      by remember { mutableStateOf("") }
-    var diasMora           by remember { mutableStateOf(0) }
-    var montoPrestamo      by remember { mutableStateOf(0.0) }
-    // ── NUEVO ──────────────────────────────────────────────────────────────
-    var esSegundaMora      by remember { mutableStateOf(false) }
-    var saldoOriginalMora  by remember { mutableStateOf(0.0) }
+    var mostrarDialogoMora  by remember { mutableStateOf(false) }
+    var clienteMora         by remember { mutableStateOf("") }
+    var prestamoIdMora      by remember { mutableStateOf("") }
+    var moraCalculada       by remember { mutableStateOf("") }
+    var diasMora            by remember { mutableStateOf(0) }
+    var totalPagarMora      by remember { mutableStateOf(0.0) }
+    var esSegundaMora       by remember { mutableStateOf(false) }
 
     // ─── CARGA ───────────────────────────────────────────────────────────
     suspend fun cargarNotificaciones() {
@@ -790,14 +777,13 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                                     context       = context,
                                     navController = navController,
                                     db            = db,
-                                    onAplicarMora = { pid, cli, mora, esSeg, saldOrig, dias ->
-                                        prestamoIdMora     = pid
-                                        clienteMora        = cli
-                                        moraCalculada      = mora
-                                        diasMora           = dias
-                                        montoPrestamo      = notif.montoSaldoPendiente
-                                        esSegundaMora      = esSeg
-                                        saldoOriginalMora  = saldOrig
+                                    onAplicarMora = { pid, cli, mora, esSeg, totalPagar, dias ->
+                                        prestamoIdMora  = pid
+                                        clienteMora     = cli
+                                        moraCalculada   = mora
+                                        diasMora        = dias
+                                        totalPagarMora  = totalPagar
+                                        esSegundaMora   = esSeg
                                         mostrarDialogoMora = true
                                     }
                                 )
@@ -809,15 +795,14 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
         }
     }
 
-    // ── Diálogo mora — fuera del Scaffold para que flote sobre todo ───────
+    // ── Diálogo mora ─────────────────────────────────────────────────────
     if (mostrarDialogoMora) {
         DialogoAplicarMora(
             cliente       = clienteMora,
             moraSugerida  = moraCalculada,
             diasMora      = diasMora,
-            montoPrestamo = montoPrestamo,
+            totalPagar    = totalPagarMora,
             esSegundaMora = esSegundaMora,
-            saldoOriginal = saldoOriginalMora,
             onDismiss     = { mostrarDialogoMora = false },
             onConfirmar   = { montoMora ->
                 scope.launch {
@@ -828,26 +813,20 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                             Toast.makeText(context, "Préstamo eliminado", Toast.LENGTH_SHORT).show()
                             return@launch
                         }
-                        val saldoActual    = doc.getDouble("saldo") ?: 0.0
-                        val morasAplicadas = (doc.get("morasAplicadas") as? List<*>)
+                        val saldoActual      = doc.getDouble("saldo") ?: 0.0
+                        val totalPagarActual = doc.getDouble("totalPagar") ?: saldoActual
+                        val morasAplicadas   = (doc.get("morasAplicadas") as? List<*>)
                             ?.mapNotNull { it as? String } ?: emptyList()
 
-                        // ── NUEVO: guardar saldoOriginal si es la primera mora ───────────
-                        // En mora 2+, el saldoOriginal ya existe en Firestore y no se pisa
-                        val saldoOriginalGuardado = doc.getDouble("saldoOriginal")
                         val updateMap = mutableMapOf<String, Any>(
                             "saldo"                    to (saldoActual + montoMora),
+                            "totalPagar"               to (totalPagarActual + montoMora),
                             "mora"                     to montoMora,
                             "morasAplicadas"           to (morasAplicadas + "${clienteMora}_${System.currentTimeMillis()}"),
                             "estado"                   to "mora",
                             "fechaUltimaActualizacion" to Timestamp.now(),
-                            // ── NUEVO: timestamp de cuándo se aplicó esta mora ───────────
                             "fechaUltimaMora"          to Timestamp.now()
                         )
-                        // Guardar saldoOriginal solo la primera vez
-                        if (saldoOriginalGuardado == null) {
-                            updateMap["saldoOriginal"] = saldoActual
-                        }
                         ref.update(updateMap).await()
 
                         Toast.makeText(
@@ -973,8 +952,7 @@ private fun NotifCard(
     context: Context,
     navController: NavHostController,
     db: FirebaseFirestore,
-    // ── NUEVO: parámetro ampliado ──────────────────────────────────────────
-    onAplicarMora: (pid: String, cli: String, mora: String, esSegunda: Boolean, saldOrig: Double, dias: Int) -> Unit
+    onAplicarMora: (pid: String, cli: String, mora: String, esSegunda: Boolean, totalPagar: Double, dias: Int) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val dec   = DecimalFormat("#,##0.00")
@@ -1207,26 +1185,19 @@ private fun NotifCard(
                             Icon(Icons.Default.Message, contentDescription = "WhatsApp", modifier = Modifier.size(16.dp))
                         }
 
-                        // ── Botón Mora — visible para CUALQUIER día vencido (< 0) ─────────
-                        // NUEVO: siempre disponible cuando hay días vencidos (admin o cobrador)
-                        // Calcula días desde la última mora si ya existe, o desde el vencimiento
-                        if ((rol == "admin" || rol == "cobrador") && notif.diferenciaDias < 0) {
+                        // ── Botón Mora ────────────────────────────────────────────
+                        if ((rol == "admin" || rol == "cobrador") &&
+                            (notif.diferenciaDias < 0 || notif.tieneMoraActiva)) {
 
-                            // ── NUEVO: días desde la última mora si ya se aplicó una ────────
                             val diasParaMora = if (notif.tieneMoraActiva && notif.fechaUltimaMora != null) {
-                                // Reinicio: contar desde la fecha de la última mora aplicada
                                 daysBetween(notif.fechaUltimaMora, Date()).coerceAtLeast(0)
                             } else {
-                                -notif.diferenciaDias  // días de atraso normales
+                                -notif.diferenciaDias
                             }
 
-                            // ── NUEVO: siempre del saldo original ───────────────────────────
-                            val saldoBase = if (notif.saldoOriginal > 0) notif.saldoOriginal
-                            else notif.montoSaldoPendiente
-
-                            // 0.5% del saldo ORIGINAL por cada día desde la última mora
+                            // ✅ FÓRMULA CORRECTA: totalPagar × 0.5% × días de mora
                             val moraSugerida = "%.2f".format(
-                                saldoBase * 0.005 * diasParaMora.coerceAtLeast(1)
+                                notif.totalPagarOriginal * 0.005 * diasParaMora.coerceAtLeast(1)
                             )
 
                             val esSeg = notif.cantidadMorasAplicadas > 0
@@ -1238,7 +1209,7 @@ private fun NotifCard(
                                         notif.cliente,
                                         moraSugerida,
                                         esSeg,
-                                        saldoBase,
+                                        notif.totalPagarOriginal,
                                         diasParaMora
                                     )
                                 },
@@ -1365,18 +1336,15 @@ private fun EstadoVacio() {
 }
 
 // ─────────────────────────────────────────────
-//  DIÁLOGO MORA  (ACTUALIZADO)
+//  DIÁLOGO MORA
 // ─────────────────────────────────────────────
 @Composable
 fun DialogoAplicarMora(
     cliente: String,
     moraSugerida: String,
     diasMora: Int,
-    montoPrestamo: Double,
-    // ── NUEVO ──────────────────────────────────
+    totalPagar: Double,
     esSegundaMora: Boolean,
-    saldoOriginal: Double,
-    // ───────────────────────────────────────────
     onDismiss: () -> Unit,
     onConfirmar: (Double) -> Unit
 ) {
@@ -1397,7 +1365,6 @@ fun DialogoAplicarMora(
                     tint = NC.Red, modifier = Modifier.size(22.dp))
                 Column {
                     Text("Aplicar mora", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    // ── NUEVO: indicador de segunda mora ─────────────────────────
                     if (esSegundaMora) {
                         Text(
                             "⚠️ Ya existe una mora previa aplicada",
@@ -1412,7 +1379,6 @@ fun DialogoAplicarMora(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
 
-                // ── NUEVO: Banner de segunda mora ────────────────────────────────
                 if (esSegundaMora) {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = NC.OrangeSoft),
@@ -1423,14 +1389,10 @@ fun DialogoAplicarMora(
                                 verticalAlignment     = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Icon(
-                                    Icons.Default.Info,
-                                    contentDescription = null,
-                                    tint     = NC.Orange,
-                                    modifier = Modifier.size(16.dp)
-                                )
+                                Icon(Icons.Default.Info, contentDescription = null,
+                                    tint = NC.Orange, modifier = Modifier.size(16.dp))
                                 Text(
-                                    "Segunda mora aplicada",
+                                    "Mora adicional",
                                     fontWeight = FontWeight.Bold,
                                     color      = NC.Orange,
                                     fontSize   = 13.sp
@@ -1438,14 +1400,14 @@ fun DialogoAplicarMora(
                             }
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                "Los días se cuentan desde la última mora aplicada (reinicio a 0). " +
-                                        "El porcentaje siempre se calcula sobre el saldo original del préstamo.",
+                                "Los días se cuentan desde la última mora aplicada. " +
+                                        "La base siempre es el total a pagar del préstamo.",
                                 fontSize = 12.sp,
                                 color    = Color(0xFFB45309)
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                "Saldo original: L. ${dec.format(saldoOriginal)}",
+                                "Total a pagar (base): L. ${dec.format(totalPagar)}",
                                 fontSize   = 12.sp,
                                 color      = NC.Orange,
                                 fontWeight = FontWeight.SemiBold
@@ -1454,7 +1416,7 @@ fun DialogoAplicarMora(
                     }
                 }
 
-                // ── Info cliente + días ───────────────────────────────────
+                // Info cliente + días
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1487,15 +1449,13 @@ fun DialogoAplicarMora(
                     }
                 }
 
-                // ── Fórmula informativa ───────────────────────────────────
-                val baseParaFormula = if (saldoOriginal > 0) saldoOriginal else montoPrestamo
+                // ✅ Fórmula correcta: totalPagar × 0.5% × días
                 Text(
-                    "Cálculo: Saldo original (L. ${dec.format(baseParaFormula)}) × 0.5% × $diasMora días = L. ${"%.2f".format(moraCalculadaRef)}",
+                    "Cálculo: Total a pagar (L. ${dec.format(totalPagar)}) × 0.5% × $diasMora días = L. ${"%.2f".format(moraCalculadaRef)}",
                     fontSize = 11.sp,
                     color    = NC.TextMuted
                 )
 
-                // ── Campo editable ────────────────────────────────────────
                 OutlinedTextField(
                     value           = moraTexto,
                     onValueChange   = { moraTexto = it },
@@ -1540,11 +1500,7 @@ fun DialogoAplicarMora(
                 colors = ButtonDefaults.buttonColors(containerColor = NC.Red),
                 shape  = RoundedCornerShape(10.dp)
             ) {
-                Icon(
-                    Icons.Default.Warning,
-                    contentDescription = null,
-                    modifier           = Modifier.size(16.dp)
-                )
+                Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("Aplicar mora", fontWeight = FontWeight.Bold)
             }

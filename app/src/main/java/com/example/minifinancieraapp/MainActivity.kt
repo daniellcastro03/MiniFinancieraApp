@@ -1,5 +1,6 @@
 package com.example.capitalexpressapp
 
+import NotificacionesScreen
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -22,7 +23,6 @@ import com.example.capitalexpressapp.ui.screens.HistorialPagosPrestamoScreen
 import com.example.capitalexpressapp.ui.screens.HistorialPagosScreen
 import com.example.capitalexpressapp.ui.screens.HistorialPrestamosScreen
 import com.example.capitalexpressapp.ui.screens.LoginScreen
-import com.example.capitalexpressapp.ui.screens.NotificacionesScreen
 import com.example.capitalexpressapp.ui.screens.PerfilClienteScreen
 import com.example.capitalexpressapp.ui.screens.PrestamoAdminScreen
 import com.example.capitalexpressapp.ui.screens.ReporteClientesScreen

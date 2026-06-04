@@ -448,10 +448,9 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                         scope.launch {
                             try {
                                 withContext(Dispatchers.IO) {
-                                    val ref = db.collection("prestamos").document(prestamoId)
+                                    val ref  = db.collection("prestamos").document(prestamoId)
                                     val snap = ref.get().await()
 
-                                    val saldoActual = snap.getDouble("saldo") ?: 0.0
                                     val moraGuardada = snap.getDouble("mora") ?: 0.0
 
                                     if (moraGuardada <= 0.0) {
@@ -461,25 +460,50 @@ fun CuotasPrestamoScreen(prestamoId: String, navController: NavController, uid: 
                                         return@withContext
                                     }
 
-                                    // Restar mora del saldo actual
-                                    val nuevoSaldo = (saldoActual - moraGuardada).coerceAtLeast(0.0)
+                                    // ✅ FIX: recalcular saldo REAL desde colección de pagos
+                                    // En vez de confiar en snap.saldo (puede estar inconsistente),
+                                    // sumamos todos los pagos reales y calculamos contra totalPagar SIN mora
+                                    val pagosSnap = db.collection("pagos")
+                                        .whereEqualTo("prestamoId", prestamoId)
+                                        .get().await()
+
+                                    var totalRealPagado = 0.0
+                                    for (pago in pagosSnap.documents) {
+                                        totalRealPagado += (pago.getDouble("monto") ?: 0.0) +
+                                                (pago.getDouble("mora") ?: 0.0)
+                                    }
+
+                                    // totalPagarSinMora: restaurar totalPagar al valor sin mora
+                                    val totalPagarConMora = snap.getDouble("totalPagar") ?: 0.0
+                                    val totalPagarSinMora = (totalPagarConMora - moraGuardada).coerceAtLeast(0.0)
+
+                                    // Saldo real = lo que queda por pagar SIN mora
+                                    val nuevoSaldo = (totalPagarSinMora - totalRealPagado).coerceAtLeast(0.0)
+
                                     val morasAplicadasActual = (snap.get("morasAplicadas") as? List<*>)
                                         ?.mapNotNull { it as? String } ?: emptyList()
-                                    // Quitar la última mora de la lista
                                     val morasActualizadas = if (morasAplicadasActual.isNotEmpty())
-                                        morasAplicadasActual.dropLast(1) else emptyList()
+                                        morasAplicadasActual.dropLast(1) else emptyList<String>()
 
-                                    ref.update(
-                                        mapOf(
-                                            "mora"                     to 0.0,
-                                            "saldo"                    to nuevoSaldo,
-                                            "morasAplicadas"           to morasActualizadas,
-                                            "estado"                   to "activo",
-                                            "fechaUltimaActualizacion" to Timestamp.now(),
-                                            // Limpiar fecha de mora para reiniciar contador
-                                            "fechaUltimaMora"          to com.google.firebase.firestore.FieldValue.delete()
-                                        )
-                                    ).await()
+                                    // Si ya no quedan moras → estado activo; si quedan → mora
+                                    val nuevoEstado = if (morasActualizadas.isEmpty()) "activo" else "mora"
+
+                                    val updateData = mutableMapOf<String, Any>(
+                                        "mora"                     to 0.0,
+                                        "saldo"                    to nuevoSaldo,
+                                        "totalPagar"               to totalPagarSinMora, // ✅ restaurar totalPagar
+                                        "morasAplicadas"           to morasActualizadas,
+                                        "estado"                   to nuevoEstado,
+                                        "fechaUltimaActualizacion" to Timestamp.now(),
+                                        "fechaUltimaMora"          to com.google.firebase.firestore.FieldValue.delete()
+                                    )
+                                    // ✅ FIX: limpiar saldoOriginal para que la próxima mora
+                                    // use el saldo correcto como base, no uno desactualizado
+                                    if (morasActualizadas.isEmpty()) {
+                                        updateData["saldoOriginal"] = com.google.firebase.firestore.FieldValue.delete()
+                                    }
+
+                                    ref.update(updateData).await()
 
                                     withContext(Dispatchers.Main) {
                                         Toast.makeText(
