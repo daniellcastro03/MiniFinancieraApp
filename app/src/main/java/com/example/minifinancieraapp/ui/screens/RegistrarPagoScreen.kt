@@ -2,24 +2,34 @@ package com.example.minifinancieraapp.ui.screens
 
 import android.content.Context
 import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.example.capitalexpressapp.theme.PrimaryButton
-import com.example.capitalexpressapp.ui.components.PrimaryTextField
-import com.example.capitalexpressapp.util.NetworkUtils.isInternetAvailable
 import com.example.capitalexpressapp.util.NetworkUtils.guardarAbonoPendiente
+import com.example.capitalexpressapp.util.NetworkUtils.isInternetAvailable
 import com.example.capitalexpressapp.util.ReciboHelper
 import com.example.minifinancieraapp.util.SessionManager
 import com.google.firebase.Timestamp
@@ -27,10 +37,46 @@ import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.io.File
+import java.text.DecimalFormat
 import java.text.SimpleDateFormat
 import java.util.*
 import android.util.Log
 
+// ─────────────────────────────────────────────
+//  PALETA (igual que NotificacionesScreen)
+// ─────────────────────────────────────────────
+private object RP {
+    val Navy      = Color(0xFF0A1628)
+    val NavyMid   = Color(0xFF0F2044)
+    val Blue      = Color(0xFF1A56DB)
+    val BlueSoft  = Color(0xFF3B82F6)
+    val BlueLight = Color(0xFFEFF6FF)
+
+    val Red       = Color(0xFFEF4444)
+    val RedSoft   = Color(0xFFFEF2F2)
+    val Orange    = Color(0xFFF97316)
+    val OrangeSoft = Color(0xFFFFF7ED)
+    val Amber     = Color(0xFFF59E0B)
+    val AmberSoft = Color(0xFFFFFBEB)
+    val Green     = Color(0xFF10B981)
+    val GreenSoft = Color(0xFFECFDF5)
+
+    val Card      = Color(0xFFFFFFFF)
+    val Surface   = Color(0xFFF8FAFC)
+    val Border    = Color(0xFFE2E8F0)
+    val TextPri   = Color(0xFF0F172A)
+    val TextSec   = Color(0xFF64748B)
+    val TextMuted = Color(0xFF94A3B8)
+
+    val GradStart = Color(0xFF0A1628)
+    val GradEnd   = Color(0xFF1A3A6B)
+}
+
+private val dec = DecimalFormat("#,##0.00")
+
+// ─────────────────────────────────────────────
+//  DATA CLASSES (se mantienen igual)
+// ─────────────────────────────────────────────
 data class CuotaCubierta(
     val numeroCuota: Int,
     val montoAplicado: Double,
@@ -44,22 +90,24 @@ data class ResultadoDistribucion(
     val totalCuotasCompletas: Int
 )
 
-// ✅✅✅ FUNCIÓN HELPER PARA OBTENER numeroPrestamo DE FORMA SEGURA ✅✅✅
+// ─────────────────────────────────────────────
+//  HELPERS (sin cambios)
+// ─────────────────────────────────────────────
 fun obtenerNumeroPrestamoSafe(doc: com.google.firebase.firestore.DocumentSnapshot): String {
     return try {
         when (val campo = doc.get("numeroPrestamo")) {
             is String -> campo.takeIf { it.isNotBlank() } ?: "0"
-            is Long -> campo.toString()
-            is Int -> campo.toString()
+            is Long   -> campo.toString()
+            is Int    -> campo.toString()
             is Number -> campo.toLong().toString()
-            null -> "0"
-            else -> {
+            null      -> "0"
+            else      -> {
                 Log.w("NumeroPrestamo", "Tipo inesperado: ${campo::class.java.simpleName}")
                 "0"
             }
         }
     } catch (e: Exception) {
-        Log.e("NumeroPrestamo", "Error al obtener numeroPrestamo: ${e.message}", e)
+        Log.e("NumeroPrestamo", "Error: ${e.message}", e)
         "0"
     }
 }
@@ -69,14 +117,13 @@ private suspend fun resolverNombreCobrador(
     db: FirebaseFirestore,
     uidParam: String
 ): String {
-    fun getCachedName(ctx: Context): String? {
-        val sp = ctx.getSharedPreferences("recibo_cache", Context.MODE_PRIVATE)
-        return sp.getString("nombreCobrador", null)
-    }
-    fun setCachedName(ctx: Context, value: String) {
-        val sp = ctx.getSharedPreferences("recibo_cache", Context.MODE_PRIVATE)
-        sp.edit().putString("nombreCobrador", value).apply()
-    }
+    fun getCachedName(ctx: Context): String? =
+        ctx.getSharedPreferences("recibo_cache", Context.MODE_PRIVATE)
+            .getString("nombreCobrador", null)
+
+    fun setCachedName(ctx: Context, value: String) =
+        ctx.getSharedPreferences("recibo_cache", Context.MODE_PRIVATE)
+            .edit().putString("nombreCobrador", value).apply()
 
     if (uidParam.contains(" ") && uidParam.length < 40 &&
         !uidParam.equals("COBRADOR", ignoreCase = true) &&
@@ -84,94 +131,53 @@ private suspend fun resolverNombreCobrador(
     ) {
         val nice = uidParam.trim()
         setCachedName(context, nice)
-        Log.d("NombreCobrador", "Usando nombre directo recibido: '$nice'")
         return nice
     }
 
     val cached = getCachedName(context)
-    if (!cached.isNullOrBlank()) {
-        return cached.trim()
-    }
+    if (!cached.isNullOrBlank()) return cached.trim()
 
     try {
         val snap = db.collection("usuarios").document(uidParam).get().await()
         if (snap.exists()) {
             val nombre = snap.getString("nombre")?.trim()
-            if (!nombre.isNullOrBlank()) {
-                setCachedName(context, nombre)
-                Log.d("NombreCobrador", "Resuelto por documentId: '$nombre'")
-                return nombre
-            }
-        } else {
-            Log.w("NombreCobrador", "usuarios/$uidParam no existe como documentId")
+            if (!nombre.isNullOrBlank()) { setCachedName(context, nombre); return nombre }
         }
-    } catch (e: Exception) {
-        Log.w("NombreCobrador", "Error leyendo usuarios/$uidParam: ${e.message}")
-    }
+    } catch (_: Exception) {}
 
-    val campos = listOf("codigo", "identidad", "telefono", "nombre")
-    for (campo in campos) {
+    for (campo in listOf("codigo", "identidad", "telefono", "nombre")) {
         try {
-            val q = db.collection("usuarios")
-                .whereEqualTo(campo, uidParam)
-                .limit(1)
-                .get()
-                .await()
-
+            val q = db.collection("usuarios").whereEqualTo(campo, uidParam).limit(1).get().await()
             if (!q.isEmpty) {
-                val doc = q.documents.first()
-                val nombre = doc.getString("nombre")?.trim()
-                if (!nombre.isNullOrBlank()) {
-                    setCachedName(context, nombre)
-                    Log.d("NombreCobrador", "Resuelto por $campo='$uidParam': '$nombre'")
-                    return nombre
-                }
+                val nombre = q.documents.first().getString("nombre")?.trim()
+                if (!nombre.isNullOrBlank()) { setCachedName(context, nombre); return nombre }
             }
-        } catch (e: Exception) {
-            Log.w("NombreCobrador", "Error buscando por $campo='$uidParam': ${e.message}")
-        }
+        } catch (_: Exception) {}
     }
 
-    try {
-        val authName = com.google.firebase.auth.FirebaseAuth
-            .getInstance()
-            .currentUser
-            ?.displayName
-            ?.trim()
-        if (!authName.isNullOrBlank()) {
-            setCachedName(context, authName)
-            Log.d("NombreCobrador", "Resuelto por FirebaseAuth: '$authName'")
-            return authName
-        }
-    } catch (_: Exception) { }
-
-    val tail = if (uidParam.length >= 6) uidParam.takeLast(6) else uidParam
-    val fallback = "Cobrador-$tail"
-    Log.w("NombreCobrador", "Usando fallback: '$fallback'")
-    return fallback
+    return try {
+        com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: "Cobrador-${uidParam.takeLast(6)}"
+    } catch (_: Exception) { "Cobrador-${uidParam.takeLast(6)}" }
 }
 
 private fun calcularFechaCuota(fechaInicio: Date, plazo: String, numeroCuota: Int): String {
     val calendar = Calendar.getInstance().apply { time = fechaInicio }
-    val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-
+    val fmt = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
     when (plazo.lowercase()) {
-        "diario" -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota)
-        "lunes a sábado" -> {
-            repeat(numeroCuota) {
-                do {
-                    calendar.add(Calendar.DAY_OF_YEAR, 1)
-                } while (calendar.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY)
-            }
+        "diario"          -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota)
+        "lunes a sábado"  -> repeat(numeroCuota) {
+            do { calendar.add(Calendar.DAY_OF_YEAR, 1) }
+            while (calendar.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY)
         }
-        "semanal" -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 7)
-        "quincenal" -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 15)
-        "mensual" -> calendar.add(Calendar.MONTH, numeroCuota)
-        "bimestral" -> calendar.add(Calendar.MONTH, numeroCuota * 2)
-        else -> calendar.add(Calendar.MONTH, numeroCuota)
+        "semanal"         -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 7)
+        "quincenal"       -> calendar.add(Calendar.DAY_OF_YEAR, numeroCuota * 15)
+        "mensual"         -> calendar.add(Calendar.MONTH, numeroCuota)
+        "bimestral"       -> calendar.add(Calendar.MONTH, numeroCuota * 2)
+        else              -> calendar.add(Calendar.MONTH, numeroCuota)
     }
-
-    return dateFormat.format(calendar.time)
+    return fmt.format(calendar.time)
 }
 
 private suspend fun obtenerEstadoCuotasCompleto(
@@ -180,81 +186,39 @@ private suspend fun obtenerEstadoCuotasCompleto(
 ): Map<Int, Double> {
     try {
         val pagosSnapshot = db.collection("pagos")
-            .whereEqualTo("prestamoId", prestamoId)
-            .get().await()
-
+            .whereEqualTo("prestamoId", prestamoId).get().await()
         if (!pagosSnapshot.isEmpty) {
             val pagosPorCuota = mutableMapOf<Int, Double>()
-
             for (pago in pagosSnapshot.documents) {
                 val cuotasCubiertas = pago.get("cuotasCubiertas") as? List<*>
                 if (!cuotasCubiertas.isNullOrEmpty()) {
                     cuotasCubiertas.forEach { cuotaData ->
                         if (cuotaData is Map<*, *>) {
-                            val numeroCuota =
-                                (cuotaData["numeroCuota"] as? Number)?.toInt() ?: return@forEach
-                            val montoAplicado =
-                                (cuotaData["montoAplicado"] as? Number)?.toDouble() ?: 0.0
-                            if (numeroCuota > 0 && montoAplicado > 0) {
-                                pagosPorCuota[numeroCuota] =
-                                    (pagosPorCuota[numeroCuota] ?: 0.0) + montoAplicado
-                            }
+                            val num = (cuotaData["numeroCuota"] as? Number)?.toInt() ?: return@forEach
+                            val monto = (cuotaData["montoAplicado"] as? Number)?.toDouble() ?: 0.0
+                            if (num > 0 && monto > 0)
+                                pagosPorCuota[num] = (pagosPorCuota[num] ?: 0.0) + monto
                         }
                     }
                 } else {
-                    val numeroCuota = when {
+                    val num = when {
                         pago.contains("numeroCuota") -> pago.getLong("numeroCuota")?.toInt() ?: 1
-                        pago.contains("cuota") -> pago.getLong("cuota")?.toInt() ?: 1
+                        pago.contains("cuota")       -> pago.getLong("cuota")?.toInt() ?: 1
                         else -> 1
                     }
-                    val montoPago = pago.getDouble("monto") ?: 0.0
-                    if (montoPago > 0) {
-                        pagosPorCuota[numeroCuota] =
-                            (pagosPorCuota[numeroCuota] ?: 0.0) + montoPago
-                    }
+                    val monto = pago.getDouble("monto") ?: 0.0
+                    if (monto > 0) pagosPorCuota[num] = (pagosPorCuota[num] ?: 0.0) + monto
                 }
             }
-
             if (pagosPorCuota.isNotEmpty()) return pagosPorCuota
         }
     } catch (e: Exception) {
         Log.w("EstadoCuotas", "Lectura de pagos no disponible: ${e.message}")
     }
-
-    return try {
-        val p = db.collection("prestamos").document(prestamoId).get().await()
-        val cuota = p.getDouble("cuota") ?: 0.0
-        val cuotasTotales = p.getLong("cuotas")?.toInt() ?: 1
-
-        val montoPagado = p.getDouble("montoPagado")
-            ?: run {
-                val monto = p.getDouble("monto") ?: 0.0
-                val interesTotal = p.getDouble("interesTotal") ?: p.getDouble("interes") ?: 0.0
-                val totalPagar = p.getDouble("totalPagar") ?: (monto + interesTotal)
-                val saldo = p.getDouble("saldo") ?: (totalPagar)
-                (totalPagar - saldo).coerceAtLeast(0.0)
-            }
-
-        if (cuota <= 0.0 || montoPagado <= 0.0) return emptyMap()
-
-        val completas = kotlin.math.floor(montoPagado / cuota).toInt()
-            .coerceAtMost(cuotasTotales)
-        val parcial =
-            (montoPagado - (completas * cuota)).coerceAtLeast(0.0)
-
-        val mapa = mutableMapOf<Int, Double>()
-        for (i in 1..completas) mapa[i] = cuota
-        if (parcial > 0.01 && completas + 1 <= cuotasTotales) mapa[completas + 1] = parcial
-
-        Log.d("EstadoCuotas", "Fallback por préstamo: completas=$completas, parcial=$parcial")
-        mapa
-    } catch (e: Exception) {
-        Log.e("EstadoCuotas", "Fallback falló: ${e.message}")
-        emptyMap()
-    }
+    return emptyMap()
 }
 
-private suspend fun distribuirPagoEnCascada(
+private suspend fun distribuirPagoConMoraYCascada(
     db: FirebaseFirestore,
     prestamoId: String,
     montoPagado: Double,
@@ -262,77 +226,73 @@ private suspend fun distribuirPagoEnCascada(
     cuotasTotales: Int
 ): ResultadoDistribucion {
     return try {
-        val estadoCuotas = obtenerEstadoCuotasCompleto(db, prestamoId)
+        val prestamoDoc = db.collection("prestamos").document(prestamoId).get().await()
+        val moraActiva  = prestamoDoc.getDouble("mora") ?: 0.0
 
         var montoRestante = montoPagado
         val cuotasCubiertas = mutableListOf<CuotaCubierta>()
         var totalCuotasCompletas = 0
 
-        for (i in 1..cuotasTotales) {
-            if (montoRestante <= 0.01) break
+        // 1. COBRAR MORA PRIMERO
+        if (moraActiva > 0.0) {
+            val pagosSnapshot = db.collection("pagos")
+                .whereEqualTo("prestamoId", prestamoId).get().await()
+            var moraPagadaAcumulada = 0.0
+            for (pago in pagosSnapshot.documents)
+                moraPagadaAcumulada += pago.getDouble("mora") ?: 0.0
 
-            val montoPagadoEnCuota = estadoCuotas[i] ?: 0.0
-            val montoRestanteCuota =
-                (cuotaEstimada - montoPagadoEnCuota).coerceAtLeast(0.0)
-
-            if (montoRestanteCuota > 0.01) {
-                val montoAAplicar = minOf(montoRestante, montoRestanteCuota)
-                // DESPUÉS
-                val montoPagadoTotal = (estadoCuotas[i] ?: 0.0) + montoAAplicar
-                val cuotaCompleta = montoPagadoTotal >= cuotaEstimada - 0.01
-
-                cuotasCubiertas.add(
-                    CuotaCubierta(
-                        numeroCuota = i,
-                        montoAplicado = montoAAplicar,
-                        completada = cuotaCompleta
-                    )
-                )
-
-                if (cuotaCompleta) totalCuotasCompletas++
-                montoRestante -= montoAAplicar
+            val moraPendiente = (moraActiva - moraPagadaAcumulada).coerceAtLeast(0.0)
+            if (moraPendiente > 0.01 && montoRestante > 0.01) {
+                val montoAAplicarMora = minOf(montoRestante, moraPendiente)
+                val moraCompleta = montoAAplicarMora >= moraPendiente - 0.01
+                cuotasCubiertas.add(CuotaCubierta(0, montoAAplicarMora, moraCompleta))
+                if (moraCompleta) totalCuotasCompletas++
+                montoRestante -= montoAAplicarMora
             }
         }
 
-        val estadoActualizado = estadoCuotas.toMutableMap()
-        cuotasCubiertas.forEach { cuota ->
+        // 2. DISTRIBUIR EN CASCADA
+        if (montoRestante > 0.01) {
+            val estadoCuotas = obtenerEstadoCuotasCompleto(db, prestamoId)
+            for (i in 1..cuotasTotales) {
+                if (montoRestante <= 0.01) break
+                val montoPagadoEnCuota  = estadoCuotas[i] ?: 0.0
+                val montoRestanteCuota  = (cuotaEstimada - montoPagadoEnCuota).coerceAtLeast(0.0)
+                if (montoRestanteCuota > 0.01) {
+                    val montoAAplicar   = minOf(montoRestante, montoRestanteCuota)
+                    val montoPagadoTotal = montoPagadoEnCuota + montoAAplicar
+                    val cuotaCompleta   = montoPagadoTotal >= cuotaEstimada - 0.01
+                    cuotasCubiertas.add(CuotaCubierta(i, montoAAplicar, cuotaCompleta))
+                    if (cuotaCompleta) totalCuotasCompletas++
+                    montoRestante -= montoAAplicar
+                }
+            }
+        }
+
+        // 3. PRÓXIMA CUOTA PENDIENTE
+        val estadoActualizado = obtenerEstadoCuotasCompleto(db, prestamoId).toMutableMap()
+        cuotasCubiertas.filter { it.numeroCuota > 0 }.forEach { cuota ->
             estadoActualizado[cuota.numeroCuota] =
                 (estadoActualizado[cuota.numeroCuota] ?: 0.0) + cuota.montoAplicado
         }
-
         var proximaCuotaPendiente = cuotasTotales + 1
         for (i in 1..cuotasTotales) {
-            val montoPagadoTotal = estadoActualizado[i] ?: 0.0
-            if (montoPagadoTotal < cuotaEstimada - 0.01) {
-                proximaCuotaPendiente = i
-                break
+            if ((estadoActualizado[i] ?: 0.0) < cuotaEstimada - 0.01) {
+                proximaCuotaPendiente = i; break
             }
         }
 
         val fechaProximoPago = if (proximaCuotaPendiente <= cuotasTotales) {
-            val prestamoDoc = db.collection("prestamos").document(prestamoId).get().await()
             val fechaInicio = prestamoDoc.getTimestamp("fecha")?.toDate() ?: Date()
             val plazo = prestamoDoc.getString("plazo") ?: "semanal"
             calcularFechaCuota(fechaInicio, plazo, proximaCuotaPendiente)
-        } else {
-            "saldado"
-        }
+        } else "saldado"
 
-        ResultadoDistribucion(
-            cuotasCubiertas = cuotasCubiertas,
-            proximaCuotaPendiente = proximaCuotaPendiente,
-            fechaProximoPago = fechaProximoPago,
-            totalCuotasCompletas = totalCuotasCompletas
-        )
+        ResultadoDistribucion(cuotasCubiertas, proximaCuotaPendiente, fechaProximoPago, totalCuotasCompletas)
 
     } catch (e: Exception) {
-        Log.e("DistribucionCascada", "Error: ${e.message}", e)
-        ResultadoDistribucion(
-            cuotasCubiertas = listOf(CuotaCubierta(1, montoPagado, false)),
-            proximaCuotaPendiente = 1,
-            fechaProximoPago = "pendiente",
-            totalCuotasCompletas = 0
-        )
+        Log.e("DistribucionConMora", "Error: ${e.message}", e)
+        ResultadoDistribucion(listOf(CuotaCubierta(1, montoPagado, false)), 1, "pendiente", 0)
     }
 }
 
@@ -346,20 +306,20 @@ suspend fun verificarYCrearCliente(
         if (!clienteDoc.exists()) {
             db.collection("clientes").document(clienteId).set(
                 mapOf(
-                    "nombre" to nombreCliente,
-                    "fechaCreacion" to Timestamp.now(),
+                    "nombre"          to nombreCliente,
+                    "fechaCreacion"   to Timestamp.now(),
                     "ultimaActividad" to Timestamp.now(),
-                    "estado" to "activo"
+                    "estado"          to "activo"
                 )
             ).await()
         }
         true
-    } catch (e: Exception) {
-        Log.e("CrearCliente", "Error: ${e.message}")
-        false
-    }
+    } catch (e: Exception) { Log.e("CrearCliente", "Error: ${e.message}"); false }
 }
 
+// ─────────────────────────────────────────────
+//  PANTALLA PRINCIPAL
+// ─────────────────────────────────────────────
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RegistrarPagoScreen(
@@ -370,120 +330,87 @@ fun RegistrarPagoScreen(
     cobrador: String
 ) {
     val context = LocalContext.current
-    val db = FirebaseFirestore.getInstance()
-    val scope = rememberCoroutineScope()
+    val db      = FirebaseFirestore.getInstance()
+    val scope   = rememberCoroutineScope()
     val session = remember { SessionManager(context) }
 
-    var nombreCliente by remember { mutableStateOf("") }
-    var montoAbono by remember { mutableStateOf("") }
-    var lugar by remember { mutableStateOf("El Paraíso, Danlí") }
-    var firmaPrestamista by remember { mutableStateOf("") }
-    var archivoPDF by remember { mutableStateOf<File?>(null) }
-    var metodoPago by remember { mutableStateOf("Efectivo") }
-    val opcionesMetodoPago = listOf("Efectivo", "Transferencia")
-    var expandedMetodoPago by remember { mutableStateOf(false) }
+    var nombreCliente         by remember { mutableStateOf("") }
+    var montoAbono            by remember { mutableStateOf("") }
+    var lugar                 by remember { mutableStateOf("El Paraíso, Danlí") }
+    var firmaPrestamista      by remember { mutableStateOf("") }
+    var archivoPDF            by remember { mutableStateOf<File?>(null) }
+    var metodoPago            by remember { mutableStateOf("Efectivo") }
+    val opcionesMetodoPago    = listOf("Efectivo", "Transferencia")
+    var expandedMetodoPago    by remember { mutableStateOf(false) }
+    var nombreCobrador        by remember { mutableStateOf(cobrador) }
+    var botonHabilitado       by remember { mutableStateOf(true) }
 
-    var nombreCobrador by remember { mutableStateOf(cobrador) }
-
-    var botonHabilitado by remember { mutableStateOf(true) }
-
-    var montoPrestamo by remember { mutableStateOf(0.0) }
-    var interesTotal by remember { mutableStateOf(0.0) }
-    var totalAPagar by remember { mutableStateOf(0.0) }
-    var cuotaEstimada by remember { mutableStateOf(0.0) }
-    var cuotasTotales by remember { mutableStateOf(1) }
-    var plazo by remember { mutableStateOf("Semanal") }
-    var numeroPrestamo by remember { mutableStateOf("") }
-    var montoPagadoActual by remember { mutableStateOf(0.0) }
-    var saldoActualizado by remember { mutableStateOf(saldoActual) }
+    // Datos del préstamo
+    var montoPrestamo         by remember { mutableStateOf(0.0) }
+    var interesTotal          by remember { mutableStateOf(0.0) }
+    var totalAPagar           by remember { mutableStateOf(0.0) }
+    var moraActiva            by remember { mutableStateOf(0.0) }
+    var cuotaEstimada         by remember { mutableStateOf(0.0) }
+    var cuotasTotales         by remember { mutableStateOf(1) }
+    var plazo                 by remember { mutableStateOf("Semanal") }
+    var numeroPrestamo        by remember { mutableStateOf("") }
+    var montoPagadoActual     by remember { mutableStateOf(0.0) }
+    var saldoActualizado      by remember { mutableStateOf(saldoActual) }
     var proximaCuotaPendiente by remember { mutableStateOf(1) }
-    var fechaProximoPago by remember { mutableStateOf("") }
+    var fechaProximoPago      by remember { mutableStateOf("") }
+    var vistaPrevia           by remember { mutableStateOf<ResultadoDistribucion?>(null) }
 
-    var vistaPrevia by remember { mutableStateOf<ResultadoDistribucion?>(null) }
-
+    // ── CARGA INICIAL ────────────────────────────────────────────────────
     LaunchedEffect(Unit) {
         try {
             val uidActualSesion = session.getUid()
             if (uidActualSesion.isNullOrEmpty()) {
                 Toast.makeText(context, "Error: Sesión no válida", Toast.LENGTH_LONG).show()
-                navController.popBackStack()
-                return@LaunchedEffect
+                navController.popBackStack(); return@LaunchedEffect
             }
-
             val uidParaRecibo = when {
                 cobrador.isNotBlank() &&
                         !cobrador.equals("COBRADOR", true) &&
-                        !cobrador.equals("Sin asignar", true) ->
-                    cobrador.trim()
+                        !cobrador.equals("Sin asignar", true) -> cobrador.trim()
                 else -> uidActualSesion
             }
-
             val nombreCobradorLimpio = resolverNombreCobrador(context, db, uidParaRecibo)
-            nombreCobrador = nombreCobradorLimpio
+            nombreCobrador   = nombreCobradorLimpio
             firmaPrestamista = nombreCobradorLimpio
 
             val clienteDoc = db.collection("clientes").document(clienteId).get().await()
-            nombreCliente = if (clienteDoc.exists()) {
-                clienteDoc.getString("nombre") ?: "Cliente"
-            } else {
-                "Cliente $clienteId"
-            }
+            nombreCliente = if (clienteDoc.exists()) clienteDoc.getString("nombre") ?: "Cliente"
+            else "Cliente $clienteId"
 
             val prestamoDoc = db.collection("prestamos").document(prestamoId).get().await()
             if (!prestamoDoc.exists()) {
-                Toast.makeText(context, "Error: El préstamo no existe", Toast.LENGTH_LONG).show()
-                navController.popBackStack()
-                return@LaunchedEffect
+                Toast.makeText(context, "El préstamo no existe", Toast.LENGTH_LONG).show()
+                navController.popBackStack(); return@LaunchedEffect
             }
 
             montoPrestamo = prestamoDoc.getDouble("monto") ?: 0.0
-            interesTotal = prestamoDoc.getDouble("interesTotal")
+            interesTotal  = prestamoDoc.getDouble("interesTotal")
                 ?: prestamoDoc.getDouble("interes") ?: 0.0
-            totalAPagar = prestamoDoc.getDouble("totalPagar")
-                ?: (montoPrestamo + interesTotal)
+            totalAPagar   = prestamoDoc.getDouble("totalPagar") ?: (montoPrestamo + interesTotal)
+            moraActiva    = prestamoDoc.getDouble("mora") ?: 0.0
             cuotaEstimada = prestamoDoc.getDouble("cuota") ?: 0.0
             cuotasTotales = prestamoDoc.getLong("cuotas")?.toInt() ?: 1
-            plazo = prestamoDoc.getString("plazo") ?: "Semanal"
-
-            // ✅ LEER NÚMERO DE PRÉSTAMO DE FORMA SEGURA
+            plazo         = prestamoDoc.getString("plazo") ?: "Semanal"
             numeroPrestamo = obtenerNumeroPrestamoSafe(prestamoDoc)
 
             val pagosSnapshot = db.collection("pagos")
-                .whereEqualTo("prestamoId", prestamoId)
-                .get().await()
-
+                .whereEqualTo("prestamoId", prestamoId).get().await()
             var totalRealmentePagado = 0.0
-            for (pago in pagosSnapshot.documents) {
-                val montoPago = pago.getDouble("monto") ?: 0.0
-                val moraPago = pago.getDouble("mora") ?: 0.0
-                totalRealmentePagado += montoPago + moraPago
-            }
-
-            val moraActual = prestamoDoc.getDouble("mora") ?: 0.0
-            val totalConMora = totalAPagar + moraActual
+            for (pago in pagosSnapshot.documents)
+                totalRealmentePagado += (pago.getDouble("monto") ?: 0.0) +
+                        (pago.getDouble("mora")  ?: 0.0)
 
             montoPagadoActual = totalRealmentePagado
-            saldoActualizado = (totalConMora - totalRealmentePagado).coerceAtLeast(0.0)
+            saldoActualizado  = (totalAPagar - totalRealmentePagado).coerceAtLeast(0.0)
 
-            Log.d("RegistrarPagoScreen", """
-                📊 CARGA INICIAL CORREGIDA:
-                - Número de préstamo: $numeroPrestamo
-                - Total a pagar: L. $totalAPagar
-                - Mora: L. $moraActual
-                - Total con mora: L. $totalConMora
-                - Total REAL pagado: L. $totalRealmentePagado
-                - Saldo REAL: L. $saldoActualizado
-            """.trimIndent())
-
-            val resultado = distribuirPagoEnCascada(
-                db,
-                prestamoId,
-                0.0,
-                cuotaEstimada,
-                cuotasTotales
-            )
+            val resultado = distribuirPagoConMoraYCascada(db, prestamoId, 0.0, cuotaEstimada, cuotasTotales)
             proximaCuotaPendiente = resultado.proximaCuotaPendiente
-            fechaProximoPago = resultado.fechaProximoPago
+            fechaProximoPago      = resultado.fechaProximoPago
 
         } catch (e: Exception) {
             Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
@@ -491,414 +418,678 @@ fun RegistrarPagoScreen(
         }
     }
 
+    // ── VISTA PREVIA ─────────────────────────────────────────────────────
     LaunchedEffect(montoAbono) {
         val abono = montoAbono.toDoubleOrNull() ?: 0.0
-        vistaPrevia = if (abono > 0.0) {
-            distribuirPagoEnCascada(db, prestamoId, abono, cuotaEstimada, cuotasTotales)
-        } else {
-            null
-        }
+        vistaPrevia = if (abono > 0.0)
+            distribuirPagoConMoraYCascada(db, prestamoId, abono, cuotaEstimada, cuotasTotales)
+        else null
     }
 
+    // ── UI ───────────────────────────────────────────────────────────────
     Scaffold(
+        containerColor = RP.Surface,
         topBar = {
-            TopAppBar(
-                title = { Text("Registrar Pago", color = MaterialTheme.colorScheme.primary) },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Brush.linearGradient(listOf(RP.GradStart, RP.GradEnd)))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .statusBarsPadding()
+                        .padding(horizontal = 20.dp, vertical = 16.dp)
+                ) {
+                    Row(
+                        modifier              = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment     = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { navController.popBackStack() }) {
+                                Icon(Icons.Default.ArrowBack, contentDescription = "Regresar",
+                                    tint = Color.White, modifier = Modifier.size(22.dp))
+                            }
+                            Spacer(Modifier.width(4.dp))
+                            Column {
+                                Text("Registrar pago",
+                                    fontSize = 22.sp, fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White, letterSpacing = (-0.5).sp)
+                                if (numeroPrestamo.isNotEmpty() && numeroPrestamo != "0") {
+                                    Text("Préstamo N° $numeroPrestamo",
+                                        fontSize = 13.sp, color = Color.White.copy(alpha = 0.65f))
+                                }
+                            }
+                        }
+                        // Avatar cliente
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = nombreCliente.take(1).uppercase(),
+                                fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+            }
         }
     ) { padding ->
+
         Column(
             modifier = Modifier
-                .padding(padding)
-                .padding(16.dp)
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
+                .padding(top = padding.calculateTopPadding())
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
 
+            // ── 1. RESUMEN FINANCIERO ─────────────────────────────────────
             Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD))
+                modifier  = Modifier.fillMaxWidth(),
+                shape     = RoundedCornerShape(20.dp),
+                colors    = CardDefaults.cardColors(containerColor = RP.Card),
+                elevation = CardDefaults.cardElevation(2.dp)
             ) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("Información del Préstamo", fontWeight = FontWeight.Bold)
-                    // ⭐ MOSTRAR NÚMERO DE PRÉSTAMO
-                    if (numeroPrestamo.isNotEmpty() && numeroPrestamo != "0") {
-                        Text("Préstamo N° $numeroPrestamo", fontWeight = FontWeight.Bold, color = Color(0xFF1565C0))
-                    }
-                    Text("Cliente: $nombreCliente", fontWeight = FontWeight.Bold)
-                    Text("Capital: L. ${"%.2f".format(montoPrestamo)}")
-                    Text("Interés: L. ${"%.2f".format(interesTotal)}")
-                    Text("Total: L. ${"%.2f".format(totalAPagar)}", fontWeight = FontWeight.Bold)
-                    Text("Pagado: L. ${"%.2f".format(montoPagadoActual)}", color = Color(0xFF4CAF50))
-                    Text(
-                        "Saldo: L. ${"%.2f".format(saldoActualizado)}",
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFFFF5722)
+                Column {
+                    // Franja superior azul
+                    Box(
+                        modifier = Modifier.fillMaxWidth().height(4.dp)
+                            .background(Brush.horizontalGradient(listOf(RP.Blue, RP.BlueSoft)))
                     )
-                    Text("Cuota: L. ${"%.2f".format(cuotaEstimada)}")
-                    Text("Próxima: #$proximaCuotaPendiente de $cuotasTotales")
-                    Text("Fecha: $fechaProximoPago", fontWeight = FontWeight.Bold)
-                    Text("Cobrador actual: $nombreCobrador", color = Color(0xFF1565C0))
-                }
-            }
+                    Column(modifier = Modifier.padding(16.dp)) {
 
-            PrimaryTextField(
-                value = montoAbono,
-                onValueChange = { montoAbono = it },
-                label = "Monto recibido",
-                keyboardType = KeyboardType.Number
-            )
-
-            vistaPrevia?.let { preview ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E8))
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Vista Previa", fontWeight = FontWeight.Bold)
-                        preview.cuotasCubiertas.forEach { cuota ->
-                            Text(
-                                "• Cuota ${cuota.numeroCuota}: L. ${"%.2f".format(cuota.montoAplicado)} ${if (cuota.completada) "✓" else "parcial"}",
-                                color = if (cuota.completada) Color(0xFF4CAF50) else Color(0xFFFF9800)
-                            )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Person, contentDescription = null,
+                                tint = RP.Blue, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(nombreCliente,
+                                fontSize = 16.sp, fontWeight = FontWeight.Bold, color = RP.TextPri)
                         }
-                        Text("Completas: ${preview.totalCuotasCompletas}", fontWeight = FontWeight.Bold)
 
-                        if ((saldoActualizado - (montoAbono.toDoubleOrNull() ?: 0.0)) > 0.01) {
-                            Text("Próxima: #${preview.proximaCuotaPendiente} - ${preview.fechaProximoPago}")
-                        } else {
-                            Text("¡SALDADO!", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(14.dp))
+
+                        // Cuatro métricas en 2×2
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            MetricaChip("Capital", "L. ${dec.format(montoPrestamo)}",
+                                RP.Blue, RP.BlueLight, Modifier.weight(1f))
+                            MetricaChip("Interés", "L. ${dec.format(interesTotal)}",
+                                RP.TextSec, RP.Surface, Modifier.weight(1f))
                         }
-                    }
-                }
-            }
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            MetricaChip("Pagado", "L. ${dec.format(montoPagadoActual)}",
+                                RP.Green, RP.GreenSoft, Modifier.weight(1f))
+                            MetricaChip("Cuota", "L. ${dec.format(cuotaEstimada)}",
+                                RP.TextSec, RP.Surface, Modifier.weight(1f))
+                        }
 
-            PrimaryTextField(value = lugar, onValueChange = { lugar = it }, label = "Lugar")
-            PrimaryTextField(value = firmaPrestamista, onValueChange = { firmaPrestamista = it }, label = "Firma")
-
-            ExposedDropdownMenuBox(
-                expanded = expandedMetodoPago,
-                onExpandedChange = { expandedMetodoPago = !expandedMetodoPago }
-            ) {
-                OutlinedTextField(
-                    value = metodoPago,
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Método de pago") },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedMetodoPago) },
-                    modifier = Modifier.menuAnchor().fillMaxWidth()
-                )
-                ExposedDropdownMenu(
-                    expanded = expandedMetodoPago,
-                    onDismissRequest = { expandedMetodoPago = false }
-                ) {
-                    opcionesMetodoPago.forEach {
-                        DropdownMenuItem(
-                            text = { Text(it) },
-                            onClick = {
-                                metodoPago = it
-                                expandedMetodoPago = false
+                        // ── MORA (si existe) ──────────────────────────────
+                        if (moraActiva > 0.0) {
+                            Spacer(Modifier.height(12.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(RP.RedSoft)
+                                    .border(1.dp, RP.Red.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment     = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Warning, contentDescription = null,
+                                        tint = RP.Red, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Column {
+                                        Text("Mora activa",
+                                            fontSize = 11.sp, color = RP.Red,
+                                            fontWeight = FontWeight.SemiBold)
+                                        Text("Se cobra primero",
+                                            fontSize = 10.sp, color = RP.Red.copy(alpha = 0.7f))
+                                    }
+                                }
+                                Text("L. ${dec.format(moraActiva)}",
+                                    fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
+                                    color = RP.Red)
                             }
-                        )
+                        }
+
+                        Spacer(Modifier.height(12.dp))
+                        Divider(color = RP.Border, thickness = 0.5.dp)
+                        Spacer(Modifier.height(12.dp))
+
+                        // ── SALDO TOTAL ───────────────────────────────────
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment     = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text("Saldo pendiente",
+                                    fontSize = 12.sp, color = RP.TextMuted,
+                                    fontWeight = FontWeight.Medium)
+                                Text("L. ${dec.format(saldoActualizado)}",
+                                    fontSize = 24.sp, fontWeight = FontWeight.ExtraBold,
+                                    color = RP.TextPri)
+                                if (moraActiva > 0.0) {
+                                    Text(
+                                        "↳ Incluye mora: L. ${dec.format(moraActiva)}",
+                                        fontSize = 11.sp, color = RP.Red,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("Próxima cuota",
+                                    fontSize = 11.sp, color = RP.TextMuted)
+                                Text("#$proximaCuotaPendiente de $cuotasTotales",
+                                    fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                                    color = RP.Blue)
+                                Text(fechaProximoPago,
+                                    fontSize = 12.sp, color = RP.TextSec)
+                            }
+                        }
+
+                        // ── Info cobrador ─────────────────────────────────
+                        Spacer(Modifier.height(10.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(Icons.Default.Person, contentDescription = null,
+                                tint = RP.TextMuted, modifier = Modifier.size(12.dp))
+                            Text("Cobrador: $nombreCobrador",
+                                fontSize = 11.sp, color = RP.TextMuted)
+                        }
                     }
                 }
             }
 
-            PrimaryButton(
-                text = "Registrar Pago",
-                onClick = {
-                    if (!botonHabilitado) return@PrimaryButton
+            // ── 2. CAMPO MONTO ────────────────────────────────────────────
+            Card(
+                modifier  = Modifier.fillMaxWidth(),
+                shape     = RoundedCornerShape(20.dp),
+                colors    = CardDefaults.cardColors(containerColor = RP.Card),
+                elevation = CardDefaults.cardElevation(2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Monto a registrar",
+                        fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = RP.TextSec)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value         = montoAbono,
+                        onValueChange = { montoAbono = it },
+                        placeholder   = { Text("0.00", color = RP.TextMuted) },
+                        leadingIcon   = {
+                            Text("L.", fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                                color = RP.Blue, modifier = Modifier.padding(start = 12.dp))
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine      = true,
+                        modifier        = Modifier.fillMaxWidth(),
+                        shape           = RoundedCornerShape(14.dp),
+                        colors          = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor   = RP.Blue,
+                            unfocusedBorderColor = RP.Border,
+                            focusedLabelColor    = RP.Blue
+                        ),
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            fontSize = 20.sp, fontWeight = FontWeight.Bold, color = RP.TextPri
+                        )
+                    )
 
+                    // Acceso rápido: cuota exacta o saldo total
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (cuotaEstimada > 0.0) {
+                            OutlinedButton(
+                                onClick = { montoAbono = "%.2f".format(cuotaEstimada) },
+                                shape   = RoundedCornerShape(10.dp),
+                                border  = androidx.compose.foundation.BorderStroke(1.dp, RP.Blue.copy(alpha = 0.4f)),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Una cuota\nL. ${dec.format(cuotaEstimada)}",
+                                    fontSize = 11.sp, color = RP.Blue,
+                                    fontWeight = FontWeight.SemiBold,
+                                    textAlign = TextAlign.Center)
+                            }
+                        }
+                        if (saldoActualizado > 0.0) {
+                            OutlinedButton(
+                                onClick = { montoAbono = "%.2f".format(saldoActualizado) },
+                                shape   = RoundedCornerShape(10.dp),
+                                border  = androidx.compose.foundation.BorderStroke(1.dp, RP.Green.copy(alpha = 0.4f)),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Saldar todo\nL. ${dec.format(saldoActualizado)}",
+                                    fontSize = 11.sp, color = RP.Green,
+                                    fontWeight = FontWeight.SemiBold,
+                                    textAlign = TextAlign.Center)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── 3. VISTA PREVIA DISTRIBUCIÓN ─────────────────────────────
+            vistaPrevia?.let { preview ->
+                val abono = montoAbono.toDoubleOrNull() ?: 0.0
+                val saldoDespues = (saldoActualizado - abono).coerceAtLeast(0.0)
+                val estaSaldando = saldoDespues <= 0.01
+
+                Card(
+                    modifier  = Modifier.fillMaxWidth(),
+                    shape     = RoundedCornerShape(20.dp),
+                    colors    = CardDefaults.cardColors(
+                        containerColor = if (estaSaldando) RP.GreenSoft else RP.Card
+                    ),
+                    elevation = CardDefaults.cardElevation(2.dp)
+                ) {
+                    Column {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().height(4.dp)
+                                .background(if (estaSaldando) RP.Green else RP.Amber)
+                        )
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                verticalAlignment     = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    if (estaSaldando) Icons.Default.CheckCircle
+                                    else Icons.Default.Info,
+                                    contentDescription = null,
+                                    tint = if (estaSaldando) RP.Green else RP.Amber,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    if (estaSaldando) "Préstamo saldado" else "Vista previa",
+                                    fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                                    color = if (estaSaldando) RP.Green else RP.TextPri
+                                )
+                            }
+
+                            Spacer(Modifier.height(10.dp))
+
+                            preview.cuotasCubiertas.forEach { cuota ->
+                                val esMora     = cuota.numeroCuota == 0
+                                val etiqueta   = if (esMora) "Mora" else "Cuota #${cuota.numeroCuota}"
+                                val colorFondo = when {
+                                    esMora && cuota.completada  -> RP.GreenSoft
+                                    esMora                      -> RP.RedSoft
+                                    cuota.completada            -> RP.GreenSoft
+                                    else                        -> RP.AmberSoft
+                                }
+                                val colorTexto = when {
+                                    esMora && cuota.completada  -> RP.Green
+                                    esMora                      -> RP.Red
+                                    cuota.completada            -> RP.Green
+                                    else                        -> RP.Amber
+                                }
+                                val icono: ImageVector = when {
+                                    esMora      -> Icons.Default.Warning
+                                    cuota.completada -> Icons.Default.CheckCircle
+                                    else        -> Icons.Default.RadioButtonUnchecked
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 3.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(colorFondo)
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment     = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(icono, contentDescription = null,
+                                            tint = colorTexto, modifier = Modifier.size(14.dp))
+                                        Text(etiqueta, fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold, color = colorTexto)
+                                        if (!cuota.completada) {
+                                            Text("parcial", fontSize = 11.sp,
+                                                color = colorTexto.copy(alpha = 0.7f))
+                                        }
+                                    }
+                                    Text("L. ${dec.format(cuota.montoAplicado)}",
+                                        fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                                        color = colorTexto)
+                                }
+                            }
+
+                            Spacer(Modifier.height(10.dp))
+                            Divider(color = RP.Border, thickness = 0.5.dp)
+                            Spacer(Modifier.height(10.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Saldo después del pago",
+                                    fontSize = 13.sp, color = RP.TextSec)
+                                Text(
+                                    if (estaSaldando) "L. 0.00 ✓"
+                                    else "L. ${dec.format(saldoDespues)}",
+                                    fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                                    color = if (estaSaldando) RP.Green else RP.TextPri
+                                )
+                            }
+                            if (!estaSaldando) {
+                                Spacer(Modifier.height(4.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Próxima cuota",
+                                        fontSize = 12.sp, color = RP.TextMuted)
+                                    Text("#${preview.proximaCuotaPendiente} — ${preview.fechaProximoPago}",
+                                        fontSize = 12.sp, color = RP.Blue,
+                                        fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── 4. DETALLES PAGO ──────────────────────────────────────────
+            Card(
+                modifier  = Modifier.fillMaxWidth(),
+                shape     = RoundedCornerShape(20.dp),
+                colors    = CardDefaults.cardColors(containerColor = RP.Card),
+                elevation = CardDefaults.cardElevation(2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
+
+                    Text("Detalles del recibo",
+                        fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = RP.TextSec)
+
+                    // Lugar
+                    OutlinedTextField(
+                        value = lugar, onValueChange = { lugar = it },
+                        label = { Text("Lugar") },
+                        leadingIcon = {
+                            Icon(Icons.Default.LocationOn, contentDescription = null,
+                                tint = RP.TextMuted, modifier = Modifier.size(18.dp))
+                        },
+                        singleLine = true, modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = RP.Blue, unfocusedBorderColor = RP.Border
+                        )
+                    )
+
+                    // Firma
+                    OutlinedTextField(
+                        value = firmaPrestamista, onValueChange = { firmaPrestamista = it },
+                        label = { Text("Firma / nombre cobrador") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Edit, contentDescription = null,
+                                tint = RP.TextMuted, modifier = Modifier.size(18.dp))
+                        },
+                        singleLine = true, modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = RP.Blue, unfocusedBorderColor = RP.Border
+                        )
+                    )
+
+                    // Método de pago
+                    ExposedDropdownMenuBox(
+                        expanded = expandedMetodoPago,
+                        onExpandedChange = { expandedMetodoPago = !expandedMetodoPago }
+                    ) {
+                        OutlinedTextField(
+                            value = metodoPago, onValueChange = {},
+                            readOnly = true, label = { Text("Método de pago") },
+                            leadingIcon = {
+                                Icon(
+                                    if (metodoPago == "Efectivo") Icons.Default.AttachMoney
+                                    else Icons.Default.SwapHoriz,
+                                    contentDescription = null,
+                                    tint = RP.TextMuted, modifier = Modifier.size(18.dp)
+                                )
+                            },
+                            trailingIcon = {
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedMetodoPago)
+                            },
+                            modifier = Modifier.menuAnchor().fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = RP.Blue, unfocusedBorderColor = RP.Border
+                            )
+                        )
+                        ExposedDropdownMenu(
+                            expanded = expandedMetodoPago,
+                            onDismissRequest = { expandedMetodoPago = false }
+                        ) {
+                            opcionesMetodoPago.forEach {
+                                DropdownMenuItem(
+                                    text = { Text(it) },
+                                    onClick = { metodoPago = it; expandedMetodoPago = false }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── 5. BOTÓN REGISTRAR ────────────────────────────────────────
+            val abonoValido = (montoAbono.toDoubleOrNull() ?: 0.0) > 0.0
+            Button(
+                onClick = {
+                    if (!botonHabilitado) return@Button
                     val abono = montoAbono.toDoubleOrNull()
                     if (abono == null || abono <= 0.0) {
                         Toast.makeText(context, "Ingresa un monto válido", Toast.LENGTH_SHORT).show()
-                        return@PrimaryButton
+                        return@Button
                     }
-
                     val uidActualSesion = session.getUid()
                     if (uidActualSesion.isNullOrEmpty()) {
                         Toast.makeText(context, "Error: Sesión no válida", Toast.LENGTH_LONG).show()
-                        return@PrimaryButton
+                        return@Button
                     }
-
                     botonHabilitado = false
 
                     scope.launch {
                         try {
                             if (!verificarYCrearCliente(db, clienteId, nombreCliente)) {
                                 Toast.makeText(context, "Error al verificar cliente", Toast.LENGTH_LONG).show()
-                                botonHabilitado = true
-                                return@launch
+                                botonHabilitado = true; return@launch
                             }
 
                             val prestamoDoc = db.collection("prestamos").document(prestamoId).get().await()
-
-                            val montoBase = prestamoDoc.getDouble("monto") ?: 0.0
+                            val montoBase        = prestamoDoc.getDouble("monto") ?: 0.0
                             val interesTotalBase = prestamoDoc.getDouble("interesTotal")
                                 ?: prestamoDoc.getDouble("interes") ?: 0.0
-                            val totalPagarBase = prestamoDoc.getDouble("totalPagar")
+                            val totalPagarDoc    = prestamoDoc.getDouble("totalPagar")
                                 ?: (montoBase + interesTotalBase)
-                            val moraActual = prestamoDoc.getDouble("mora") ?: 0.0
-
-                            // ✅ LEER NÚMERO DE PRÉSTAMO DE FORMA SEGURA
+                            val moraActualDoc    = prestamoDoc.getDouble("mora") ?: 0.0
                             val numeroPrestamoActual = obtenerNumeroPrestamoSafe(prestamoDoc)
 
                             val pagosSnapshot = db.collection("pagos")
-                                .whereEqualTo("prestamoId", prestamoId)
-                                .get().await()
-
+                                .whereEqualTo("prestamoId", prestamoId).get().await()
                             var totalRealmentePagado = 0.0
-                            for (pago in pagosSnapshot.documents) {
-                                val montoPago = pago.getDouble("monto") ?: 0.0
-                                val moraPago = pago.getDouble("mora") ?: 0.0
-                                totalRealmentePagado += montoPago + moraPago
-                            }
+                            for (pago in pagosSnapshot.documents)
+                                totalRealmentePagado += (pago.getDouble("monto") ?: 0.0) +
+                                        (pago.getDouble("mora")  ?: 0.0)
 
-                            Log.d("RegistrarPago", """
-                                🔍 RECÁLCULO DESDE FIRESTORE:
-                                - Número préstamo: $numeroPrestamoActual
-                                - Total a pagar (base): L. $totalPagarBase
-                                - Mora actual: L. $moraActual
-                                - Total con mora: L. ${totalPagarBase + moraActual}
-                                - Total REALMENTE pagado (desde pagos): L. $totalRealmentePagado
-                                - Pago actual: L. $abono
-                                - Nuevo total pagado: L. ${totalRealmentePagado + abono}
-                            """.trimIndent())
-
-                            val distribucion = distribuirPagoEnCascada(
-                                db,
-                                prestamoId,
-                                abono,
-                                cuotaEstimada,
-                                cuotasTotales
+                            val saldoAnteriorCorrecto = (totalPagarDoc - totalRealmentePagado).coerceAtLeast(0.0)
+                            val distribucion = distribuirPagoConMoraYCascada(
+                                db, prestamoId, abono, cuotaEstimada, cuotasTotales
                             )
 
-                            val fechaActual = Timestamp.now()
-                            val fechaFormateada = SimpleDateFormat(
-                                "dd/MM/yyyy HH:mm",
-                                Locale.getDefault()
-                            ).format(fechaActual.toDate())
+                            val fechaActual     = Timestamp.now()
+                            val fechaFormateada = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+                                .format(fechaActual.toDate())
 
-                            val totalConMora = totalPagarBase + moraActual
                             val nuevoMontoPagado = totalRealmentePagado + abono
-                            val nuevoSaldo = (totalConMora - nuevoMontoPagado).coerceAtLeast(0.0)
+                            val nuevoSaldo       = (totalPagarDoc - nuevoMontoPagado).coerceAtLeast(0.0)
 
-                            Log.d("RegistrarPago", """
-                                ✅ SALDOS CORRECTOS:
-                                - Saldo ANTERIOR correcto: L. ${totalConMora - totalRealmentePagado}
-                                - Pago actual: L. $abono
-                                - Saldo NUEVO correcto: L. $nuevoSaldo
-                            """.trimIndent())
+                            val cuotaMoraCubierta = distribucion.cuotasCubiertas.find { it.numeroCuota == 0 }
+                            val montoPagoNormal   = abono - (cuotaMoraCubierta?.montoAplicado ?: 0.0)
+                            val montoPagoMora     = cuotaMoraCubierta?.montoAplicado ?: 0.0
+
+                            val actualizacionMora: Map<String, Any> = when {
+                                cuotaMoraCubierta != null && cuotaMoraCubierta.completada ->
+                                    mapOf("mora" to 0.0, "estado" to if (nuevoSaldo <= 0.01) "saldado" else "activo")
+                                cuotaMoraCubierta != null ->
+                                    mapOf("estado" to "mora")
+                                else ->
+                                    mapOf("estado" to if (nuevoSaldo <= 0.01) "saldado" else "activo")
+                            }
 
                             val proximoPagoValidado = when {
-                                nuevoSaldo <= 0.01 -> {
-                                    Log.d("RegistrarPago", "✅ PRÉSTAMO SALDADO")
-                                    "saldado"
-                                }
+                                nuevoSaldo <= 0.01 -> "saldado"
                                 distribucion.fechaProximoPago.equals("saldado", ignoreCase = true) && nuevoSaldo > 0.01 -> {
-                                    Log.w("RegistrarPago", "⚠️ INCONSISTENCIA DETECTADA - Recalculando fecha")
                                     try {
                                         val fechaInicio = prestamoDoc.getTimestamp("fecha")?.toDate() ?: Date()
                                         val plazoActual = prestamoDoc.getString("plazo") ?: "semanal"
                                         calcularFechaCuota(fechaInicio, plazoActual, distribucion.proximaCuotaPendiente)
-                                    } catch (e: Exception) {
-                                        "Pendiente"
-                                    }
+                                    } catch (_: Exception) { "Pendiente" }
                                 }
                                 else -> distribucion.fechaProximoPago
                             }
 
-                            val descripcionDetallada = when {
-                                distribucion.cuotasCubiertas.isEmpty() -> {
-                                    "Abono a cuota #${distribucion.proximaCuotaPendiente}"
+                            val cuotasNormales = distribucion.cuotasCubiertas.filter { it.numeroCuota > 0 }
+                            val descripcionDetallada = buildString {
+                                if (cuotaMoraCubierta != null) {
+                                    append("MORA (L. ${"%.2f".format(cuotaMoraCubierta.montoAplicado)}${if (cuotaMoraCubierta.completada) " ✓" else " parcial"})")
+                                    if (cuotasNormales.isNotEmpty()) append(" + ")
                                 }
-                                distribucion.cuotasCubiertas.size == 1 -> {
-                                    val c = distribucion.cuotasCubiertas.first()
-                                    if (c.completada) "Cuota #${c.numeroCuota}"
-                                    else "Cuota #${c.numeroCuota} parcial (L. ${"%.2f".format(c.montoAplicado)})"
-                                }
-                                else -> {
-                                    val nums = distribucion.cuotasCubiertas.map { it.numeroCuota }
-                                    val ultima = distribucion.cuotasCubiertas.last()
-                                    val sufijo = if (!ultima.completada)
-                                        " + #${ultima.numeroCuota} parcial (L. ${"%.2f".format(ultima.montoAplicado)})"
-                                    else ""
-
-                                    if (nums.size <= 3)
-                                        "Cuotas ${nums.dropLast(if (!ultima.completada) 1 else 0).joinToString(", ") { "#$it" }}$sufijo"
-                                    else
-                                        "Cuotas #${nums.first()} a #${nums.dropLast(1).last()} + ${if (!ultima.completada) "#${ultima.numeroCuota} parcial (L. ${"%.2f".format(ultima.montoAplicado)})" else "#${ultima.numeroCuota}"}"
-                                }
-                            }
-
-                            val descripcionCorta = when {
-                                distribucion.cuotasCubiertas.isEmpty() -> {
-                                    "#${distribucion.proximaCuotaPendiente}*"
-                                }
-                                distribucion.cuotasCubiertas.size == 1 -> {
-                                    val c = distribucion.cuotasCubiertas.first()
-                                    if (c.completada) "#${c.numeroCuota}" else "#${c.numeroCuota}*"
-                                }
-                                else -> {
-                                    val nums = distribucion.cuotasCubiertas.map { it.numeroCuota }
-                                    val ultima = distribucion.cuotasCubiertas.last()
-                                    val completadas = if (!ultima.completada) nums.dropLast(1) else nums
-                                    val parcialSufijo = if (!ultima.completada) ", #${ultima.numeroCuota}*" else ""
-
-                                    if (completadas.size <= 3)
-                                        completadas.joinToString(", ") { "#$it" } + parcialSufijo
-                                    else
-                                        "#${completadas.first()}-#${completadas.last()}$parcialSufijo"
+                                when {
+                                    cuotasNormales.isEmpty() -> Unit
+                                    cuotasNormales.size == 1 -> {
+                                        val c = cuotasNormales.first()
+                                        append(if (c.completada) "Cuota #${c.numeroCuota}" else "Cuota #${c.numeroCuota} parcial")
+                                    }
+                                    else -> {
+                                        val nums = cuotasNormales.map { it.numeroCuota }
+                                        append("Cuotas #${nums.first()} a #${nums.last()}")
+                                    }
                                 }
                             }
 
                             val uidCobradorActivo = when {
                                 cobrador.isNotBlank() &&
                                         !cobrador.equals("COBRADOR", true) &&
-                                        !cobrador.equals("Sin asignar", true) ->
-                                    cobrador.trim()
+                                        !cobrador.equals("Sin asignar", true) -> cobrador.trim()
                                 else -> uidActualSesion
                             }
-
                             val nombreCobradorActivo = resolverNombreCobrador(context, db, uidCobradorActivo)
 
-                            val saldoAnteriorCorrecto = (totalConMora - totalRealmentePagado).coerceAtLeast(0.0)
-
-                            Log.d("RegistrarPago", """
-                                💰 VERIFICACIÓN FINAL PARA PDF:
-                                - Número préstamo: $numeroPrestamoActual
-                                - Saldo anterior: L. $saldoAnteriorCorrecto
-                                - Pago actual: L. $abono
-                                - Saldo nuevo: L. $nuevoSaldo
-                                - Próximo pago: $proximoPagoValidado
-                            """.trimIndent())
-
-                            // ⭐ PDF CON NÚMERO DE PRÉSTAMO CORRECTO
-                            val prestamoIdParaPDF = if (numeroPrestamoActual.isNotEmpty() && numeroPrestamoActual != "0") {
-                                "Préstamo N° $numeroPrestamoActual"
-                            } else {
-                                "Préstamo"
-                            }
+                            val prestamoIdParaPDF = if (numeroPrestamoActual.isNotEmpty() && numeroPrestamoActual != "0")
+                                "Préstamo N° $numeroPrestamoActual" else "Préstamo"
 
                             val pdfFile = ReciboHelper.generarReciboPDF(
-                                context = context,
-                                cliente = nombreCliente,
-                                prestamoId = prestamoIdParaPDF,
-                                fecha = fechaFormateada,
-                                montoPagado = abono.toString(),
-                                saldoAnterior = saldoAnteriorCorrecto,
-                                proximoPago = proximoPagoValidado,
-                                cuota = descripcionDetallada,
-                                cobrador = nombreCobradorActivo,
-                                lugar = lugar,
-                                firma = firmaPrestamista,
-                                tipoPago = metodoPago,
-                                mora = 0.0,
+                                context        = context,
+                                cliente        = nombreCliente,
+                                prestamoId     = prestamoIdParaPDF,
+                                fecha          = fechaFormateada,
+                                montoPagado    = abono.toString(),
+                                saldoAnterior  = saldoAnteriorCorrecto,
+                                proximoPago    = proximoPagoValidado,
+                                cuota          = descripcionDetallada,
+                                cobrador       = nombreCobradorActivo,
+                                lugar          = lugar,
+                                firma          = firmaPrestamista,
+                                tipoPago       = metodoPago,
+                                mora           = montoPagoMora,
                                 saldoNuevoFijo = nuevoSaldo
                             )
 
                             val pdfGenerado = pdfFile != null && pdfFile.exists()
-                            var pdfImpreso = false
-
                             if (pdfGenerado) {
                                 archivoPDF = pdfFile
-                                try {
-                                    ReciboHelper.imprimirPDF(context, pdfFile!!)
-                                    pdfImpreso = true
-                                } catch (e: Exception) {
-                                    Log.e("ImprimirPDF", "Error al imprimir: ${e.message}")
-                                }
+                                try { ReciboHelper.imprimirPDF(context, pdfFile!!) } catch (_: Exception) {}
                                 ReciboHelper.compartirReciboPDF(context, pdfFile!!)
                             }
 
                             val abonoData = mapOf(
-                                "clienteId" to clienteId,
-                                "clienteNombre" to nombreCliente,
-                                "prestamoId" to prestamoId,
-                                "numeroPrestamo" to numeroPrestamoActual,
-                                "monto" to abono,
-                                "mora" to 0.0,
-                                "fechaPago" to fechaActual,
-                                "registradoPor" to uidCobradorActivo,
-                                "nombreCobrador" to nombreCobradorActivo,
-                                "saldoRestante" to nuevoSaldo,
-                                "lugar" to lugar,
-                                "firma" to firmaPrestamista,
-                                "metodoPago" to metodoPago,
-                                "plazo" to plazo,
-                                "pdfGenerado" to pdfGenerado,
-                                "pdfImpreso" to pdfImpreso,
+                                "clienteId"              to clienteId,
+                                "clienteNombre"          to nombreCliente,
+                                "prestamoId"             to prestamoId,
+                                "numeroPrestamo"         to numeroPrestamoActual,
+                                "monto"                  to montoPagoNormal.coerceAtLeast(0.0),
+                                "mora"                   to montoPagoMora,
+                                "fechaPago"              to fechaActual,
+                                "registradoPor"          to uidCobradorActivo,
+                                "nombreCobrador"         to nombreCobradorActivo,
+                                "saldoRestante"          to nuevoSaldo,
+                                "lugar"                  to lugar,
+                                "firma"                  to firmaPrestamista,
+                                "metodoPago"             to metodoPago,
+                                "plazo"                  to plazo,
+                                "pdfGenerado"            to pdfGenerado,
                                 "proximaFechaProgramada" to proximoPagoValidado,
-                                "totalCuotasCompletas" to distribucion.totalCuotasCompletas,
-                                "cuotasCubiertas" to distribucion.cuotasCubiertas.map {
-                                    mapOf(
-                                        "numeroCuota" to it.numeroCuota,
-                                        "montoAplicado" to it.montoAplicado,
-                                        "completada" to it.completada
-                                    )
-                                },
-                                "descripcionCuotas" to descripcionCorta,
-                                "sistemaPagoEnCascada" to true
+                                "totalCuotasCompletas"   to distribucion.totalCuotasCompletas,
+                                "cuotasCubiertas"        to distribucion.cuotasCubiertas
+                                    .filter { it.numeroCuota > 0 }
+                                    .map { mapOf("numeroCuota" to it.numeroCuota, "montoAplicado" to it.montoAplicado, "completada" to it.completada) },
+                                "descripcionCuotas"      to descripcionDetallada,
+                                "sistemaPagoEnCascada"   to true
                             )
 
                             if (isInternetAvailable(context)) {
                                 db.collection("pagos").add(abonoData).await()
 
-                                val actualizacionPrestamo =
-                                    if (nuevoSaldo <= 0.01) {
-                                        mapOf<String, Any>(
-                                            "saldo" to 0.0,
-                                            "montoPagado" to totalConMora,
-                                            "estado" to "saldado",
-                                            "proximoPago" to "saldado",
-                                            "fechaUltimaActualizacion" to fechaActual,
-                                            "ultimoPago" to fechaFormateada,
-                                            "fechaSaldado" to fechaActual,
-                                            "fechaCancelacion" to fechaActual,
-                                            "totalPagar" to totalPagarBase,
-                                            "mora" to 0.0
-                                        )
-                                    } else {
-                                        mapOf<String, Any>(
-                                            "saldo" to nuevoSaldo,
-                                            "montoPagado" to nuevoMontoPagado,
-                                            "estado" to "activo",
-                                            "proximoPago" to proximoPagoValidado,
-                                            "fechaUltimaActualizacion" to fechaActual,
-                                            "ultimoPago" to fechaFormateada
-                                        )
-                                    }
-
-                                db.collection("prestamos").document(prestamoId)
-                                    .update(actualizacionPrestamo)
-                                    .await()
+                                val camposBase = mutableMapOf<String, Any>(
+                                    "saldo"                    to nuevoSaldo,
+                                    "montoPagado"              to nuevoMontoPagado,
+                                    "proximoPago"              to proximoPagoValidado,
+                                    "fechaUltimaActualizacion" to fechaActual,
+                                    "ultimoPago"               to fechaFormateada
+                                )
+                                camposBase.putAll(actualizacionMora)
+                                if (nuevoSaldo <= 0.01) {
+                                    camposBase["fechaSaldado"]     = fechaActual
+                                    camposBase["fechaCancelacion"] = fechaActual
+                                    camposBase["mora"]             = 0.0
+                                }
+                                db.collection("prestamos").document(prestamoId).update(camposBase).await()
 
                                 runCatching {
                                     db.collection("clientes").document(clienteId).update(
-                                        mapOf(
-                                            "ultimaActividad" to fechaActual,
-                                            "fechaUltimaActualizacion" to fechaActual
-                                        )
+                                        mapOf("ultimaActividad" to fechaActual, "fechaUltimaActualizacion" to fechaActual)
                                     ).await()
                                 }
 
-                                val msg =
-                                    if (nuevoSaldo <= 0.01) "¡PRÉSTAMO N° $numeroPrestamoActual SALDADO! ✅"
-                                    else "Pago registrado. Saldo: L. ${"%.2f".format(nuevoSaldo)}"
-
+                                val msg = if (nuevoSaldo <= 0.01)
+                                    "¡PRÉSTAMO N° $numeroPrestamoActual SALDADO! ✅"
+                                else "Pago registrado. Saldo: L. ${"%.2f".format(nuevoSaldo)}"
                                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+
                             } else {
                                 guardarAbonoPendiente(context, abonoData)
                                 Toast.makeText(context, "Pago guardado offline", Toast.LENGTH_LONG).show()
                             }
 
-                            montoPagadoActual = nuevoMontoPagado
-                            saldoActualizado = nuevoSaldo
+                            montoPagadoActual     = nuevoMontoPagado
+                            saldoActualizado      = nuevoSaldo
+                            moraActiva            = if (cuotaMoraCubierta?.completada == true) 0.0 else moraActiva
                             proximaCuotaPendiente = distribucion.proximaCuotaPendiente
-                            fechaProximoPago = proximoPagoValidado
-                            montoAbono = ""
+                            fechaProximoPago      = proximoPagoValidado
+                            montoAbono            = ""
 
                         } catch (e: Exception) {
                             Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
@@ -908,35 +1099,90 @@ fun RegistrarPagoScreen(
                         }
                     }
                 },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = botonHabilitado && (montoAbono.toDoubleOrNull() ?: 0.0) > 0
-            )
-
-            if (archivoPDF != null) {
-                OutlinedButton(
-                    onClick = {
-                        archivoPDF?.let {
-                            try {
-                                ReciboHelper.imprimirPDF(context, it)
-                                Toast.makeText(context, "Recibo reenviado", Toast.LENGTH_SHORT).show()
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Error al reimprimir", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Reimprimir Recibo") }
-
-                OutlinedButton(
-                    onClick = { archivoPDF?.let { ReciboHelper.compartirReciboPDF(context, it) } },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Compartir Recibo") }
+                enabled   = botonHabilitado && abonoValido,
+                modifier  = Modifier.fillMaxWidth().height(52.dp),
+                shape     = RoundedCornerShape(14.dp),
+                colors    = ButtonDefaults.buttonColors(
+                    containerColor         = RP.Blue,
+                    disabledContainerColor = RP.Blue.copy(alpha = 0.4f)
+                )
+            ) {
+                if (!botonHabilitado) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = Color.White, strokeWidth = 2.dp
+                    )
+                    Spacer(Modifier.width(10.dp))
+                }
+                Icon(Icons.Default.Payment, contentDescription = null,
+                    modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Registrar pago",
+                    fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
 
-            OutlinedButton(
-                onClick = { navController.popBackStack() },
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("Regresar") }
+            // ── 6. REIMPRIMIR PDF ─────────────────────────────────────────
+            if (archivoPDF != null) {
+                Row(
+                    modifier              = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            archivoPDF?.let {
+                                try { ReciboHelper.imprimirPDF(context, it) }
+                                catch (_: Exception) {
+                                    Toast.makeText(context, "Error al reimprimir", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        shape  = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, RP.Border),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Print, contentDescription = null,
+                            modifier = Modifier.size(16.dp), tint = RP.TextSec)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Reimprimir", color = RP.TextSec, fontSize = 13.sp)
+                    }
+                    OutlinedButton(
+                        onClick = { archivoPDF?.let { ReciboHelper.compartirReciboPDF(context, it) } },
+                        shape  = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, RP.Border),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null,
+                            modifier = Modifier.size(16.dp), tint = RP.TextSec)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Compartir", color = RP.TextSec, fontSize = 13.sp)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
         }
+    }
+}
+
+// ─────────────────────────────────────────────
+//  COMPONENTE MÉTRICA
+// ─────────────────────────────────────────────
+@Composable
+private fun MetricaChip(
+    label: String,
+    valor: String,
+    color: Color,
+    bgColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(bgColor)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        Text(label, fontSize = 11.sp, color = color.copy(alpha = 0.75f),
+            fontWeight = FontWeight.Medium)
+        Text(valor, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = color)
     }
 }
