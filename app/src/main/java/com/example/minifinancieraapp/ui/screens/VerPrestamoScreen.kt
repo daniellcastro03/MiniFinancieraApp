@@ -151,33 +151,40 @@ fun VerPrestamoScreen(
                     else         -> null
                 }
 
-                // ✅✅✅ RECALCULAR MONTO PAGADO DESDE LA COLECCIÓN DE PAGOS ✅✅✅
+                // ✅✅✅ RECALCULAR SALDO DESDE LA COLECCIÓN DE PAGOS ✅✅✅
                 val moraActual = (data["mora"] as? Number)?.toDouble() ?: 0.0
-                val totalConMora = totalPagar + moraActual
 
                 val pagosSnapshot = db.collection("pagos")
                     .whereEqualTo("prestamoId", prestamoId)
                     .get().await()
 
-                var montoPagadoReal = 0.0
+                // ✅ FIX: Separar mora de cuotas para calcular saldo correcto.
+                // El campo "mora" en el prestamo se pone a 0 cuando se paga, pero
+                // montoPagadoReal incluiría eso en pago.mora. Con la fórmula:
+                //   saldo = base - cuotasPagadas + moraPendiente
+                // el saldo es correcto incluso después de pagar la mora.
+                var montoCuotasPagado = 0.0
+                var totalMoraPagada   = 0.0
                 for (pago in pagosSnapshot.documents) {
-                    val montoPago = pago.getDouble("monto") ?: 0.0
-                    val moraPago = pago.getDouble("mora") ?: 0.0
-                    montoPagadoReal += montoPago + moraPago
+                    montoCuotasPagado += pago.getDouble("monto") ?: 0.0
+                    totalMoraPagada   += pago.getDouble("mora")  ?: 0.0
                 }
+                val montoPagadoReal = montoCuotasPagado + totalMoraPagada
+                val totalConMora    = totalPagar + moraActual  // para display
 
                 Log.d("VerPrestamoScreen", """
-                    💰 RECÁLCULO DE SALDO DESDE PAGOS:
+                    💰 RECÁLCULO DE SALDO (fórmula separada mora/cuotas):
                     - Total a pagar (base): L. $totalPagar
-                    - Mora aplicada: L. $moraActual
-                    - Total con mora: L. $totalConMora
-                    - Monto REAL pagado (desde pagos): L. $montoPagadoReal
+                    - Mora activa actual: L. $moraActual
+                    - Cuotas pagadas: L. $montoCuotasPagado
+                    - Mora ya pagada: L. $totalMoraPagada
                 """.trimIndent())
 
                 // ====== NORMALIZACIÓN CRÍTICA ======
                 val epsilon = 0.01
-                // Calcular saldo pendiente usando el monto REAL pagado
-                val saldoPendienteCalculado = totalConMora - montoPagadoReal
+                // saldo = base - cuotasPagadas + moraPendiente
+                val moraPendiente           = (moraActual - totalMoraPagada).coerceAtLeast(0.0)
+                val saldoPendienteCalculado = totalPagar - montoCuotasPagado + moraPendiente
                 val saldoPendiente = if (saldoPendienteCalculado <= epsilon) 0.0 else saldoPendienteCalculado
 
                 Log.d("VerPrestamoScreen", """

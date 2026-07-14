@@ -1506,7 +1506,7 @@ fun StatsCard(pagos: List<PagoItem>) {
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     StatItem(
-                        label = "Capital",
+                        label = "Abonos",
                         value = formatearLempiras(totalRecaudado),
                         icon = Icons.Default.Money
                     )

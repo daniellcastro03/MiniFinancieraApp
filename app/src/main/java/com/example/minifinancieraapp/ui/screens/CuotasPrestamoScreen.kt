@@ -899,6 +899,7 @@ fun CuotasPrestamoScreen(
                                             ?: prestamoSnap.getDouble("interes") ?: 0.0
                                         val totalPagar   = prestamoSnap.getDouble("totalPagar")
                                             ?: (monto + interesTotal)
+                                        val moraActivaSnap = prestamoSnap.getDouble("mora") ?: 0.0
                                         val numPrestamo  = prestamoSnap.getNumeroPrestamoSafeCuotas()
                                         val plazo        = prestamoSnap.getString("plazo") ?: "semanal"
                                         val fechaInicio  = prestamoSnap.getTimestamp("fecha")?.toDate()
@@ -907,15 +908,29 @@ fun CuotasPrestamoScreen(
                                         val pagosSnapshot = db.collection("pagos")
                                             .whereEqualTo("prestamoId", prestamoId).get().await()
 
-                                        var totalRealmentePagado = 0.0
-                                        for (pago in pagosSnapshot.documents)
-                                            totalRealmentePagado +=
-                                                (pago.getDouble("monto") ?: 0.0) +
-                                                        (pago.getDouble("mora")  ?: 0.0)
+                                        var totalRealmentePagado  = 0.0
+                                        var totalMoraYaPagadaSnap = 0.0
+                                        var totalCuotasYaPagadasSnap = 0.0
+                                        for (pago in pagosSnapshot.documents) {
+                                            val pm = pago.getDouble("monto") ?: 0.0
+                                            val mm = pago.getDouble("mora")  ?: 0.0
+                                            totalRealmentePagado     += pm + mm
+                                            totalMoraYaPagadaSnap    += mm
+                                            totalCuotasYaPagadasSnap += pm
+                                        }
 
                                         val nuevoMontoPagado = totalRealmentePagado + cuota.total
-                                        val nuevoSaldo = (totalPagar - nuevoMontoPagado)
-                                            .coerceAtLeast(0.0)
+
+                                        // ✅ FIX: Saldo correcto separando mora de cuotas.
+                                        // Si es cuota normal: va a totalCuotasPagadas
+                                        // Si es mora manual: va a totalMoraPagada
+                                        val esCuotaMora = cuota.descripcion == "Mora"
+                                        val cuotasAcumuladasSnap = totalCuotasYaPagadasSnap +
+                                            if (!esCuotaMora) cuota.total else 0.0
+                                        val moraAplicadaSnap     = totalMoraYaPagadaSnap +
+                                            if (esCuotaMora) cuota.total else 0.0
+                                        val moraPendienteSnap    = (moraActivaSnap - moraAplicadaSnap).coerceAtLeast(0.0)
+                                        val nuevoSaldo = (totalPagar - cuotasAcumuladasSnap + moraPendienteSnap).coerceAtLeast(0.0)
 
                                         val cuotasPagadas = mutableSetOf<Int>()
                                         for (pago in pagosSnapshot.documents) {

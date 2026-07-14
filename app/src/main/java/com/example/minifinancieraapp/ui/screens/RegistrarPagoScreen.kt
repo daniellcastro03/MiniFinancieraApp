@@ -401,12 +401,20 @@ fun RegistrarPagoScreen(
             val pagosSnapshot = db.collection("pagos")
                 .whereEqualTo("prestamoId", prestamoId).get().await()
             var totalRealmentePagado = 0.0
-            for (pago in pagosSnapshot.documents)
-                totalRealmentePagado += (pago.getDouble("monto") ?: 0.0) +
-                        (pago.getDouble("mora")  ?: 0.0)
+            var totalMoraInit        = 0.0
+            var totalCuotasInit      = 0.0
+            for (pago in pagosSnapshot.documents) {
+                val pm = pago.getDouble("monto") ?: 0.0
+                val mm = pago.getDouble("mora")  ?: 0.0
+                totalRealmentePagado += pm + mm
+                totalMoraInit        += mm
+                totalCuotasInit      += pm
+            }
 
             montoPagadoActual = totalRealmentePagado
-            saldoActualizado  = (totalAPagar - totalRealmentePagado).coerceAtLeast(0.0)
+            // ✅ FIX: saldo display = base - cuotas pagadas + mora pendiente
+            val moraPendienteInit = (moraActiva - totalMoraInit).coerceAtLeast(0.0)
+            saldoActualizado  = (totalAPagar - totalCuotasInit + moraPendienteInit).coerceAtLeast(0.0)
 
             val resultado = distribuirPagoConMoraYCascada(db, prestamoId, 0.0, cuotaEstimada, cuotasTotales)
             proximaCuotaPendiente = resultado.proximaCuotaPendiente
@@ -930,11 +938,19 @@ fun RegistrarPagoScreen(
                             val pagosSnapshot = db.collection("pagos")
                                 .whereEqualTo("prestamoId", prestamoId).get().await()
                             var totalRealmentePagado = 0.0
-                            for (pago in pagosSnapshot.documents)
-                                totalRealmentePagado += (pago.getDouble("monto") ?: 0.0) +
-                                        (pago.getDouble("mora")  ?: 0.0)
+                            var totalMoraYaPagada    = 0.0
+                            var totalCuotasYaPagadas = 0.0
+                            for (pago in pagosSnapshot.documents) {
+                                val pm = pago.getDouble("monto") ?: 0.0
+                                val mm = pago.getDouble("mora")  ?: 0.0
+                                totalRealmentePagado += pm + mm
+                                totalMoraYaPagada    += mm
+                                totalCuotasYaPagadas += pm
+                            }
 
-                            val saldoAnteriorCorrecto = (totalPagarDoc - totalRealmentePagado).coerceAtLeast(0.0)
+                            // ✅ FIX: Saldo anterior = base - cuotas pagadas + mora pendiente
+                            val moraPendienteActual   = (moraActualDoc - totalMoraYaPagada).coerceAtLeast(0.0)
+                            val saldoAnteriorCorrecto = (totalPagarDoc - totalCuotasYaPagadas + moraPendienteActual).coerceAtLeast(0.0)
                             val distribucion = distribuirPagoConMoraYCascada(
                                 db, prestamoId, abono, cuotaEstimada, cuotasTotales
                             )
@@ -943,12 +959,20 @@ fun RegistrarPagoScreen(
                             val fechaFormateada = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
                                 .format(fechaActual.toDate())
 
-                            val nuevoMontoPagado = totalRealmentePagado + abono
-                            val nuevoSaldo       = (totalPagarDoc - nuevoMontoPagado).coerceAtLeast(0.0)
+                            val nuevoMontoPagado  = totalRealmentePagado + abono
 
                             val cuotaMoraCubierta = distribucion.cuotasCubiertas.find { it.numeroCuota == 0 }
                             val montoPagoNormal   = abono - (cuotaMoraCubierta?.montoAplicado ?: 0.0)
                             val montoPagoMora     = cuotaMoraCubierta?.montoAplicado ?: 0.0
+
+                            // ✅ FIX: Saldo correcto separando mora de cuotas.
+                            // Fórmula: saldo = base - cuotasPagadas + moraPendiente
+                            // Evita que la mora pagada (campo que se borra al pagar)
+                            // se reste de una base que ya no la incluye.
+                            val moraYaPagadaTotal       = (totalMoraYaPagada + montoPagoMora).coerceAtLeast(0.0)
+                            val moraNuevamentePendiente = (moraActualDoc - moraYaPagadaTotal).coerceAtLeast(0.0)
+                            val cuotasAcumuladas        = totalCuotasYaPagadas + montoPagoNormal.coerceAtLeast(0.0)
+                            val nuevoSaldo              = (totalPagarDoc - cuotasAcumuladas + moraNuevamentePendiente).coerceAtLeast(0.0)
 
                             val actualizacionMora: Map<String, Any> = when {
                                 cuotaMoraCubierta != null && cuotaMoraCubierta.completada ->

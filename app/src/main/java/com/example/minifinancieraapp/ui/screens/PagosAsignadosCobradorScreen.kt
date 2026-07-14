@@ -729,6 +729,7 @@ private fun StatisticsCardCobrador(pagos: List<PagoItem>, nombreCobrador: String
     val totalPagos      = pagos.size
     val montoTotal      = pagos.sumOf { it.monto }
     val totalMora       = pagos.sumOf { it.mora }
+    val totalRecaudado  = montoTotal + totalMora          // ← NUEVO: suma total
     val abonosParciales = pagos.count { it.tipoPago == "Abono Parcial" }
 
     Card(
@@ -748,9 +749,31 @@ private fun StatisticsCardCobrador(pagos: List<PagoItem>, nombreCobrador: String
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
                 }
             }
+
+            // ── TOTAL RECAUDADO destacado ──────────────────────────────────
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color    = Color.White.copy(alpha = 0.18f),
+                shape    = RoundedCornerShape(12.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("💰 TOTAL RECAUDADO", fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.85f))
+                    Spacer(Modifier.height(4.dp))
+                    Text("L. ${String.format("%,.2f", totalRecaudado)}",
+                        fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                    if (totalMora > 0)
+                        Text("(abonos: L. ${String.format("%,.2f", montoTotal)}  +  mora: L. ${String.format("%,.2f", totalMora)})",
+                            fontSize = 11.sp, color = Color.White.copy(alpha = 0.75f))
+                }
+            }
+
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                StatItemCobrador("Total pagos",  totalPagos.toString(), "💰")
-                StatItemCobrador("Monto total",  "L. ${String.format("%.2f", montoTotal)}", "💵")
+                StatItemCobrador("Total pagos",  totalPagos.toString(), "📋")
+                StatItemCobrador("Abonos",       "L. ${String.format("%.2f", montoTotal)}", "💵")
             }
             if (totalMora > 0 || abonosParciales > 0) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
