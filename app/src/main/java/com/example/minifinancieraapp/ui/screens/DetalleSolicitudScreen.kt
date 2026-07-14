@@ -845,7 +845,7 @@ fun DetalleSolicitudScreen(
                                         .await()
                                     Toast.makeText(
                                         context,
-                                        "Solicitud rechazada y eliminada",
+                                        "Solicitud rechazadas y eliminada",
                                         Toast.LENGTH_LONG
                                     ).show()
                                     navController.popBackStack()
