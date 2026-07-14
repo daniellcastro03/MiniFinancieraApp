@@ -309,8 +309,10 @@ fun CuotasPrestamoScreen(
             totalRealPagado += (pago.getDouble("monto") ?: 0.0) +
                     (pago.getDouble("mora")  ?: 0.0)
 
+        // ✅ "totalPagar" es SIEMPRE la base (monto + interés), sin mora.
+        // El saldo real incluye la mora sumándola aparte.
         val totalPagarDoc = prestamoDoc.getDouble("totalPagar") ?: (monto + interesTotal)
-        saldoRestante = (totalPagarDoc - totalRealPagado).coerceAtLeast(0.0)
+        saldoRestante = (totalPagarDoc + moraAplicada - totalRealPagado).coerceAtLeast(0.0)
 
         // ── Cuota mora ───────────────────────────────────────────────────
         if (moraActiva) {
@@ -429,22 +431,35 @@ fun CuotasPrestamoScreen(
                                     for (pago in pagosSnapCancelar.documents)
                                         totalRealPagado += (pago.getDouble("monto") ?: 0.0) +
                                                 (pago.getDouble("mora")  ?: 0.0)
-                                    val totalPagarConMora = snap.getDouble("totalPagar") ?: 0.0
-                                    val totalPagarSinMora = (totalPagarConMora - moraGuardada).coerceAtLeast(0.0)
-                                    val nuevoSaldo        = (totalPagarSinMora - totalRealPagado).coerceAtLeast(0.0)
+
+                                    // ✅ FIX: "totalPagar" NUNCA incluye la mora (es la base fija
+                                    // monto + interés). Al cancelar la mora solo se resetea el
+                                    // campo "mora" a 0 y se recalcula el saldo real usando
+                                    // exclusivamente la base, sin restar nada de totalPagar.
+                                    val totalPagarBase = snap.getDouble("totalPagar") ?: 0.0
+                                    val nuevoSaldo = (totalPagarBase - totalRealPagado).coerceAtLeast(0.0)
+
                                     val morasAplicadasActual = (snap.get("morasAplicadas") as? List<*>)
                                         ?.mapNotNull { it as? String } ?: emptyList()
                                     val morasActualizadas = if (morasAplicadasActual.isNotEmpty())
                                         morasAplicadasActual.dropLast(1) else emptyList<String>()
+
+                                    // ✅ FIX: el estado se decide ÚNICAMENTE con base en el saldo
+                                    // real restante, no en si el arreglo de moras quedó vacío.
+                                    val nuevoEstado = if (nuevoSaldo <= 0.01) "saldado" else "activo"
+
                                     val updateData = mutableMapOf<String, Any>(
                                         "mora"                     to 0.0,
                                         "saldo"                    to nuevoSaldo,
-                                        "totalPagar"               to totalPagarSinMora,
                                         "morasAplicadas"           to morasActualizadas,
-                                        "estado"                   to if (morasActualizadas.isEmpty()) "activo" else "mora",
+                                        "estado"                   to nuevoEstado,
                                         "fechaUltimaActualizacion" to Timestamp.now(),
                                         "fechaUltimaMora"          to com.google.firebase.firestore.FieldValue.delete()
                                     )
+                                    if (nuevoEstado == "saldado") {
+                                        updateData["fechaSaldado"]     = Timestamp.now()
+                                        updateData["fechaCancelacion"] = Timestamp.now()
+                                    }
                                     if (morasActualizadas.isEmpty())
                                         updateData["saldoOriginal"] =
                                             com.google.firebase.firestore.FieldValue.delete()

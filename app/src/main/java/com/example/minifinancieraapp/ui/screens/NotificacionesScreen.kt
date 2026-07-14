@@ -814,13 +814,19 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                             return@launch
                         }
                         val saldoActual      = doc.getDouble("saldo") ?: 0.0
-                        val totalPagarActual = doc.getDouble("totalPagar") ?: saldoActual
                         val morasAplicadas   = (doc.get("morasAplicadas") as? List<*>)
                             ?.mapNotNull { it as? String } ?: emptyList()
 
+                        // ✅ FIX: "totalPagar" es SIEMPRE la base fija del préstamo
+                        // (monto + interés) y NUNCA debe incluir la mora. La mora
+                        // se guarda por separado en el campo "mora"; solo se suma
+                        // a totalPagar en tiempo de lectura (ej. totalConMora en
+                        // VerPrestamoScreen) para calcular saldo/estado real.
+                        // Antes aquí se hacía "totalPagar" to (totalPagarActual + montoMora),
+                        // lo que duplicaba el monto de la mora y provocaba saldos
+                        // incorrectos al cancelarla.
                         val updateMap = mutableMapOf<String, Any>(
                             "saldo"                    to (saldoActual + montoMora),
-                            "totalPagar"               to (totalPagarActual + montoMora),
                             "mora"                     to montoMora,
                             "morasAplicadas"           to (morasAplicadas + "${clienteMora}_${System.currentTimeMillis()}"),
                             "estado"                   to "mora",

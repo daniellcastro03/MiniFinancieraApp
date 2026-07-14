@@ -81,9 +81,35 @@ fun Map<String, Any>.toSolicitudModel(): SolicitudModel {
 }
 
 // ─────────────────────────────────────────────
-//  FUNCIONES DE CÁLCULO
+//  FUNCIONES DE CÁLCULO (renombradas con sufijo "Detalle"
+//  para evitar colisión de nombres con otros archivos del
+//  mismo package, como EditarPrestamoScreen.kt)
 // ─────────────────────────────────────────────
-fun calcularProximoPagoDesdeHoy(plazo: String): Timestamp {
+fun calcularDiasEfectivosDetalle(plazo: String, cuotas: Int, fechaInicio: Calendar): Int {
+    return when (plazo) {
+        "Diario"         -> cuotas
+        "Lunes a Sábado" -> contarDiasSinDomingosDetalle(cuotas, fechaInicio)
+        "Semanal"        -> contarDiasSinDomingosDetalle(cuotas * 6, fechaInicio)
+        "Quincenal"      -> cuotas * 15
+        "Mensual"        -> cuotas * 30
+        "Bimestral"      -> cuotas * 60
+        else             -> cuotas * 30
+    }
+}
+
+private fun contarDiasSinDomingosDetalle(diasNecesarios: Int, fechaInicio: Calendar): Int {
+    var diasEfectivos = 0
+    var diasTotales = 0
+    val fecha = fechaInicio.clone() as Calendar
+    while (diasEfectivos < diasNecesarios) {
+        if (fecha.get(Calendar.DAY_OF_WEEK) != Calendar.SUNDAY) diasEfectivos++
+        diasTotales++
+        fecha.add(Calendar.DAY_OF_YEAR, 1)
+    }
+    return diasTotales
+}
+
+fun calcularProximoPagoDesdeHoyDetalle(plazo: String): Timestamp {
     val proximaFecha = Calendar.getInstance()
     when (plazo) {
         "Diario" -> proximaFecha.add(Calendar.DAY_OF_MONTH, 1)
@@ -102,14 +128,14 @@ fun calcularProximoPagoDesdeHoy(plazo: String): Timestamp {
     return Timestamp(proximaFecha.time)
 }
 
-fun calcularInteresTotal(
+fun calcularInteresTotalDetalle(
     monto: Double,
     interesMensual: Double,
     plazo: String,
     cuotas: Int,
     fechaInicio: Calendar
 ): Double {
-    val diasEfectivos = calcularDiasEfectivos(plazo, cuotas, fechaInicio)
+    val diasEfectivos = calcularDiasEfectivosDetalle(plazo, cuotas, fechaInicio)
     val interesMensualMonto = monto * (interesMensual / 100)
     return when (plazo) {
         "Diario" -> {
@@ -167,7 +193,7 @@ suspend fun aceptarSolicitudYGenerarRecibo(
         val interesTotal = if (solicitud.interesManual > 0) {
             solicitud.interesManual
         } else {
-            calcularInteresTotal(
+            calcularInteresTotalDetalle(
                 solicitud.monto,
                 solicitud.interesMensual,
                 solicitud.plazo,
@@ -178,7 +204,7 @@ suspend fun aceptarSolicitudYGenerarRecibo(
 
         val totalPagar = solicitud.monto + interesTotal
         val cuota = if (solicitud.cuotas > 0) (totalPagar / solicitud.cuotas).roundToInt() else 0
-        val proximoPago = calcularProximoPagoDesdeHoy(solicitud.plazo)
+        val proximoPago = calcularProximoPagoDesdeHoyDetalle(solicitud.plazo)
 
         // Nombre y UID del cobrador solicitante
         val cobradorNombre = when {
@@ -412,7 +438,7 @@ fun DetalleSolicitudScreen(
     val diasEfectivos = if (solicitudActual.diasEfectivos > 0) {
         solicitudActual.diasEfectivos
     } else {
-        calcularDiasEfectivos(solicitudActual.plazo, solicitudActual.cuotas, fechaInicio)
+        calcularDiasEfectivosDetalle(solicitudActual.plazo, solicitudActual.cuotas, fechaInicio)
     }
 
     val mesesAproximados = diasEfectivos / 30.0
@@ -420,7 +446,7 @@ fun DetalleSolicitudScreen(
     val interesCalculado = if (solicitudActual.interesTotal > 0) {
         solicitudActual.interesTotal
     } else {
-        calcularInteresTotal(
+        calcularInteresTotalDetalle(
             solicitudActual.monto,
             solicitudActual.interesMensual,
             solicitudActual.plazo,
