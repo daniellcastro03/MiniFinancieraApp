@@ -298,38 +298,40 @@ fun CuotasPrestamoScreen(
 
         val moraValor  = prestamoDoc.getDouble("mora") ?: 0.0
         val moraActiva = moraValor > 0.0
-        moraAplicada   = if (moraActiva) moraValor else 0.0
 
         // ── Saldo real desde colección pagos ─────────────────────────────
         val pagosSnap = db.collection("pagos")
             .whereEqualTo("prestamoId", prestamoId).get().await()
 
-        var totalRealPagado = 0.0
-        for (pago in pagosSnap.documents)
-            totalRealPagado += (pago.getDouble("monto") ?: 0.0) +
-                    (pago.getDouble("mora")  ?: 0.0)
+        var totalCuotasPagadas = 0.0
+        var totalMoraPagada    = 0.0
+        for (pago in pagosSnap.documents) {
+            totalCuotasPagadas += pago.getDouble("monto") ?: 0.0
+            totalMoraPagada    += pago.getDouble("mora")  ?: 0.0
+        }
 
-        // ✅ "totalPagar" es SIEMPRE la base (monto + interés), sin mora.
-        // El saldo real incluye la mora sumándola aparte.
+        var moraHistorica = if (moraActiva) moraValor else 0.0
+        if (moraActiva && moraValor < totalMoraPagada) {
+            moraHistorica = totalMoraPagada + moraValor
+        }
+        moraAplicada = moraHistorica
+
         val totalPagarDoc = prestamoDoc.getDouble("totalPagar") ?: (monto + interesTotal)
-        saldoRestante = (totalPagarDoc + moraAplicada - totalRealPagado).coerceAtLeast(0.0)
+        val moraPendiente = (moraAplicada - totalMoraPagada).coerceAtLeast(0.0)
+        saldoRestante = (totalPagarDoc - totalCuotasPagadas + moraPendiente).coerceAtLeast(0.0)
 
         // ── Cuota mora ───────────────────────────────────────────────────
         if (moraActiva) {
-            var montoMoraPagado = 0.0
-            for (pago in pagosSnap.documents)
-                montoMoraPagado += pago.getDouble("mora") ?: 0.0
-
-            val moraPagada = montoMoraPagado >= moraValor - 0.90
+            val moraPagada = moraPendiente <= 0.01
             cuotas = cuotas + CuotaInfo(
                 numero      = cuotas.size + 1,
                 fecha       = "Aplicada (mora)",
                 capital     = 0.0,
                 interes     = 0.0,
-                total       = moraValor,
+                total       = moraAplicada,
                 descripcion = "Mora",
                 pagada      = moraPagada,
-                montoPagado = montoMoraPagado,
+                montoPagado = totalMoraPagada,
                 fechaPago   = if (moraPagada) "Pagada" else null
             )
         }
@@ -427,29 +429,29 @@ fun CuotasPrestamoScreen(
                                     }
                                     val pagosSnapCancelar = db.collection("pagos")
                                         .whereEqualTo("prestamoId", prestamoId).get().await()
-                                    var totalRealPagado = 0.0
-                                    for (pago in pagosSnapCancelar.documents)
-                                        totalRealPagado += (pago.getDouble("monto") ?: 0.0) +
-                                                (pago.getDouble("mora")  ?: 0.0)
+                                    var totalCuotasPagadas = 0.0
+                                    var totalMoraPagada = 0.0
+                                    for (pago in pagosSnapCancelar.documents) {
+                                        totalCuotasPagadas += pago.getDouble("monto") ?: 0.0
+                                        totalMoraPagada    += pago.getDouble("mora")  ?: 0.0
+                                    }
 
                                     // ✅ FIX: "totalPagar" NUNCA incluye la mora (es la base fija
-                                    // monto + interés). Al cancelar la mora solo se resetea el
-                                    // campo "mora" a 0 y se recalcula el saldo real usando
-                                    // exclusivamente la base, sin restar nada de totalPagar.
+                                    // monto + interés). Al cancelar la mora, fijamos la mora
+                                    // histórica igual a lo ya pagado para que moraPendiente = 0,
+                                    // y el saldo se recalcula descontando SOLO el capital pagado.
                                     val totalPagarBase = snap.getDouble("totalPagar") ?: 0.0
-                                    val nuevoSaldo = (totalPagarBase - totalRealPagado).coerceAtLeast(0.0)
+                                    val nuevoSaldo = (totalPagarBase - totalCuotasPagadas).coerceAtLeast(0.0)
 
                                     val morasAplicadasActual = (snap.get("morasAplicadas") as? List<*>)
                                         ?.mapNotNull { it as? String } ?: emptyList()
                                     val morasActualizadas = if (morasAplicadasActual.isNotEmpty())
                                         morasAplicadasActual.dropLast(1) else emptyList<String>()
 
-                                    // ✅ FIX: el estado se decide ÚNICAMENTE con base en el saldo
-                                    // real restante, no en si el arreglo de moras quedó vacío.
                                     val nuevoEstado = if (nuevoSaldo <= 0.01) "saldado" else "activo"
 
                                     val updateData = mutableMapOf<String, Any>(
-                                        "mora"                     to 0.0,
+                                        "mora"                     to totalMoraPagada,
                                         "saldo"                    to nuevoSaldo,
                                         "morasAplicadas"           to morasActualizadas,
                                         "estado"                   to nuevoEstado,
@@ -696,7 +698,7 @@ fun CuotasPrestamoScreen(
                                 val cuotaMoraFinal   = cuotas.find { it.descripcion == "Mora" }
                                 val moraAunPendiente = cuotaMoraFinal != null &&
                                         !cuotaMoraFinal.estaCompleta
-                                val moraEnTotal      = if (moraAunPendiente) moraAplicada else 0.0
+                                val moraEnTotal      = moraAplicada
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -724,7 +726,7 @@ fun CuotasPrestamoScreen(
                                         )
                                         if (moraAunPendiente && moraAplicada > 0.0)
                                             Text(
-                                                "↳ mora: L. ${dec.format(moraAplicada)}",
+                                                "↳ mora acumulada: L. ${dec.format(moraAplicada)}",
                                                 fontSize = 10.sp,
                                                 color = CRed,
                                                 fontWeight = FontWeight.Medium

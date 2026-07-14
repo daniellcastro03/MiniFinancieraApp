@@ -503,7 +503,36 @@ fun HistorialPagosPrestamoScreen(
                     onClick = {
                         scope.launch {
                             try {
+                                // ✅ FIX: Recalcular saldo desde pagos en lugar de solo borrar
+                                val prestamoRef = db.collection("prestamos").document(pago.prestamoId)
+                                val prestamoDoc = prestamoRef.get().await()
+                                val totalPagarBase = prestamoDoc.getDouble("totalPagar") ?: 0.0
+                                val moraHistorica  = prestamoDoc.getDouble("mora") ?: 0.0
+
+                                val todosLosPagos = db.collection("pagos")
+                                    .whereEqualTo("prestamoId", pago.prestamoId).get().await()
+
+                                var cuotasPagadasSinEste = 0.0
+                                var moraPagadaSinEste    = 0.0
+                                todosLosPagos.documents.forEach { doc ->
+                                    if (doc.id != pago.docId) {
+                                        cuotasPagadasSinEste += doc.getDouble("monto") ?: 0.0
+                                        moraPagadaSinEste    += doc.getDouble("mora")  ?: 0.0
+                                    }
+                                }
+                                val moraHistoricaCorregida = if (moraHistorica > 0 && moraHistorica < moraPagadaSinEste)
+                                    moraPagadaSinEste + moraHistorica else moraHistorica
+                                val moraPendienteSinEste = (moraHistoricaCorregida - moraPagadaSinEste).coerceAtLeast(0.0)
+                                val nuevoSaldo = (totalPagarBase - cuotasPagadasSinEste + moraPendienteSinEste).coerceAtLeast(0.0)
+                                val estadoNuevo = when {
+                                    nuevoSaldo <= 0.01           -> "saldado"
+                                    moraPendienteSinEste > 0.01  -> "mora"
+                                    else                         -> "activo"
+                                }
+
                                 db.collection("pagos").document(pago.docId).delete().await()
+                                prestamoRef.update(mapOf("saldo" to nuevoSaldo, "estado" to estadoNuevo)).await()
+
                                 pagos = pagos.filterNot { it.docId == pago.docId }
                                 Toast.makeText(context, "Pago eliminado correctamente", Toast.LENGTH_SHORT).show()
                             } catch (e: Exception) {

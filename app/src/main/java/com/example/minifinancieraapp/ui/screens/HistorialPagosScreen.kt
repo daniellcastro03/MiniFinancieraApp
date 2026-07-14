@@ -489,15 +489,34 @@ private suspend fun eliminarPagoCorregido(
 
             Log.d("EliminarPago", "✅ Documentos encontrados en Firestore")
 
-            // 2. Calcular el nuevo saldo
-            val montoTotal = pago.monto + pago.mora
-            val saldoActual = prestamoSnapshot.getDouble("saldo") ?: 0.0
-            val nuevoSaldo = saldoActual + montoTotal
+            // 2. Recalcular el saldo real a partir de pagos (excepto el que se borra)
+            //    Fórmula: saldo = base - cuotasPagadas + moraPendiente
+            val totalPagarBase   = prestamoSnapshot.getDouble("totalPagar") ?: 0.0
+            val moraHistorica    = prestamoSnapshot.getDouble("mora") ?: 0.0
+
+            var cuotasPagadasSinEste = 0.0
+            var moraPagadaSinEste    = 0.0
+            todosLosPagosSnapshot.documents.forEach { doc ->
+                if (doc.id != pago.docId) {
+                    cuotasPagadasSinEste += doc.getDouble("monto") ?: 0.0
+                    moraPagadaSinEste    += doc.getDouble("mora")  ?: 0.0
+                }
+            }
+
+            // Auto-fix: si la mora histórica parece menor que la pagada, sumar ambas
+            val moraHistoricaCorregida = if (moraHistorica > 0 && moraHistorica < moraPagadaSinEste) {
+                moraPagadaSinEste + moraHistorica
+            } else {
+                moraHistorica
+            }
+            val moraPendienteSinEste = (moraHistoricaCorregida - moraPagadaSinEste).coerceAtLeast(0.0)
+            val nuevoSaldo = (totalPagarBase - cuotasPagadasSinEste + moraPendienteSinEste).coerceAtLeast(0.0)
 
             Log.d("EliminarPago", """
-                💰 Cálculo de saldo:
-                • Saldo actual: L. $saldoActual
-                • Monto a devolver: L. $montoTotal (${pago.monto} + ${pago.mora})
+                💰 Cálculo de saldo (recalculado desde pagos):
+                • Base: L. $totalPagarBase
+                • Cuotas pagadas (sin este): L. $cuotasPagadasSinEste
+                • Mora pendiente (sin este): L. $moraPendienteSinEste
                 • Nuevo saldo: L. $nuevoSaldo
             """.trimIndent())
 
@@ -521,7 +540,7 @@ private suspend fun eliminarPagoCorregido(
             } else {
                 // Pago antiguo sin cuotasCubiertas
                 val numeroCuota = pago.numeroCuota ?: 1
-                cuotasPagadasMap[numeroCuota] = montoTotal
+                cuotasPagadasMap[numeroCuota] = pago.monto
                 Log.d("EliminarPago", "📋 Pago sin cuotasCubiertas, usando cuota #$numeroCuota")
             }
 
@@ -563,7 +582,7 @@ private suspend fun eliminarPagoCorregido(
                             }
                             else -> 1
                         }
-                        val monto = (docPago.getDouble("monto") ?: 0.0) + (docPago.getDouble("mora") ?: 0.0)
+                        val monto = docPago.getDouble("monto") ?: 0.0
                         cuotasPagadasTotales[num] = (cuotasPagadasTotales[num] ?: 0.0) + monto
                     }
                 }
@@ -584,7 +603,11 @@ private suspend fun eliminarPagoCorregido(
             Log.d("EliminarPago", "🎯 Próxima cuota pendiente: #$proximaCuota")
 
             // 6. Determinar estado del préstamo
-            val estadoNuevo = if (nuevoSaldo > 0.01) "activo" else "saldado"
+            val estadoNuevo = when {
+                nuevoSaldo <= 0.01 -> "saldado"
+                moraPendienteSinEste > 0.01 -> "mora"
+                else -> "activo"
+            }
             val proximoPagoStr = if (nuevoSaldo > 0.01) proximaCuota.toString() else "saldado"
 
             Log.d("EliminarPago", """

@@ -1465,18 +1465,19 @@ object ReciboHelper {
         val linePaint = Paint().apply { color = colorLinea; strokeWidth = 1f }
         val headerBg  = Paint().apply { color = colorPrimario }
 
-        // Columnas: Cliente | N° | F.Pago | F.Cancel | Monto | Mora | Cuota | Cobrador
+        // Columnas: Cliente | N° | F.Pago | F.Cancel | Abono | Mora | Total | Cuota | Cobrador
         val colXs = floatArrayOf(
             margin,           // Cliente
-            margin + 120f,    // N° Préstamo
-            margin + 172f,    // Fecha Pago
-            margin + 238f,    // Fecha Cancelación
-            margin + 310f,    // Monto
-            margin + 368f,    // Mora
-            margin + 416f,    // Cuota
-            margin + 456f     // Cobrador
+            margin + 105f,    // N° Préstamo
+            margin + 155f,    // Fecha Pago
+            margin + 205f,    // Fecha Cancelación
+            margin + 265f,    // Abono
+            margin + 315f,    // Mora
+            margin + 360f,    // Total
+            margin + 410f,    // Cuota
+            margin + 455f     // Cobrador
         )
-        val headers = arrayOf("Cliente", "N° Prést", "F. Pago", "F. Cancel.", "Monto", "Mora", "Cuota", "Cobrador")
+        val headers = arrayOf("Cliente", "N° Prést", "F. Pago", "F. Cancel.", "Abono", "Mora", "Total", "Cuota", "Cobrador")
 
         val pdf = PdfDocument()
         var pageNum = 1
@@ -1537,13 +1538,14 @@ object ReciboHelper {
             }
 
             val cols = arrayOf(
-                r.cliente.take(18),
+                r.cliente.take(16),
                 r.numeroPrestamo,
                 r.fechaPagoStr,
                 r.fechaCancel,
                 "L %,.2f".format(r.monto),
                 if (r.mora > 0) "L %,.2f".format(r.mora) else "-",
-                r.cuota.take(8),
+                "L %,.2f".format(r.monto + r.mora), // <-- NUEVO COLUMNA TOTAL
+                r.cuota.take(7),
                 r.cobrador.take(14)
             )
 
@@ -1578,9 +1580,10 @@ object ReciboHelper {
             Paint().apply { color = Color.parseColor("#EEF2FF") }
         )
         canvas.drawText("Registros: ${rows.size}", margin + 4f, totalY, totPaint)
+        val totalRecaudado = totalMonto + totalMora
         canvas.drawText(
-            "Total Mora: L %,.2f   •   Total Pagado: L %,.2f".format(totalMora, totalMonto),
-            margin + 180f, totalY, totPaint
+            "Abonos: L %,.2f   •   Mora: L %,.2f   •   TOTAL RECAUDADO: L %,.2f".format(totalMonto, totalMora, totalRecaudado),
+            margin + 120f, totalY, totPaint
         )
 
         footer(canvas)

@@ -827,7 +827,7 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                         // incorrectos al cancelarla.
                         val updateMap = mutableMapOf<String, Any>(
                             "saldo"                    to (saldoActual + montoMora),
-                            "mora"                     to montoMora,
+                            "mora"                     to com.google.firebase.firestore.FieldValue.increment(montoMora),
                             "morasAplicadas"           to (morasAplicadas + "${clienteMora}_${System.currentTimeMillis()}"),
                             "estado"                   to "mora",
                             "fechaUltimaActualizacion" to Timestamp.now(),

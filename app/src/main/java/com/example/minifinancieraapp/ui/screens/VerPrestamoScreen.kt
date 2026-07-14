@@ -170,20 +170,17 @@ fun VerPrestamoScreen(
                     totalMoraPagada   += pago.getDouble("mora")  ?: 0.0
                 }
                 val montoPagadoReal = montoCuotasPagado + totalMoraPagada
-                val totalConMora    = totalPagar + moraActual  // para display
-
-                Log.d("VerPrestamoScreen", """
-                    💰 RECÁLCULO DE SALDO (fórmula separada mora/cuotas):
-                    - Total a pagar (base): L. $totalPagar
-                    - Mora activa actual: L. $moraActual
-                    - Cuotas pagadas: L. $montoCuotasPagado
-                    - Mora ya pagada: L. $totalMoraPagada
-                """.trimIndent())
 
                 // ====== NORMALIZACIÓN CRÍTICA ======
                 val epsilon = 0.01
                 // saldo = base - cuotasPagadas + moraPendiente
-                val moraPendiente           = (moraActual - totalMoraPagada).coerceAtLeast(0.0)
+                // Auto-fix: solo si mora < moraPagada (indica que el campo fue sobreescrito antes, NO si son iguales)
+                var moraHistorica = moraActual
+                if (moraActual > 0 && moraActual < totalMoraPagada) {
+                    moraHistorica = totalMoraPagada + moraActual
+                }
+                val moraPendiente           = (moraHistorica - totalMoraPagada).coerceAtLeast(0.0)
+                val totalConMora            = totalPagar + moraHistorica  // para display: base + mora histórica total
                 val saldoPendienteCalculado = totalPagar - montoCuotasPagado + moraPendiente
                 val saldoPendiente = if (saldoPendienteCalculado <= epsilon) 0.0 else saldoPendienteCalculado
 

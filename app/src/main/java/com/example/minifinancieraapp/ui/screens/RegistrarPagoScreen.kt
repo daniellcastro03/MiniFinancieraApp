@@ -241,7 +241,15 @@ private suspend fun distribuirPagoConMoraYCascada(
             for (pago in pagosSnapshot.documents)
                 moraPagadaAcumulada += pago.getDouble("mora") ?: 0.0
 
-            val moraPendiente = (moraActiva - moraPagadaAcumulada).coerceAtLeast(0.0)
+            var moraPendiente = (moraActiva - moraPagadaAcumulada).coerceAtLeast(0.0)
+            
+            // Auto-fix for corrupted documents where mora was overwritten
+            if (moraActiva > 0 && moraActiva < moraPagadaAcumulada) {
+                val moraCorregida = moraPagadaAcumulada + moraActiva
+                try { db.collection("prestamos").document(prestamoId).update("mora", moraCorregida) } catch (_: Exception) {}
+                moraPendiente = (moraCorregida - moraPagadaAcumulada).coerceAtLeast(0.0)
+            }
+
             if (moraPendiente > 0.01 && montoRestante > 0.01) {
                 val montoAAplicarMora = minOf(montoRestante, moraPendiente)
                 val moraCompleta = montoAAplicarMora >= moraPendiente - 0.01
@@ -413,7 +421,11 @@ fun RegistrarPagoScreen(
 
             montoPagadoActual = totalRealmentePagado
             // ✅ FIX: saldo display = base - cuotas pagadas + mora pendiente
-            val moraPendienteInit = (moraActiva - totalMoraInit).coerceAtLeast(0.0)
+            var moraHistoricaInit = moraActiva
+            if (moraActiva > 0 && moraActiva < totalMoraInit) {
+                moraHistoricaInit = totalMoraInit + moraActiva
+            }
+            val moraPendienteInit = (moraHistoricaInit - totalMoraInit).coerceAtLeast(0.0)
             saldoActualizado  = (totalAPagar - totalCuotasInit + moraPendienteInit).coerceAtLeast(0.0)
 
             val resultado = distribuirPagoConMoraYCascada(db, prestamoId, 0.0, cuotaEstimada, cuotasTotales)
@@ -949,7 +961,11 @@ fun RegistrarPagoScreen(
                             }
 
                             // ✅ FIX: Saldo anterior = base - cuotas pagadas + mora pendiente
-                            val moraPendienteActual   = (moraActualDoc - totalMoraYaPagada).coerceAtLeast(0.0)
+                            var moraHistoricaDoc = moraActualDoc
+                            if (moraActualDoc > 0 && moraActualDoc < totalMoraYaPagada) {
+                                moraHistoricaDoc = totalMoraYaPagada + moraActualDoc
+                            }
+                            val moraPendienteActual   = (moraHistoricaDoc - totalMoraYaPagada).coerceAtLeast(0.0)
                             val saldoAnteriorCorrecto = (totalPagarDoc - totalCuotasYaPagadas + moraPendienteActual).coerceAtLeast(0.0)
                             val distribucion = distribuirPagoConMoraYCascada(
                                 db, prestamoId, abono, cuotaEstimada, cuotasTotales
@@ -970,13 +986,13 @@ fun RegistrarPagoScreen(
                             // Evita que la mora pagada (campo que se borra al pagar)
                             // se reste de una base que ya no la incluye.
                             val moraYaPagadaTotal       = (totalMoraYaPagada + montoPagoMora).coerceAtLeast(0.0)
-                            val moraNuevamentePendiente = (moraActualDoc - moraYaPagadaTotal).coerceAtLeast(0.0)
+                            val moraNuevamentePendiente = (moraHistoricaDoc - moraYaPagadaTotal).coerceAtLeast(0.0)
                             val cuotasAcumuladas        = totalCuotasYaPagadas + montoPagoNormal.coerceAtLeast(0.0)
                             val nuevoSaldo              = (totalPagarDoc - cuotasAcumuladas + moraNuevamentePendiente).coerceAtLeast(0.0)
 
                             val actualizacionMora: Map<String, Any> = when {
                                 cuotaMoraCubierta != null && cuotaMoraCubierta.completada ->
-                                    mapOf("mora" to 0.0, "estado" to if (nuevoSaldo <= 0.01) "saldado" else "activo")
+                                    mapOf("estado" to if (nuevoSaldo <= 0.01) "saldado" else "activo")
                                 cuotaMoraCubierta != null ->
                                     mapOf("estado" to "mora")
                                 else ->
