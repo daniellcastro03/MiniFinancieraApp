@@ -1,5 +1,6 @@
 package com.example.minifinancieraapp.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
+import com.example.capitalexpressapp.core.ActualizacionOverlay
 import com.example.minifinancieraapp.util.SessionManager
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
@@ -40,6 +42,14 @@ fun AdminScreen(navController: NavController, uid: String, rol: String) {
     var nombreAdmin by remember { mutableStateOf("") }
     var fotoUrl by remember { mutableStateOf("") }
     var mostrarDialogoCerrarSesion by remember { mutableStateOf(false) }
+    var chequeoManualActualizacion by remember { mutableStateOf(0) }
+
+    ActualizacionOverlay(
+        chequeoManualId = chequeoManualActualizacion,
+        onSinActualizaciones = {
+            Toast.makeText(context, "No hay actualizaciones disponibles", Toast.LENGTH_SHORT).show()
+        }
+    )
 
     LaunchedEffect(uid) {
         try {
@@ -364,6 +374,18 @@ fun AdminScreen(navController: NavController, uid: String, rol: String) {
                     color = Color(0xFF34495E)
                 ) {
                     navController.navigate("BackupScreen")
+                }
+            }
+
+            // BUSCAR ACTUALIZACIONES
+            item {
+                AdminOpcionCard(
+                    icon = Icons.Default.SystemUpdate,
+                    label = "Buscar Actualizaciones",
+                    subtitle = "Revisar si hay una nueva versión de la app",
+                    color = Color(0xFF16A085)
+                ) {
+                    chequeoManualActualizacion++
                 }
             }
 

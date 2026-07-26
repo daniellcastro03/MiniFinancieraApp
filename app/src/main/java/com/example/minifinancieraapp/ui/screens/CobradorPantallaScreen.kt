@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
+import com.example.capitalexpressapp.core.ActualizacionOverlay
 import com.example.minifinancieraapp.util.SessionManager
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -42,6 +43,8 @@ fun CobradorPantallaScreen(navController: NavController, uid: String) {
     val fotoUrl = session.getFotoUrl()
     var mostrarDialogoCerrarSesion by remember { mutableStateOf(false) }
     var hayAbonosPendientes by remember { mutableStateOf(false) }
+
+    ActualizacionOverlay()
 
     // Verifica si hay abonos pendientes en SharedPreferences
     LaunchedEffect(Unit) {
