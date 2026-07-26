@@ -4,6 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -142,11 +143,13 @@ fun LoginScreen(navController: NavController) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 32.dp),
-                verticalArrangement = Arrangement.Center,
+                    .padding(horizontal = 28.dp),
+                verticalArrangement = Arrangement.Top,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Logo animado
+                Spacer(modifier = Modifier.height(64.dp))
+
+                // Logo + título, arriba de la pantalla (no centrado en el medio)
                 AnimatedVisibility(
                     visible = logoVisible.value,
                     enter = fadeIn(animationSpec = tween(700)) +
@@ -154,15 +157,15 @@ fun LoginScreen(navController: NavController) {
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(bottom = 48.dp)
+                        modifier = Modifier.padding(bottom = 40.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             // Resplandor sutil detrás del logo
                             Box(
                                 modifier = Modifier
-                                    .size(180.dp)
+                                    .size(140.dp)
                                     .scale(pulseAnimation * 0.1f + 0.9f)
-                                    .blur(55.dp)
+                                    .blur(45.dp)
                                     .background(
                                         Brush.radialGradient(
                                             colors = listOf(
@@ -178,8 +181,8 @@ fun LoginScreen(navController: NavController) {
                             // el fondo oscuro de la pantalla (si no, se pierde).
                             Box(
                                 modifier = Modifier
-                                    .size(132.dp)
-                                    .shadow(elevation = 16.dp, shape = CircleShape)
+                                    .size(96.dp)
+                                    .shadow(elevation = 14.dp, shape = CircleShape)
                                     .clip(CircleShape)
                                     .background(Color.White),
                                 contentAlignment = Alignment.Center
@@ -188,24 +191,23 @@ fun LoginScreen(navController: NavController) {
                                     painter = painterResource(id = R.drawable.logo_capital),
                                     contentDescription = "Logo Capital Express",
                                     modifier = Modifier
-                                        .size(96.dp)
+                                        .size(70.dp)
                                         .scale(pulseAnimation * 0.04f + 0.96f)
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(28.dp))
+                        Spacer(modifier = Modifier.height(20.dp))
 
                         Text(
-                            text = "CAPITAL EXPRESS",
-                            fontSize = 24.sp,
+                            text = "Capital Express.",
+                            fontSize = 34.sp,
                             color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 3.sp,
+                            fontWeight = FontWeight.Black,
                             textAlign = TextAlign.Center
                         )
 
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
 
                         Text(
                             text = "Tu socio financiero de confianza",
@@ -216,7 +218,10 @@ fun LoginScreen(navController: NavController) {
                     }
                 }
 
-                // Formulario de login minimalista
+                Spacer(modifier = Modifier.weight(1f))
+
+                // Tarjeta del formulario: redondeada, con borde de acento y fondo
+                // semitransparente para que se note el degradé de atrás.
                 AnimatedVisibility(
                     visible = contentVisible.value,
                     enter = slideInVertically(
@@ -224,10 +229,30 @@ fun LoginScreen(navController: NavController) {
                         animationSpec = tween(500, easing = FastOutSlowInEasing)
                     ) + fadeIn(animationSpec = tween(500))
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(
+                                width = 1.5.dp,
+                                color = AcentoLogin.copy(alpha = 0.6f),
+                                shape = RoundedCornerShape(32.dp)
+                            )
+                            .clip(RoundedCornerShape(32.dp))
+                            .background(Color.White.copy(alpha = 0.06f))
+                            .padding(horizontal = 24.dp, vertical = 28.dp)
+                    ) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(28.dp)
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
+                        Text(
+                            "Iniciar Sesión",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+
                         CampoLogin(
                             value = codigo.value,
                             onValueChange = { codigo.value = it },
@@ -334,7 +359,10 @@ fun LoginScreen(navController: NavController) {
                             }
                         }
                     }
+                    }
                 }
+
+                Spacer(modifier = Modifier.height(48.dp))
             }
         }
     }

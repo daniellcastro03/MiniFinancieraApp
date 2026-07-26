@@ -9,31 +9,42 @@ fun normalizarTexto(texto: String): String {
     return sinAcentos.lowercase().trim().replace(Regex("\\s+"), " ")
 }
 
-private fun distanciaLevenshtein(a: String, b: String): Int {
+/**
+ * Distancia de edición con transposición (Damerau-Levenshtein, variante OSA):
+ * cuenta sustituir/agregar/quitar UNA letra, o intercambiar dos letras
+ * adyacentes, como un solo error. Deliberadamente más estricta que Levenshtein
+ * puro -que permitía 2 sustituciones independientes y hacía que nombres
+ * totalmente distintos (ej. "Majin" y "Jazmin") coincidieran por error-.
+ */
+private fun distanciaEdicion(a: String, b: String): Int {
     if (a == b) return 0
     if (a.isEmpty()) return b.length
     if (b.isEmpty()) return a.length
-    val filaAnterior = IntArray(b.length + 1) { it }
-    val filaActual = IntArray(b.length + 1)
+    val d = Array(a.length + 1) { IntArray(b.length + 1) }
+    for (i in 0..a.length) d[i][0] = i
+    for (j in 0..b.length) d[0][j] = j
     for (i in 1..a.length) {
-        filaActual[0] = i
         for (j in 1..b.length) {
             val costo = if (a[i - 1] == b[j - 1]) 0 else 1
-            filaActual[j] = minOf(
-                filaActual[j - 1] + 1,
-                filaAnterior[j] + 1,
-                filaAnterior[j - 1] + costo
+            d[i][j] = minOf(
+                d[i - 1][j] + 1,
+                d[i][j - 1] + 1,
+                d[i - 1][j - 1] + costo
             )
+            if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) {
+                d[i][j] = minOf(d[i][j], d[i - 2][j - 2] + 1)
+            }
         }
-        for (j in 0..b.length) filaAnterior[j] = filaActual[j]
     }
-    return filaAnterior[b.length]
+    return d[a.length][b.length]
 }
 
 private fun tokenCoincide(tokenConsulta: String, tokenObjetivo: String): Boolean {
     if (tokenObjetivo.startsWith(tokenConsulta) || tokenConsulta.startsWith(tokenObjetivo)) return true
-    val tolerancia = if (tokenConsulta.length <= 4) 1 else 2
-    return distanciaLevenshtein(tokenConsulta, tokenObjetivo) <= tolerancia
+    // Tolerancia fija de 1 solo error (un typo, una letra de más/menos, o dos
+    // letras cambiadas de lugar) -no más, para no hacer coincidir nombres
+    // distintos que casualmente se parecen-.
+    return distanciaEdicion(tokenConsulta, tokenObjetivo) <= 1
 }
 
 /**

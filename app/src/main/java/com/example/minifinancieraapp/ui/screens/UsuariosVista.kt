@@ -244,7 +244,7 @@ fun UsuariosVista(navController: NavController, rol: String) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(vertical = 8.dp)
             ) {
-                items(listaFiltrada) { usuario ->
+                items(listaFiltrada, key = { it.id }) { usuario ->
                     ModernUserCard(
                         usuario = usuario,
                         onEdit = { usuarioAEditar = usuario },

@@ -394,6 +394,17 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
     var totalPagarMora      by remember { mutableStateOf(0.0) }
     var esSegundaMora       by remember { mutableStateOf(false) }
 
+    fun aplicarFiltros() {
+        notificaciones.clear()
+        val filtradas = todasLasNotificaciones.asSequence().filter { n ->
+            val pasaTipo     = filtroTipo == "Todos" || filtroTipo == n.tipo
+            val pasaBusqueda = textoBusqueda.isBlank() ||
+                    n.cliente.contains(textoBusqueda, ignoreCase = true)
+            pasaTipo && pasaBusqueda
+        }.toList()
+        notificaciones.addAll(filtradas)
+    }
+
     // ─── CARGA ───────────────────────────────────────────────────────────
     suspend fun cargarNotificaciones() {
         try {
@@ -590,6 +601,11 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
             }
 
             todasLasNotificaciones.addAll(ordenado)
+            // ✅ Se llama aquí mismo, sincrónico, para que "notificaciones" (la lista
+            // que se muestra) ya esté al día en el mismo instante en que isLoading
+            // pasa a false -si no, quedaba un frame mostrando "vacío" antes de que
+            // el LaunchedEffect aparte recalculara el filtro-.
+            aplicarFiltros()
 
         } catch (e: Exception) {
             hasError = true
@@ -604,16 +620,6 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
         }
     }
 
-    fun aplicarFiltros() {
-        notificaciones.clear()
-        val filtradas = todasLasNotificaciones.asSequence().filter { n ->
-            val pasaTipo     = filtroTipo == "Todos" || filtroTipo == n.tipo
-            val pasaBusqueda = textoBusqueda.isBlank() ||
-                    n.cliente.contains(textoBusqueda, ignoreCase = true)
-            pasaTipo && pasaBusqueda
-        }.toList()
-        notificaciones.addAll(filtradas)
-    }
 
     LaunchedEffect(filtroTipo, textoBusqueda, todasLasNotificaciones.size) { aplicarFiltros() }
     LaunchedEffect(Unit) { scope.launch { cargarNotificaciones() } }

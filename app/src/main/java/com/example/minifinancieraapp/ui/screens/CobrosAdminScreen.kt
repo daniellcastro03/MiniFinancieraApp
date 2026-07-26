@@ -206,7 +206,7 @@ fun CobrosAdminScreen(navController: NavController, adminUid: String) {
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(prestamos) { prestamo ->
+                        items(prestamos, key = { it.id }) { prestamo ->
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()

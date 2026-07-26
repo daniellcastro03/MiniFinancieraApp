@@ -42,6 +42,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
+
+// ✅ Caché en memoria de "cobradorId -> nombre": sin esto, cada tarjeta volvía a
+// consultar Firestore cada vez que reaparecía en pantalla al hacer scroll (las
+// tarjetas fuera de vista se descomponen), lo que se sentía como scroll trabado.
+private val cobradorNombreCache = ConcurrentHashMap<String, String>()
 
 // ⭐ Data class actualizada con numeroPrestamo como String
 data class PrestamoAdmin(
@@ -197,8 +203,14 @@ suspend fun obtenerNombresCobradores(cobradores: List<String>): String {
         val nombres = mutableListOf<String>()
 
         for (cobradorId in cobradores) {
+            val cacheado = cobradorNombreCache[cobradorId]
+            if (cacheado != null) {
+                nombres.add(cacheado)
+                continue
+            }
             val doc = db.collection("usuarios").document(cobradorId).get().await()
             val nombre = doc.getString("nombre") ?: doc.getString("email") ?: "Usuario desconocido"
+            cobradorNombreCache[cobradorId] = nombre
             nombres.add(nombre)
         }
 

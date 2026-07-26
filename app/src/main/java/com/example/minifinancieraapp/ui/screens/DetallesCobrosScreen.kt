@@ -111,7 +111,7 @@ fun DetalleCobrosScreen(navController: NavController, cobrador: String) {
                     Spacer(Modifier.height(8.dp))
 
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(prestamos) { prestamo ->
+                        items(prestamos, key = { it.id }) { prestamo ->
                             val fechaHoy = remember { Date() }
                             val fechaPago = runCatching { formatter.parse(prestamo.proximoPago) }.getOrNull()
                             val diasAtraso = fechaPago?.let {

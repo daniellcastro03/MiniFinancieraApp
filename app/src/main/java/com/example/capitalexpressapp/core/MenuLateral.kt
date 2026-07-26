@@ -52,10 +52,10 @@ fun MenuLateralContenido(
     onCerrar: () -> Unit
 ) {
     val esAdmin = rol == "admin"
+    val rutaInicio = if (esAdmin) "AdminScreen/$uid/admin" else "CobradorPantalla/$uid"
 
     val itemsComunes = listOf(
-        if (esAdmin) ItemMenu("Inicio", Icons.Default.Home, "AdminScreen/$uid/admin")
-        else ItemMenu("Inicio", Icons.Default.Home, "CobradorPantalla/$uid"),
+        ItemMenu("Inicio", Icons.Default.Home, rutaInicio),
         ItemMenu("Clientes", Icons.Default.People, "ClientesVista/$uid/$rol"),
         ItemMenu("Préstamos", Icons.Default.Assignment, "PrestamoAdminScreen/$uid/$rol"),
         ItemMenu("Notificaciones", Icons.Default.Notifications, "NotificacionesScreen/$uid/$rol"),
@@ -99,7 +99,13 @@ fun MenuLateralContenido(
                 selected = false,
                 onClick = {
                     onCerrar()
-                    navController.navigate(item.ruta) { launchSingleTop = true }
+                    // Al navegar desde el menú, la pila vuelve a quedar en
+                    // Inicio -> destino: así "atrás" lleva a Inicio, no a la
+                    // pantalla en la que estaba antes de abrir el menú.
+                    navController.navigate(item.ruta) {
+                        popUpTo(rutaInicio) { inclusive = item.ruta == rutaInicio }
+                        launchSingleTop = true
+                    }
                 },
                 modifier = Modifier.padding(horizontal = 12.dp)
             )
