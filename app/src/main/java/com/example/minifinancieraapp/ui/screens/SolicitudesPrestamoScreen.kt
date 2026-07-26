@@ -1,6 +1,7 @@
 package com.example.capitalexpressapp.ui.screens
 
 import com.example.minifinancieraapp.ui.models.SolicitudModel
+import com.example.capitalexpressapp.core.formatearLempiras
 import android.content.Context
 import android.net.Uri
 import android.widget.Toast
@@ -324,7 +325,7 @@ fun SolicitudCard(
                     ) {
                         Column {
                             Text("Monto:", fontWeight = FontWeight.Bold)
-                            Text("L. %.2f".format(solicitud.monto))
+                            Text(formatearLempiras(solicitud.monto))
                         }
                         Column {
                             Text("Interés:", fontWeight = FontWeight.Bold)
@@ -340,11 +341,11 @@ fun SolicitudCard(
                     ) {
                         Column {
                             Text("Total a pagar:", fontWeight = FontWeight.Bold)
-                            Text("L. %.2f".format(solicitud.totalPagar))
+                            Text(formatearLempiras(solicitud.totalPagar))
                         }
                         Column {
                             Text("Cuota:", fontWeight = FontWeight.Bold)
-                            Text("L. %.0f".format(solicitud.cuota))
+                            Text(formatearLempiras(solicitud.cuota))
                         }
                     }
                 }

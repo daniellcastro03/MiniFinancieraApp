@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.util.Log
 import android.widget.Toast
+import com.example.capitalexpressapp.core.formatearLempiras
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -801,16 +802,16 @@ fun ResumenSolicitud(
             Divider(color = SolicitudPrestamoColors.Primary.copy(alpha = 0.2f))
             Spacer(Modifier.height(16.dp))
 
-            ResumenRow("Monto solicitado",   "L. ${"%.2f".format(monto)}",            true)
+            ResumenRow("Monto solicitado",   formatearLempiras(monto),            true)
             if (usarInteresMensual) ResumenRow("Interés mensual", "${"%.1f".format(interesPorcentaje)}%", false)
-            else                    ResumenRow("Interés fijo",    "L. ${"%.2f".format(interesTotalFijo)}", false)
+            else                    ResumenRow("Interés fijo",    formatearLempiras(interesTotalFijo), false)
             ResumenRow("Días efectivos",     "$diasEfectivos días",                    false)
-            ResumenRow("Interés total",      "L. ${"%.2f".format(interesCalculado)}", false)
-            ResumenRow("Total a pagar",      "L. ${"%.2f".format(totalAPagar)}",      true)
+            ResumenRow("Interés total",      formatearLempiras(interesCalculado), false)
+            ResumenRow("Total a pagar",      formatearLempiras(totalAPagar),      true)
             ResumenRow("Cuotas",             "$cuotas $plazo",                         false)
-            ResumenRow("Cuota estimada",     "L. ${"%.0f".format(cuotaEstimada)}",    true)
+            ResumenRow("Cuota estimada",     formatearLempiras(cuotaEstimada),    true)
             ResumenRow("Próximo pago",       proximoPago,                              false)
-            if (mora > 0)         ResumenRow("Mora diaria",   "L. ${"%.2f".format(mora)}", false)
+            if (mora > 0)         ResumenRow("Mora diaria",   formatearLempiras(mora), false)
             if (fotosCount > 0)   ResumenRow("Fotos adjuntas", "$fotosCount",          false)
         }
     }

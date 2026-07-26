@@ -2,6 +2,7 @@ package com.example.minifinancieraapp.ui.screens
 
 import android.app.DatePickerDialog
 import android.widget.Toast
+import com.example.capitalexpressapp.core.formatearLempiras
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -763,22 +764,22 @@ private fun StatisticsCardCobrador(pagos: List<PagoItem>, nombreCobrador: String
                     Text("💰 TOTAL RECAUDADO", fontSize = 11.sp,
                         fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.85f))
                     Spacer(Modifier.height(4.dp))
-                    Text("L. ${String.format("%,.2f", totalRecaudado)}",
+                    Text(formatearLempiras(totalRecaudado),
                         fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
                     if (totalMora > 0)
-                        Text("(abonos: L. ${String.format("%,.2f", montoTotal)}  +  mora: L. ${String.format("%,.2f", totalMora)})",
+                        Text("(abonos: ${formatearLempiras(montoTotal)}  +  mora: ${formatearLempiras(totalMora)})",
                             fontSize = 11.sp, color = Color.White.copy(alpha = 0.75f))
                 }
             }
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 StatItemCobrador("Total pagos",  totalPagos.toString(), "📋")
-                StatItemCobrador("Abonos",       "L. ${String.format("%.2f", montoTotal)}", "💵")
+                StatItemCobrador("Abonos",       formatearLempiras(montoTotal), "💵")
             }
             if (totalMora > 0 || abonosParciales > 0) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     if (totalMora > 0)
-                        StatItemCobrador("Total mora", "L. ${String.format("%.2f", totalMora)}", "🚨")
+                        StatItemCobrador("Total mora", formatearLempiras(totalMora), "🚨")
                     if (abonosParciales > 0)
                         StatItemCobrador("Abonos parciales", abonosParciales.toString(), "🧩")
                 }
@@ -893,14 +894,14 @@ private fun PagoCardCobrador(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(if (esAbonoParcial) "Abono realizado" else "Total pagado", fontSize = 12.sp, color = Color.Gray)
                     Text(
-                        "L. ${String.format("%.2f", pago.monto)}",
+                        formatearLempiras(pago.monto),
                         fontWeight = FontWeight.Bold, fontSize = 20.sp,
                         color = when { esAbonoParcial -> Color(0xFFFF9800); esManual -> Color(0xFF673AB7); else -> Color(0xFF2E7D32) }
                     )
                     if (pago.mora > 0)
-                        Text("Base: L. ${String.format("%.2f", pago.monto - pago.mora)}", fontSize = 12.sp, color = Color.Gray)
+                        Text("Base: ${formatearLempiras(pago.monto - pago.mora)}", fontSize = 12.sp, color = Color.Gray)
                     if (esAbonoParcial && (pago.saldoRestante ?: 0.0) > 0)
-                        Text("Resta de cuota: L. ${String.format("%.2f", pago.saldoRestante ?: 0.0)}", fontSize = 12.sp, color = Color(0xFFFF9800), fontWeight = FontWeight.Medium)
+                        Text("Resta de cuota: ${formatearLempiras(pago.saldoRestante ?: 0.0)}", fontSize = 12.sp, color = Color(0xFFFF9800), fontWeight = FontWeight.Medium)
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Surface(
@@ -924,13 +925,13 @@ private fun PagoCardCobrador(
                     if (pago.mora > 0.0) {
                         Column {
                             Text("Mora", fontSize = 12.sp, color = Color.Red)
-                            Text("L. ${String.format("%.2f", pago.mora)}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Red)
+                            Text(formatearLempiras(pago.mora), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Red)
                         }
                     }
                     if (pago.interesTotal > 0.0) {
                         Column {
                             Text("Interés", fontSize = 12.sp, color = Color(0xFF6A1B9A))
-                            Text("L. ${String.format("%.2f", pago.interesTotal)}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF6A1B9A))
+                            Text(formatearLempiras(pago.interesTotal), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF6A1B9A))
                         }
                     }
                 }

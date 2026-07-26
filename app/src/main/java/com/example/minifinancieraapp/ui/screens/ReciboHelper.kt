@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Environment
 import android.widget.Toast
 import androidx.core.content.FileProvider
+import com.example.capitalexpressapp.core.formatearLempiras
 import com.dantsu.escposprinter.EscPosPrinter
 import com.dantsu.escposprinter.connection.bluetooth.BluetoothPrintersConnections
 import com.itextpdf.text.Document
@@ -253,15 +254,15 @@ object ReciboHelper {
             // Métricas financieras con colores temáticos
             y = dibujarMetrica(
                 "Monto Total Prestado:",
-                "L. ${dec.format(prestado)}",
+                "L.${dec.format(prestado)}",
                 Color.parseColor("#8B5CF6"),
                 y
             )
-            y = dibujarMetrica("Total Pagado:", "L. ${dec.format(pagado)}", colorExito, y)
-            y = dibujarMetrica("Saldo Pendiente:", "L. ${dec.format(pendiente)}", colorPendiente, y)
+            y = dibujarMetrica("Total Pagado:", "L.${dec.format(pagado)}", colorExito, y)
+            y = dibujarMetrica("Saldo Pendiente:", "L.${dec.format(pendiente)}", colorPendiente, y)
             y = dibujarMetrica(
                 "Total de Intereses:",
-                "L. ${dec.format(interes)}",
+                "L.${dec.format(interes)}",
                 colorAdvertencia,
                 y
             )
@@ -272,7 +273,7 @@ object ReciboHelper {
 
             y = dibujarMetrica(
                 "Total Moras Cobradas:",
-                "L. ${dec.format(moras)}",
+                "L.${dec.format(moras)}",
                 Color.parseColor("#DC2626"),
                 y
             )
@@ -311,7 +312,7 @@ object ReciboHelper {
 
             canvas.drawText("Total General (Capital + Interés):", margen + 15f, y, paintText)
             canvas.drawText(
-                "L. ${dec.format(totalGeneral)}",
+                "L.${dec.format(totalGeneral)}",
                 ancho - margen - 15f,
                 y,
                 Paint().apply {
@@ -489,8 +490,8 @@ object ReciboHelper {
             document.add(Paragraph("DETALLE DE PAGO:", labelFont))
             document.add(Paragraph(" "))
 
-            document.add(Paragraph("Saldo anterior:    L. %.2f".format(saldoAnterior), textFont))
-            document.add(Paragraph("Monto abonado:     L. %.2f".format(montoAbonado), textFont))
+            document.add(Paragraph("Saldo anterior:    ${formatearLempiras(saldoAnterior)}", textFont))
+            document.add(Paragraph("Monto abonado:     ${formatearLempiras(montoAbonado)}", textFont))
 
             document.add(Paragraph(" "))
             document.add(Paragraph("─────────────────────────────", smallFont).apply {
@@ -500,7 +501,7 @@ object ReciboHelper {
 
             document.add(
                 Paragraph(
-                    "Nuevo saldo:       L. %.2f".format(nuevoSaldo),
+                    "Nuevo saldo:       ${formatearLempiras(nuevoSaldo)}",
                     labelFont
                 ).apply {
                     setLeading(0f, 1.2f)
@@ -574,11 +575,11 @@ object ReciboHelper {
                 builder.append("[L]<b>Cliente:</b> ${pago.cliente}\n")
                 builder.append("[L]<b>Préstamo ID:</b> ${pago.prestamoId}\n")
                 builder.append("[L]<b>Fecha:</b> ${pago.fecha}\n")
-                builder.append("[L]<b>Monto:</b> L. %.2f\n".format(pago.monto))
+                builder.append("[L]<b>Monto:</b> ${formatearLempiras(pago.monto)}\n")
                 if (pago.interesTotal > 0.0)
-                    builder.append("[L]<b>Interés:</b> L. %.2f\n".format(pago.interesTotal))
+                    builder.append("[L]<b>Interés:</b> ${formatearLempiras(pago.interesTotal)}\n")
                 if (pago.mora > 0.0)
-                    builder.append("[L]<b>Mora:</b> L. %.2f\n".format(pago.mora))
+                    builder.append("[L]<b>Mora:</b> ${formatearLempiras(pago.mora)}\n")
                 if (pago.cuota.isNotBlank())
                     builder.append("[L]<b>Cuota:</b> ${pago.cuota}\n")
                 if (pago.cobrador.isNotBlank())
@@ -589,7 +590,7 @@ object ReciboHelper {
             }
 
             builder.append("\n[C]===============================\n")
-            builder.append("[C]<b>TOTAL PAGADO:</b> L. %.2f\n".format(total))
+            builder.append("[C]<b>TOTAL PAGADO:</b> ${formatearLempiras(total)}\n")
             builder.append("[C]===============================\n")
 
             builder.append("\n\n[L]Firma:\n")
@@ -652,16 +653,16 @@ object ReciboHelper {
 
             builder.append("[L]<b>TIPO DE PAGO:</b> $tipoPago\n")
             builder.append("[L]<b>COBRADOR:</b> $cobrador\n")
-            builder.append("[L]<b>SALDO ANTERIOR:</b> L. %.2f\n".format(saldoAnterior))
+            builder.append("[L]<b>SALDO ANTERIOR:</b> ${formatearLempiras(saldoAnterior)}\n")
             if (mora > 0.0) {
-                builder.append("[L]<b>MORA APLICADA:</b> L. %.2f\n".format(mora))
+                builder.append("[L]<b>MORA APLICADA:</b> ${formatearLempiras(mora)}\n")
             }
 
             val pagado = montoPagado.toDoubleOrNull() ?: 0.0
             val saldoRestante = saldoAnterior + mora - pagado
 
-            builder.append("[L]<b>TOTAL PAGADO:</b> L. %.2f\n".format(pagado))
-            builder.append("[L]<b>SALDO RESTANTE:</b> L. %.2f\n".format(saldoRestante))
+            builder.append("[L]<b>TOTAL PAGADO:</b> ${formatearLempiras(pagado)}\n")
+            builder.append("[L]<b>SALDO RESTANTE:</b> ${formatearLempiras(saldoRestante)}\n")
             builder.append("[L]<b>PRÓXIMO PAGO:</b> $proximoPago\n")
             builder.append("[L]--------------------------------\n")
 
@@ -1059,16 +1060,16 @@ object ReciboHelper {
             y += 20
             canvas.drawText("Fecha de compra: $fecha", 40f, y.toFloat(), paint)
             y += 18
-            canvas.drawText("Precio: L. %.2f".format(monto), 40f, y.toFloat(), paint)
+            canvas.drawText("Precio: ${formatearLempiras(monto)}", 40f, y.toFloat(), paint)
 
             val pagos = pagosPorPrestamo[producto] ?: emptyList()
             val totalPagado = pagos.sumOf { it.monto }
             val restante = monto - totalPagado
 
             y += 18
-            canvas.drawText("Pagado: L. %.2f".format(totalPagado), 40f, y.toFloat(), paint)
+            canvas.drawText("Pagado: ${formatearLempiras(totalPagado)}", 40f, y.toFloat(), paint)
             y += 18
-            canvas.drawText("Resta: L. %.2f".format(restante), 40f, y.toFloat(), paint)
+            canvas.drawText("Resta: ${formatearLempiras(restante)}", 40f, y.toFloat(), paint)
             y += 25
 
             if (pagos.isNotEmpty()) {
@@ -1224,13 +1225,13 @@ object ReciboHelper {
             Préstamo ID: $prestamoId
             Fecha: $fecha
             Monto Pagado: L. $montoPagado
-            Saldo Anterior: L. %.2f
+            Saldo Anterior: ${formatearLempiras(saldoAnterior)}
             Próximo Pago: $proximoPago
             Cuota: $cuota
             Registrado por: $cobrador
             *************************************
             Gracias por su pago.
-        """.trimIndent().format(saldoAnterior)
+        """.trimIndent()
     }
 
     private suspend fun obtenerFechaCancelacionPrestamo(
@@ -1948,7 +1949,7 @@ object ReciboHelper {
             val nombreCliente = doc.getString("cliente") ?: "N/A"
             val monto = doc.getDouble("monto") ?: 0.0
             val fecha = doc.getString("fecha") ?: "Sin fecha"
-            Triple(index + 1, nombreCliente, "L. %.2f  |  $fecha".format(monto))
+            Triple(index + 1, nombreCliente, "${formatearLempiras(monto)}  |  $fecha")
         }
 
         val titulo = "Resumen de Préstamos - $periodo"
@@ -2626,13 +2627,13 @@ object ReciboHelper {
                         )
                     )
                     table.addCell(
-                        Paragraph("L. ${"%.2f".format(pres)}", normalFont)
+                        Paragraph(formatearLempiras(pres), normalFont)
                     )
                     table.addCell(
-                        Paragraph("L. ${"%.2f".format(abo)}", normalFont)
+                        Paragraph(formatearLempiras(abo), normalFont)
                     )
                     table.addCell(
-                        Paragraph("L. ${"%.2f".format(pen)}", normalFont)
+                        Paragraph(formatearLempiras(pen), normalFont)
                     )
                     table.addCell(Paragraph(estadoTxt, normalFont))
                     table.addCell(Paragraph(proxTxt, normalFont))
@@ -2698,9 +2699,9 @@ object ReciboHelper {
                             }
                         )
 
-                    cell("Prestado: L. ${"%.2f".format(subPres)}")
-                    cell("Abonado: L. ${"%.2f".format(subAbo)}")
-                    cell("Pendiente: L. ${"%.2f".format(subPen)}")
+                    cell("Prestado: ${formatearLempiras(subPres)}")
+                    cell("Abonado: ${formatearLempiras(subAbo)}")
+                    cell("Pendiente: ${formatearLempiras(subPen)}")
                     cell("Activos: $subAct")
                     cell("Saldados: $subSal")
                 }
@@ -2772,9 +2773,9 @@ object ReciboHelper {
                         }
                     )
 
-                cell("Prestado: L. ${"%.2f".format(gPres)}")
-                cell("Abonado: L. ${"%.2f".format(gAbo)}")
-                cell("Pendiente: L. ${"%.2f".format(gPen)}")
+                cell("Prestado: ${formatearLempiras(gPres)}")
+                cell("Abonado: ${formatearLempiras(gAbo)}")
+                cell("Pendiente: ${formatearLempiras(gPen)}")
                 cell("Activos: $gAct")
                 cell("Saldados: $gSal")
             }
@@ -2931,7 +2932,7 @@ object ReciboHelper {
             canvas.drawText("Monto total pendiente:", col1X, summaryY, paint)
             paint.color = Color.parseColor("#D32F2F")
             paint.textSize = 13f
-            canvas.drawText("L. ${String.format("%.2f", totalMontoPendiente)}", col1X + 150f, summaryY, paint)
+            canvas.drawText(formatearLempiras(totalMontoPendiente), col1X + 150f, summaryY, paint)
 
             yPos += boxHeight + 25f
 
@@ -2958,7 +2959,7 @@ object ReciboHelper {
 
                 smallPaint.color = Color.GRAY
                 canvas.drawText(
-                    "$totalCuotasCliente cuota(s) pendiente(s) - Total: L. ${String.format("%.2f", totalMontoCliente)}",
+                    "$totalCuotasCliente cuota(s) pendiente(s) - Total: ${formatearLempiras(totalMontoCliente)}",
                     margin,
                     yPos,
                     smallPaint
@@ -3328,9 +3329,9 @@ object ReciboHelper {
             canvas.drawText("⏰ PENDIENTE", col3, y, paintWhite)
             y += espacioLinea
 
-            canvas.drawText("L. ${decEntero.format(totalPrestado)}", col1, y, paintWhiteBold)
-            canvas.drawText("L. ${decEntero.format(totalPagado)}", col2, y, paintWhiteBold)
-            canvas.drawText("L. ${decEntero.format(totalPendiente)}", col3, y, paintWhiteBold)
+            canvas.drawText("L.${decEntero.format(totalPrestado)}", col1, y, paintWhiteBold)
+            canvas.drawText("L.${decEntero.format(totalPagado)}", col2, y, paintWhiteBold)
+            canvas.drawText("L.${decEntero.format(totalPendiente)}", col3, y, paintWhiteBold)
             y += 35f
 
             // === ESTADÍSTICAS POR ESTADO ===
@@ -3411,9 +3412,9 @@ object ReciboHelper {
                 // Dibujar datos
                 canvas.drawText(numero, colNro, y, paintTextCenter)
                 canvas.drawText(cliente, margen + 55f, y, paintText)
-                canvas.drawText("L. ${decEntero.format(monto)}", colPrestamo, y, paintText)
-                canvas.drawText("L. ${decEntero.format(montoPagado)}", colPagado, y, paintText)
-                canvas.drawText("L. ${decEntero.format(saldo)}", colSaldo, y,
+                canvas.drawText("L.${decEntero.format(monto)}", colPrestamo, y, paintText)
+                canvas.drawText("L.${decEntero.format(montoPagado)}", colPagado, y, paintText)
+                canvas.drawText("L.${decEntero.format(saldo)}", colSaldo, y,
                     Paint().apply {
                         color = if (saldo > 0) colorVencido else colorActivo
                         textSize = 9f
@@ -3685,8 +3686,8 @@ object ReciboHelper {
                 // Datos de la fila
                 canvas.drawText("$numero", colPago, y, paintTextCenter)
                 canvas.drawText(fecha, colFecha, y, paintText)
-                canvas.drawText("L. ${dec.format(total)}", colMonto, y, paintText)
-                canvas.drawText("L. ${dec.format(montoPagado)}", colPagado, y, paintText)
+                canvas.drawText("L.${dec.format(total)}", colMonto, y, paintText)
+                canvas.drawText("L.${dec.format(montoPagado)}", colPagado, y, paintText)
                 canvas.drawText(estado, colEstado, y, paintEstado)
 
                 y += espacioLinea
@@ -3709,21 +3710,21 @@ object ReciboHelper {
             canvas.drawText("RESUMEN DEL PRÉSTAMO", margen + 10f, y, paintSubtitle)
             y += espacioLinea
             canvas.drawText(
-                "Total Capital: L. ${dec.format(totalCapital)}",
+                "Total Capital: L.${dec.format(totalCapital)}",
                 margen + 10f,
                 y,
                 paintText
             )
             y += espacioLinea
             canvas.drawText(
-                "Total Intereses: L. ${dec.format(totalInteres)}",
+                "Total Intereses: L.${dec.format(totalInteres)}",
                 margen + 10f,
                 y,
                 paintText
             )
             if (mora > 0) {
                 y += espacioLinea
-                canvas.drawText("Mora: L. ${dec.format(mora)}", margen + 10f, y, paintText)
+                canvas.drawText("Mora: L.${dec.format(mora)}", margen + 10f, y, paintText)
             }
             y += espacioLinea
 
@@ -3732,20 +3733,20 @@ object ReciboHelper {
             val saldoPendiente = (totalGeneral - totalPagado).coerceAtLeast(0.0)
 
             canvas.drawText(
-                "TOTAL PRÉSTAMO: L. ${dec.format(totalGeneral)}",
+                "TOTAL PRÉSTAMO: L.${dec.format(totalGeneral)}",
                 margen + 10f,
                 y,
                 paintSubtitle
             )
             y += espacioLinea
             canvas.drawText(
-                "TOTAL PAGADO: L. ${dec.format(totalPagado)}",
+                "TOTAL PAGADO: L.${dec.format(totalPagado)}",
                 margen + 10f,
                 y,
                 paintText
             )
             y += espacioLinea
-            canvas.drawText("SALDO PENDIENTE: L. ${dec.format(saldoPendiente)}", margen + 10f, y,
+            canvas.drawText("SALDO PENDIENTE: L.${dec.format(saldoPendiente)}", margen + 10f, y,
                 Paint().apply {
                     color = if (saldoPendiente > 0) Color.RED else colorExito
                     textSize = 12f

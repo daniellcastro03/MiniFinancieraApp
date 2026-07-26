@@ -242,7 +242,9 @@ fun FiltrosCompactos(
                 },
                 trailingIcon = if (search.isNotBlank()) {
                     {
-                        IconButton(onClick = { onSearchChange("") }) {
+                        // Limpiar la búsqueda vacía la lista (vuelve al estado de
+                        // búsqueda), no muestra todos los préstamos cargados.
+                        IconButton(onClick = onResetFiltros) {
                             Icon(Icons.Default.Clear, null, tint = Color.Gray)
                         }
                     }
@@ -658,7 +660,6 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
     val fullFormatter = SimpleDateFormat("dd 'de' MMMM 'de' yyyy, HH:mm:ss a", Locale("es", "ES"))
 
     var prestamosOriginales by remember { mutableStateOf(listOf<PrestamoAdmin>()) }
-    var prestamosFiltrados by remember { mutableStateOf(listOf<PrestamoAdmin>()) }
     var prestamoAEliminar by remember { mutableStateOf<PrestamoAdmin?>(null) }
     var cargando by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
@@ -693,6 +694,8 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
         estadoSeleccionado = "Todos"
         search = ""
         mostrarEliminados = false
+        // Limpiar vuelve al estado de búsqueda (vacío), no muestra todos los préstamos.
+        datosYaCargados = false
     }
 
     fun configurarListenerFirebase() {
@@ -898,28 +901,31 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
         }
     }
 
-    LaunchedEffect(estadoSeleccionado, search, prestamosOriginales, mostrarEliminados) {
-        prestamosFiltrados = prestamosOriginales
-            .filter { prestamo ->
-                val coincideEliminado = if (mostrarEliminados) {
-                    prestamo.eliminado
-                } else {
-                    !prestamo.eliminado
-                }
-
-                val coincideEstado = estadoSeleccionado == "Todos" ||
-                        prestamo.estado.equals(estadoSeleccionado, ignoreCase = true)
-
-                // ⭐ BÚSQUEDA POR CLIENTE (tolera errores de tipeo/orden) Y NÚMERO DE PRÉSTAMO
-                val coincideBusqueda = search.isBlank() ||
-                        coincideAproximado(search, prestamo.cliente) ||
-                        prestamo.numeroPrestamo.contains(search, ignoreCase = true)
-
-                coincideEliminado && coincideEstado && coincideBusqueda
+    // ✅ Se calcula directo en la composición (no en un LaunchedEffect aparte) para que
+    // no quede desfasado un frame de "prestamosOriginales" -eso causaba el parpadeo de
+    // "no se encontraron préstamos" apenas antes de que aparecieran los resultados reales-.
+    val prestamosFiltrados = prestamosOriginales
+        .filter { prestamo ->
+            val coincideEliminado = if (mostrarEliminados) {
+                prestamo.eliminado
+            } else {
+                !prestamo.eliminado
             }
-            .sortedWith(compareBy<PrestamoAdmin> { it.cobradores.isEmpty() }
-                .thenByDescending { it.fechaCreacionTimestamp?.toDate() })
-    }
+
+            val coincideEstado = estadoSeleccionado == "Todos" ||
+                    prestamo.estado.equals(estadoSeleccionado, ignoreCase = true)
+
+            // ⭐ BÚSQUEDA POR CLIENTE (tolera errores de tipeo/orden) Y NÚMERO DE PRÉSTAMO
+            val coincideBusqueda = search.isBlank() ||
+                    coincideAproximado(search, prestamo.cliente) ||
+                    prestamo.numeroPrestamo.contains(search, ignoreCase = true)
+
+            coincideEliminado && coincideEstado && coincideBusqueda
+        }
+        .sortedWith(
+            compareBy<PrestamoAdmin> { it.cobradores.isEmpty() }
+                .thenByDescending { it.fechaCreacionTimestamp?.toDate() }
+        )
 
     Scaffold(
         topBar = {

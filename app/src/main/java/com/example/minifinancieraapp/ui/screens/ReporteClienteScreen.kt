@@ -2,6 +2,7 @@ package com.example.capitalexpressapp.ui.screens
 
 import android.util.Log
 import android.widget.Toast
+import com.example.capitalexpressapp.core.formatearLempiras
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -662,15 +663,15 @@ fun ReporteClientesScreen(
                             ) {
                                 StatChip(
                                     "Prestado",
-                                    "L. ${"%.2f".format(resumen.totalPrestado)}"
+                                    formatearLempiras(resumen.totalPrestado)
                                 )
                                 StatChip(
                                     "Abonado",
-                                    "L. ${"%.2f".format(resumen.totalAbonado)}"
+                                    formatearLempiras(resumen.totalAbonado)
                                 )
                                 StatChip(
                                     "Pendiente",
-                                    "L. ${"%.2f".format(resumen.totalPendiente)}"
+                                    formatearLempiras(resumen.totalPendiente)
                                 )
                             }
                         }

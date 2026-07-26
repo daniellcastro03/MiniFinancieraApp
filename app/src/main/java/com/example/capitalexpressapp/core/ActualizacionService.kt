@@ -14,7 +14,7 @@ import java.net.URL
  * Versión publicada como release de GitHub. Debe coincidir con `versionCode` en
  * app/build.gradle.kts y con el tag de la release (`vN`). Subir en 1 en cada release nueva.
  */
-const val VERSION_APP = 3
+const val VERSION_APP = 4
 
 private const val REPO = "daniellcastro03/MiniFinancieraApp"
 private const val AUTORIDAD_FILE_PROVIDER = "com.example.capitalexpressapp.fileprovider"

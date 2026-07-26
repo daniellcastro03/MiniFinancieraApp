@@ -915,7 +915,9 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
         fechaInicio = null
         fechaFin = null
         estadoFiltro = EstadoFiltro.TODOS
-        pagosFiltrados = pagos
+        // Limpiar vuelve al estado de búsqueda (vacío), no muestra todos los pagos.
+        pagosFiltrados = emptyList()
+        datosYaCargados = false
     }
 
     // ✅ BLOQUE 1 REEMPLAZADO: Una sola carga paralela, límite razonable

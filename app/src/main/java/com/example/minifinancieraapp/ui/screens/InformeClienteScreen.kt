@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import com.example.capitalexpressapp.core.formatearLempiras
 import com.example.capitalexpressapp.util.ReciboHelper
 import com.example.minifinancieraapp.ui.models.PagoItem
 import com.google.firebase.firestore.FirebaseFirestore
@@ -135,9 +136,9 @@ fun InformeClienteScreen(navController: NavController, clienteId: String) {
                 val pagado = monto - saldo
 
                 Text("Producto: $producto", style = MaterialTheme.typography.titleSmall)
-                Text("Total: L. %.2f".format(monto))
-                Text("Pagado: L. %.2f".format(pagado))
-                Text("Pendiente: L. %.2f".format(saldo))
+                Text("Total: ${formatearLempiras(monto)}")
+                Text("Pagado: ${formatearLempiras(pagado)}")
+                Text("Pendiente: ${formatearLempiras(saldo)}")
 
                 pagosPorPrestamo[producto]?.let { pagos ->
                     Spacer(Modifier.height(8.dp))
@@ -161,8 +162,8 @@ fun InformeClienteScreen(navController: NavController, clienteId: String) {
                         ) {
                             Text(pago.fecha, modifier = Modifier.weight(1f), fontSize = MaterialTheme.typography.bodySmall.fontSize)
                             Text(pago.cuota, modifier = Modifier.weight(2f), fontSize = MaterialTheme.typography.bodySmall.fontSize)
-                            Text("L. %.2f".format(pago.monto), modifier = Modifier.weight(1f), fontSize = MaterialTheme.typography.bodySmall.fontSize)
-                            Text("L. %.2f".format(resta), modifier = Modifier.weight(1f), fontSize = MaterialTheme.typography.bodySmall.fontSize)
+                            Text(formatearLempiras(pago.monto), modifier = Modifier.weight(1f), fontSize = MaterialTheme.typography.bodySmall.fontSize)
+                            Text(formatearLempiras(resta), modifier = Modifier.weight(1f), fontSize = MaterialTheme.typography.bodySmall.fontSize)
                         }
                     }
                 }

@@ -1,6 +1,7 @@
 package com.example.minifinancieraapp.ui.screens
 
 import com.example.minifinancieraapp.ui.models.SolicitudModel
+import com.example.capitalexpressapp.core.formatearLempiras
 import android.content.Context
 import android.util.Log
 import android.widget.Toast
@@ -639,7 +640,7 @@ fun DetalleSolicitudScreen(
 
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
 
-                        InfoRow(label = "Monto solicitado", value = "L. ${"%.2f".format(solicitudActual.monto)}")
+                        InfoRow(label = "Monto solicitado", value = formatearLempiras(solicitudActual.monto))
                         InfoRow(label = "Interés mensual", value = "${"%.1f".format(solicitudActual.interesMensual)}%")
                         InfoRow(label = "Número de cuotas", value = "${solicitudActual.cuotas}")
                         InfoRow(label = "Plazo", value = "${solicitudActual.plazo} ($descripcionPlazo)")
@@ -690,18 +691,18 @@ fun DetalleSolicitudScreen(
                         )
                         InfoRow(
                             label = "Interés total",
-                            value = "L. ${"%.2f".format(interesCalculado)}",
+                            value = formatearLempiras(interesCalculado),
                             valueColor = Color(0xFF1976D2)
                         )
                         InfoRow(
                             label = "Total a pagar",
-                            value = "L. ${"%.2f".format(totalAPagar)}",
+                            value = formatearLempiras(totalAPagar),
                             valueColor = Color(0xFF2E7D32),
                             isHighlighted = true
                         )
                         InfoRow(
                             label = "Cuota estimada",
-                            value = "L. ${"%.0f".format(cuotaEstimada)}",
+                            value = formatearLempiras(cuotaEstimada),
                             valueColor = Color(0xFF1976D2)
                         )
 

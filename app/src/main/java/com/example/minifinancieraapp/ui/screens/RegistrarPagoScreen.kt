@@ -540,9 +540,9 @@ fun RegistrarPagoScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            MetricaChip("Capital", "L. ${dec.format(montoPrestamo)}",
+                            MetricaChip("Capital", "L.${dec.format(montoPrestamo)}",
                                 RP.Blue, RP.BlueLight, Modifier.weight(1f))
-                            MetricaChip("Interés", "L. ${dec.format(interesTotal)}",
+                            MetricaChip("Interés", "L.${dec.format(interesTotal)}",
                                 RP.TextSec, RP.Surface, Modifier.weight(1f))
                         }
                         Spacer(Modifier.height(8.dp))
@@ -550,9 +550,9 @@ fun RegistrarPagoScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            MetricaChip("Pagado", "L. ${dec.format(montoPagadoActual)}",
+                            MetricaChip("Pagado", "L.${dec.format(montoPagadoActual)}",
                                 RP.Green, RP.GreenSoft, Modifier.weight(1f))
-                            MetricaChip("Cuota", "L. ${dec.format(cuotaEstimada)}",
+                            MetricaChip("Cuota", "L.${dec.format(cuotaEstimada)}",
                                 RP.TextSec, RP.Surface, Modifier.weight(1f))
                         }
 
@@ -581,7 +581,7 @@ fun RegistrarPagoScreen(
                                             fontSize = 10.sp, color = RP.Red.copy(alpha = 0.7f))
                                     }
                                 }
-                                Text("L. ${dec.format(moraActiva)}",
+                                Text("L.${dec.format(moraActiva)}",
                                     fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
                                     color = RP.Red)
                             }
@@ -601,12 +601,12 @@ fun RegistrarPagoScreen(
                                 Text("Saldo pendiente",
                                     fontSize = 12.sp, color = RP.TextMuted,
                                     fontWeight = FontWeight.Medium)
-                                Text("L. ${dec.format(saldoActualizado)}",
+                                Text("L.${dec.format(saldoActualizado)}",
                                     fontSize = 24.sp, fontWeight = FontWeight.ExtraBold,
                                     color = RP.TextPri)
                                 if (moraActiva > 0.0) {
                                     Text(
-                                        "↳ Incluye mora: L. ${dec.format(moraActiva)}",
+                                        "↳ Incluye mora: L.${dec.format(moraActiva)}",
                                         fontSize = 11.sp, color = RP.Red,
                                         fontWeight = FontWeight.Medium
                                     )
@@ -682,7 +682,7 @@ fun RegistrarPagoScreen(
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Text("Una cuota\nL. ${dec.format(cuotaEstimada)}",
+                                Text("Una cuota\nL.${dec.format(cuotaEstimada)}",
                                     fontSize = 11.sp, color = RP.Blue,
                                     fontWeight = FontWeight.SemiBold,
                                     textAlign = TextAlign.Center)
@@ -696,7 +696,7 @@ fun RegistrarPagoScreen(
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Text("Saldar todo\nL. ${dec.format(saldoActualizado)}",
+                                Text("Saldar todo\nL.${dec.format(saldoActualizado)}",
                                     fontSize = 11.sp, color = RP.Green,
                                     fontWeight = FontWeight.SemiBold,
                                     textAlign = TextAlign.Center)
@@ -790,7 +790,7 @@ fun RegistrarPagoScreen(
                                                 color = colorTexto.copy(alpha = 0.7f))
                                         }
                                     }
-                                    Text("L. ${dec.format(cuota.montoAplicado)}",
+                                    Text("L.${dec.format(cuota.montoAplicado)}",
                                         fontSize = 13.sp, fontWeight = FontWeight.Bold,
                                         color = colorTexto)
                                 }
@@ -808,7 +808,7 @@ fun RegistrarPagoScreen(
                                     fontSize = 13.sp, color = RP.TextSec)
                                 Text(
                                     if (estaSaldando) "L. 0.00 ✓"
-                                    else "L. ${dec.format(saldoDespues)}",
+                                    else "L.${dec.format(saldoDespues)}",
                                     fontSize = 14.sp, fontWeight = FontWeight.Bold,
                                     color = if (estaSaldando) RP.Green else RP.TextPri
                                 )

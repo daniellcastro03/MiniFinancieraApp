@@ -3,6 +3,7 @@ package com.example.capitalexpressapp.ui.screens
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import com.example.capitalexpressapp.core.formatearLempiras
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -840,7 +841,7 @@ fun EnhancedMetricCard(
             )
 
             Text(
-                "L. ${"%.2f".format(valor)}",
+                formatearLempiras(valor),
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 color = color

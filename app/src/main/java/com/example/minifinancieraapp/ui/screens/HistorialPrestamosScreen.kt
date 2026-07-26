@@ -193,6 +193,8 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
         busqueda = ""
         fechaInicio = ""
         fechaFin = ""
+        // Limpiar vuelve al estado de búsqueda (vacío), no muestra todos los préstamos.
+        datosYaCargados = false
     }
 
     fun aplicarFiltros() {
@@ -529,13 +531,13 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                             }
                                             context.startActivity(Intent.createChooser(intent, "Compartir historial PDF"))
-                                            Toast.makeText(context, "✅ PDF generado: ${pdfFile.name}", Toast.LENGTH_LONG).show()
+                                            Toast.makeText(context, "PDF generado: ${pdfFile.name}", Toast.LENGTH_LONG).show()
                                         } else {
-                                            Toast.makeText(context, "❌ Error al generar PDF", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, "Error al generar PDF", Toast.LENGTH_SHORT).show()
                                         }
                                     } catch (e: Exception) {
                                         Log.e("HistorialPDF", "Error: ${e.message}", e)
-                                        Toast.makeText(context, "❌ Error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                        Toast.makeText(context, "Error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
                                     } finally {
                                         exportandoPDF = false
                                     }
@@ -569,7 +571,9 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                 .fillMaxSize()
                 .background(Brush.verticalGradient(colors = listOf(Color(0xFFF8F9FA), Color(0xFFE3F2FD))))
         ) {
-            Column(
+            // Un solo LazyColumn (resumen, filtros y lista) para que el scroll mueva
+            // toda la pantalla, sin controles fijos arriba.
+            LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
@@ -577,6 +581,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (!cargando && prestamosFiltrados.isNotEmpty()) {
+                  item {
                     val rotationAngle by animateFloatAsState(
                         targetValue = if (resumenExpandido) 180f else 0f,
                         animationSpec = tween(300)
@@ -603,7 +608,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                             }
 
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("L. ${String.format("%.0f", estadisticas["montoPrestado"] as Double)}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text(formatearLempiras(estadisticas["montoPrestado"] as Double), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Icon(Icons.Default.ExpandMore, null, tint = Color.White, modifier = Modifier.size(20.dp).rotate(rotationAngle))
                             }
@@ -641,8 +646,10 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                             }
                         }
                     }
+                  }
                 }
 
+                item {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = Color.White),
                     shape = RoundedCornerShape(12.dp),
@@ -705,14 +712,16 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                         DropdownMenuItem(
                                             text = {
                                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    val icon = when(periodo) {
-                                                        "Hoy" -> "📅"
-                                                        "Semana" -> "📆"
-                                                        "Mes" -> "🗓️"
-                                                        "Rango" -> "📊"
-                                                        else -> "🌐"
+                                                    val icon = when (periodo) {
+                                                        "Hoy" -> Icons.Default.Today
+                                                        "Semana" -> Icons.Default.DateRange
+                                                        "Mes" -> Icons.Default.CalendarMonth
+                                                        "Rango" -> Icons.Default.DateRange
+                                                        else -> Icons.Default.Public
                                                     }
-                                                    Text("$icon $periodo", fontSize = 12.sp)
+                                                    Icon(icon, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFF2196F3))
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text(periodo, fontSize = 12.sp)
                                                 }
                                             },
                                             onClick = { filtroFecha = periodo; expandedFecha = false }
@@ -750,14 +759,16 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                         DropdownMenuItem(
                                             text = {
                                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    val icon = when(estado.lowercase()) {
-                                                        "activo" -> "🟢"
-                                                        "completado" -> "🔵"
-                                                        "vencido" -> "🔴"
-                                                        "saldado" -> "✅"
-                                                        else -> "🌐"
+                                                    val colorEstado = when (estado.lowercase()) {
+                                                        "activo" -> Color(0xFF4CAF50)
+                                                        "completado" -> Color(0xFF2196F3)
+                                                        "vencido" -> Color(0xFFFF5722)
+                                                        "saldado" -> Color(0xFF2196F3)
+                                                        else -> Color(0xFF9E9E9E)
                                                     }
-                                                    Text("$icon ${estado.replaceFirstChar { it.uppercase() }}", fontSize = 12.sp)
+                                                    Icon(Icons.Default.Circle, contentDescription = null, modifier = Modifier.size(10.dp), tint = colorEstado)
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text(estado.replaceFirstChar { it.uppercase() }, fontSize = 12.sp)
                                                 }
                                             },
                                             onClick = { filtroEstado = estado; expandedEstado = false }
@@ -823,8 +834,10 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                         }
                     }
                 }
+                }
 
                 if (errorMessage.isNotBlank()) {
+                  item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)),
@@ -853,10 +866,12 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                             }
                         }
                     }
+                  }
                 }
 
                 when {
                     !datosYaCargados && !cargando -> {
+                      item {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -892,9 +907,11 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                 )
                             }
                         }
+                      }
                     }
 
                     cargando -> {
+                      item {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Card(
                                 colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -912,9 +929,11 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                 }
                             }
                         }
+                      }
                     }
 
                     prestamosFiltrados.isEmpty() && errorMessage.isBlank() -> {
+                      item {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Card(
                                 colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -955,26 +974,22 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                 }
                             }
                         }
+                      }
                     }
 
                     else -> {
-                        LazyColumn(
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            items(prestamosFiltrados) { prestamo ->
-                                PrestamoCardHistorial(
-                                    prestamo = prestamo,
-                                    navController = navController,
-                                    isExpanded = expandedCard == prestamo.id,
-                                    onExpandToggle = { id -> expandedCard = if (expandedCard == id) null else id },
-                                    context = context,
-                                    scope = scope,
-                                    db = db
-                                )
-                            }
-                            item { Spacer(modifier = Modifier.height(8.dp)) }
+                        items(prestamosFiltrados, key = { it.id }) { prestamo ->
+                            PrestamoCardHistorial(
+                                prestamo = prestamo,
+                                navController = navController,
+                                isExpanded = expandedCard == prestamo.id,
+                                onExpandToggle = { id -> expandedCard = if (expandedCard == id) null else id },
+                                context = context,
+                                scope = scope,
+                                db = db
+                            )
                         }
+                        item { Spacer(modifier = Modifier.height(8.dp)) }
                     }
                 }
             }
@@ -994,12 +1009,12 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3))
                 ) {
-                    Text("✅ Aceptar")
+                    Text("Aceptar")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showInicioPicker.value = false }) {
-                    Text("❌ Cancelar", color = Color(0xFF666666))
+                    Text("Cancelar", color = Color(0xFF666666))
                 }
             }
         ) {
@@ -1020,12 +1035,12 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3))
                 ) {
-                    Text("✅ Aceptar")
+                    Text("Aceptar")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showFinPicker.value = false }) {
-                    Text("❌ Cancelar", color = Color(0xFF666666))
+                    Text("Cancelar", color = Color(0xFF666666))
                 }
             }
         ) {
@@ -1094,14 +1109,14 @@ fun PrestamoCardHistorial(
 
     val estadoUI = prestamo.estadoEfectivo()
 
-    val (estadoColor, estadoText, estadoEmoji) = when (estadoUI.lowercase()) {
-        "activo" -> Triple(Color(0xFF4CAF50), "ACTIVO", "🟢")
-        "completado" -> Triple(Color(0xFF2196F3), "COMPLETADO", "🔵")
-        "saldado" -> Triple(Color(0xFF2196F3), "SALDADO", "✅")
-        "vencido" -> Triple(Color(0xFFFF5722), "VENCIDO", "🔴")
-        "atrasado" -> Triple(Color(0xFFFF5722), "ATRASADO", "⚠️")
-        "inactivo" -> Triple(Color(0xFF757575), "INACTIVO", "⚫")
-        else -> Triple(Color(0xFF757575), estadoUI.uppercase(), "⚪")
+    val (estadoColor, estadoText) = when (estadoUI.lowercase()) {
+        "activo" -> Color(0xFF4CAF50) to "ACTIVO"
+        "completado" -> Color(0xFF2196F3) to "COMPLETADO"
+        "saldado" -> Color(0xFF2196F3) to "SALDADO"
+        "vencido" -> Color(0xFFFF5722) to "VENCIDO"
+        "atrasado" -> Color(0xFFFF5722) to "ATRASADO"
+        "inactivo" -> Color(0xFF757575) to "INACTIVO"
+        else -> Color(0xFF757575) to estadoUI.uppercase()
     }
 
     Card(
@@ -1248,14 +1263,14 @@ fun PrestamoCardHistorial(
                                                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                                         }
                                                         context.startActivity(Intent.createChooser(intent, "Compartir recibo"))
-                                                        Toast.makeText(context, "📄 Recibo generado para ${clienteModel.nombre}", Toast.LENGTH_SHORT).show()
+                                                        Toast.makeText(context, "Recibo generado para ${clienteModel.nombre}", Toast.LENGTH_SHORT).show()
                                                     }
                                                 } else {
-                                                    Toast.makeText(context, "❌ Error: No se encontraron datos del cliente", Toast.LENGTH_SHORT).show()
+                                                    Toast.makeText(context, "Error: No se encontraron datos del cliente", Toast.LENGTH_SHORT).show()
                                                 }
                                             } catch (e: Exception) {
                                                 Log.e("HistorialPrestamos", "Error generando recibo", e)
-                                                Toast.makeText(context, "❌ Error al generar recibo: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                                Toast.makeText(context, "Error al generar recibo: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
                                             }
                                         }
                                     },

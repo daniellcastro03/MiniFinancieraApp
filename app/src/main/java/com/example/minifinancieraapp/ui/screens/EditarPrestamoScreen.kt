@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.widget.Toast
+import com.example.capitalexpressapp.core.formatearLempiras
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -502,7 +503,7 @@ fun EditarPrestamoScreen(navController: NavController, prestamoId: String) {
                 ) {
                     Column {
                         Text("Pagado hasta ahora", fontSize = 11.sp, color = EP.Green.copy(alpha = 0.75f), fontWeight = FontWeight.Medium)
-                        Text("L. ${"%.2f".format(montoPagadoReal)}", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = EP.Green)
+                        Text(formatearLempiras(montoPagadoReal), fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = EP.Green)
                     }
                     Icon(Icons.Default.Verified, contentDescription = null, tint = EP.Green, modifier = Modifier.size(28.dp))
                 }
@@ -650,12 +651,12 @@ fun EditarPrestamoScreen(navController: NavController, prestamoId: String) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
                         Column {
                             Text("Total a pagar (nuevo)", fontSize = 11.sp, color = Color.White.copy(alpha = 0.5f))
-                            Text("L. ${"%.2f".format(totalAPagar)}", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                            Text(formatearLempiras(totalAPagar), fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text("Saldo pendiente real", fontSize = 11.sp, color = Color.White.copy(alpha = 0.5f))
                             Text(
-                                "L. ${"%.2f".format(saldoPendienteTexto.toDoubleOrNull() ?: saldoRealVivo)}",
+                                formatearLempiras(saldoPendienteTexto.toDoubleOrNull() ?: saldoRealVivo),
                                 fontSize = 20.sp, fontWeight = FontWeight.Bold, color = EP.BlueSoft
                             )
                         }
@@ -666,7 +667,7 @@ fun EditarPrestamoScreen(navController: NavController, prestamoId: String) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Cuota estimada", fontSize = 10.sp, color = Color.White.copy(alpha = 0.45f))
-                            Text("L. ${"%.0f".format(cuotaEstimada)}", fontSize = 13.sp, color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text(formatearLempiras(cuotaEstimada), fontSize = 13.sp, color = Color.White, fontWeight = FontWeight.SemiBold)
                         }
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Cuotas", fontSize = 10.sp, color = Color.White.copy(alpha = 0.45f))

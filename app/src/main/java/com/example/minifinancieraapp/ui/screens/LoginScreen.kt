@@ -39,7 +39,9 @@ import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private val FondoLogin = Color(0xFF0B0B0D)
+private val FondoLoginTop = Color(0xFF10151F)
+private val FondoLoginBottom = Color(0xFF060709)
+private val AcentoLogin = Color(0xFF2F6FED)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -99,14 +101,44 @@ fun LoginScreen(navController: NavController) {
                 }
             )
         },
-        containerColor = FondoLogin
+        containerColor = FondoLoginTop
     ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(FondoLogin)
+                .background(
+                    Brush.verticalGradient(colors = listOf(FondoLoginTop, FondoLoginBottom))
+                )
                 .padding(padding)
         ) {
+            // Resplandores decorativos para que el fondo no se vea plano.
+            Box(
+                modifier = Modifier
+                    .size(320.dp)
+                    .align(Alignment.TopStart)
+                    .offset((-120).dp, (-120).dp)
+                    .blur(110.dp)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(AcentoLogin.copy(alpha = 0.35f), Color.Transparent)
+                        ),
+                        shape = CircleShape
+                    )
+            )
+            Box(
+                modifier = Modifier
+                    .size(260.dp)
+                    .align(Alignment.BottomEnd)
+                    .offset(90.dp, 90.dp)
+                    .blur(100.dp)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(Color(0xFF7C3AED).copy(alpha = 0.22f), Color.Transparent)
+                        ),
+                        shape = CircleShape
+                    )
+            )
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -277,9 +309,9 @@ fun LoginScreen(navController: NavController) {
                                 .fillMaxWidth()
                                 .height(54.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color.White,
-                                contentColor = Color.Black,
-                                disabledContainerColor = Color.White.copy(alpha = 0.4f)
+                                containerColor = AcentoLogin,
+                                contentColor = Color.White,
+                                disabledContainerColor = AcentoLogin.copy(alpha = 0.4f)
                             ),
                             shape = RoundedCornerShape(28.dp),
                             enabled = !isLoading.value
@@ -291,7 +323,7 @@ fun LoginScreen(navController: NavController) {
                                 ) {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(20.dp),
-                                        color = Color.Black,
+                                        color = Color.White,
                                         strokeWidth = 2.dp
                                     )
                                     Spacer(modifier = Modifier.width(12.dp))
@@ -345,9 +377,11 @@ private fun CampoLogin(
             disabledContainerColor = Color.Transparent,
             focusedTextColor = Color.White,
             unfocusedTextColor = Color.White,
-            focusedIndicatorColor = Color.White,
+            focusedIndicatorColor = AcentoLogin,
             unfocusedIndicatorColor = Color.White.copy(alpha = 0.35f),
-            cursorColor = Color.White
+            cursorColor = AcentoLogin,
+            focusedLeadingIconColor = AcentoLogin,
+            unfocusedLeadingIconColor = Color.White.copy(alpha = 0.6f)
         )
     )
 }

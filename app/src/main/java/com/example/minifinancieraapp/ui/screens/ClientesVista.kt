@@ -433,7 +433,12 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
                         },
                         trailingIcon = {
                             if (search.isNotEmpty()) {
-                                IconButton(onClick = { search = "" }) {
+                                IconButton(onClick = {
+                                    // Limpiar vacía la lista (vuelve al estado de búsqueda),
+                                    // no muestra todos los clientes cargados en memoria.
+                                    search = ""
+                                    datosYaCargados = false
+                                }) {
                                     Icon(Icons.Default.Close, contentDescription = "Limpiar", modifier = Modifier.size(18.dp))
                                 }
                             }

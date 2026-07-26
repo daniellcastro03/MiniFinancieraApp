@@ -16,6 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import com.example.capitalexpressapp.core.formatearLempiras
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -148,8 +149,8 @@ fun DetalleCobrosScreen(navController: NavController, cobrador: String) {
                             ) {
                                 Column(Modifier.padding(16.dp)) {
                                     Text("👤 Cliente: ${prestamo.cliente}", fontWeight = FontWeight.Bold)
-                                    Text("💰 Total a pagar: L. %.2f".format(prestamo.total))
-                                    Text("📉 Saldo restante: L. %.2f".format(prestamo.saldo))
+                                    Text("💰 Total a pagar: ${formatearLempiras(prestamo.total)}")
+                                    Text("📉 Saldo restante: ${formatearLempiras(prestamo.saldo)}")
                                     Text("📆 Próximo pago: ${prestamo.proximoPago}")
                                     Text("📅 Fecha inicial: ${prestamo.fecha}")
                                     Text("📈 Plazo: ${prestamo.plazo}")
@@ -157,7 +158,7 @@ fun DetalleCobrosScreen(navController: NavController, cobrador: String) {
                                     if (moraExtra > 0) {
                                         Spacer(Modifier.height(8.dp))
                                         Text(
-                                            "⚠️ Mora detectada: L. %.2f".format(moraExtra),
+                                            "⚠️ Mora detectada: ${formatearLempiras(moraExtra)}",
                                             color = MaterialTheme.colorScheme.error
                                         )
                                         // ℹ️ El sistema de moras se gestiona desde la pantalla

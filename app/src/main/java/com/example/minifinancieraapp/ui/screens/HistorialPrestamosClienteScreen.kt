@@ -12,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import com.example.capitalexpressapp.core.formatearLempiras
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
 
@@ -76,7 +77,7 @@ fun HistorialPrestamosClienteScreen(
                         modifier = Modifier.padding(16.dp)
                     ) {
                         Text("ID: ${prestamo.id}")
-                        Text("Monto: L. %.0f".format(prestamo.monto))
+                        Text("Monto: ${formatearLempiras(prestamo.monto)}")
                         Text("Fecha: ${prestamo.fecha}")
 
                         Row(

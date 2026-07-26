@@ -2,6 +2,7 @@ package com.example.capitalexpressapp.ui.screens
 
 import android.net.Uri
 import android.widget.Toast
+import com.example.capitalexpressapp.core.formatearLempiras
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -144,7 +145,7 @@ fun CobradorScreen(navController: NavController, uid: String) {
                                 Text("🏢 ${cliente.empresa}")
                                 Text("📋 Préstamos activos: ${cliente.prestamosActivos}")
                                 Text(
-                                    "💰 Saldo pendiente: L. ${"%.2f".format(cliente.saldoPendiente)}",
+                                    "💰 Saldo pendiente: ${formatearLempiras(cliente.saldoPendiente)}",
                                     color = Color.Red
                                 )
 
@@ -173,7 +174,7 @@ fun CobradorScreen(navController: NavController, uid: String) {
                                     Divider()
                                     Text("📜 Últimos pagos:", fontWeight = FontWeight.Bold)
                                     cliente.pagosRecientes.forEach { pago ->
-                                        Text("💸 L. %.2f | 📄 Cuota ${pago.cuota} | 📅 ${pago.fecha}".format(pago.monto))
+                                        Text("💸 ${formatearLempiras(pago.monto)} | 📄 Cuota ${pago.cuota} | 📅 ${pago.fecha}")
                                     }
                                 }
                             }

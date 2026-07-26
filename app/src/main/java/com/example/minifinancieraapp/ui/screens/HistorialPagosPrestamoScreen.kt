@@ -2,6 +2,7 @@ package com.example.capitalexpressapp.ui.screens
 
 import android.content.Context
 import android.widget.Toast
+import com.example.capitalexpressapp.core.formatearLempiras
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -274,9 +275,9 @@ fun HistorialPagosPrestamoScreen(
                             Spacer(modifier = Modifier.height(8.dp))
                             Text("👤 Cliente: ${info.cliente}")
                             Text("📋 Número: #${info.numeroPrestamo}")
-                            Text("💰 Monto inicial: L. %.2f".format(info.monto))
+                            Text("💰 Monto inicial: ${formatearLempiras(info.monto)}")
                             Text("📅 Fecha inicio: ${info.fechaInicio}")
-                            Text("💳 Saldo actual: L. %.2f".format(info.saldoActual))
+                            Text("💳 Saldo actual: ${formatearLempiras(info.saldoActual)}")
                             Text(
                                 "📊 Estado: ${info.estado}",
                                 color = if (info.estado == "Activo") Color(0xFF2E7D32) else Color(0xFFD32F2F)
@@ -294,14 +295,14 @@ fun HistorialPagosPrestamoScreen(
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text("Resumen de Pagos", fontWeight = FontWeight.Bold)
                             Text("Total pagos realizados: ${pagos.size}")
-                            Text("Monto total pagado: L. %.2f".format(pagos.sumOf { it.monto }))
+                            Text("Monto total pagado: ${formatearLempiras(pagos.sumOf { it.monto })}")
                             val totalMora = pagos.sumOf { it.mora }
                             if (totalMora > 0) {
-                                Text("Total mora pagada: L. %.2f".format(totalMora))
+                                Text("Total mora pagada: ${formatearLempiras(totalMora)}")
                             }
                             val totalInteres = pagos.sumOf { it.interesTotal }
                             if (totalInteres > 0) {
-                                Text("Total interés pagado: L. %.2f".format(totalInteres))
+                                Text("Total interés pagado: ${formatearLempiras(totalInteres)}")
                             }
                         }
                     }
@@ -351,7 +352,7 @@ fun HistorialPagosPrestamoScreen(
                                 Spacer(modifier = Modifier.height(8.dp))
 
                                 Text(
-                                    "💰 Total pagado: L. %.2f".format(pago.monto),
+                                    "💰 Total pagado: ${formatearLempiras(pago.monto)}",
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF2E7D32),
                                     fontSize = 16.sp
@@ -359,12 +360,12 @@ fun HistorialPagosPrestamoScreen(
 
                                 val montoBase = pago.monto - pago.mora
                                 if (montoBase > 0 && pago.mora > 0) {
-                                    Text("💵 Monto base: L. %.2f".format(montoBase))
+                                    Text("💵 Monto base: ${formatearLempiras(montoBase)}")
                                 }
 
                                 if (pago.mora > 0.0) {
                                     Text(
-                                        "⚠️ Mora: L. %.2f".format(pago.mora),
+                                        "⚠️ Mora: ${formatearLempiras(pago.mora)}",
                                         color = Color.Red,
                                         fontWeight = FontWeight.Medium
                                     )
@@ -372,14 +373,14 @@ fun HistorialPagosPrestamoScreen(
 
                                 if (pago.interesTotal > 0.0) {
                                     Text(
-                                        "📈 Interés: L. %.2f".format(pago.interesTotal),
+                                        "📈 Interés: ${formatearLempiras(pago.interesTotal)}",
                                         color = Color(0xFF6A1B9A)
                                     )
                                 }
 
                                 if (pago.saldoRestante > 0) {
                                     Text(
-                                        "💳 Saldo restante: L. %.2f".format(pago.saldoRestante),
+                                        "💳 Saldo restante: ${formatearLempiras(pago.saldoRestante)}",
                                         color = Color(0xFF1976D2)
                                     )
                                 }
@@ -424,7 +425,7 @@ fun HistorialPagosPrestamoScreen(
                                                 try {
                                                     val saldoAnterior = pago.saldoRestante + pago.monto
                                                     val proximoPago = if (pago.saldoRestante > 0) {
-                                                        "L. %.2f".format(pago.saldoRestante)
+                                                        formatearLempiras(pago.saldoRestante)
                                                     } else {
                                                         "Préstamo cancelado"
                                                     }
@@ -491,7 +492,7 @@ fun HistorialPagosPrestamoScreen(
                 Column {
                     Text("¿Estás seguro de que deseas eliminar este pago?")
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Monto: L. %.2f".format(pago.monto), fontWeight = FontWeight.Bold)
+                    Text("Monto: ${formatearLempiras(pago.monto)}", fontWeight = FontWeight.Bold)
                     Text("Fecha: ${pago.fecha}")
                     Text("Cobrador: ${pago.cobrador}")
                     Spacer(modifier = Modifier.height(8.dp))
