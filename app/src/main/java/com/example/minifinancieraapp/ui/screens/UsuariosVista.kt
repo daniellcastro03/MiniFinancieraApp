@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import com.example.capitalexpressapp.core.coincideAproximado
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -232,12 +233,14 @@ fun UsuariosVista(navController: NavController, rol: String) {
             val listaFiltrada = usuarios.filter {
                 (filtroRol == "todos" || it.rol == filtroRol) &&
                         (filtroEstado == "todos" || it.estado == filtroEstado) &&
-                        (it.nombre.contains(busqueda, true) || it.codigo.contains(busqueda, true))
+                        (busqueda.isBlank() || coincideAproximado(busqueda, it.nombre) || it.codigo.contains(busqueda, true))
             }
 
             // Lista de usuarios mejorada
             LazyColumn(
-                modifier = Modifier.padding(horizontal = 16.dp),
+                modifier = Modifier
+                    .padding(horizontal = 16.dp)
+                    .fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(vertical = 8.dp)
             ) {

@@ -107,9 +107,11 @@ fun EditarPagoScreen(
             if (prestamoDoc.exists()) {
                 plazoOriginal = prestamoDoc.getString("plazo") ?: ""
                 cuotaEstimada = prestamoDoc.getDouble("cuota") ?: 0.0
-                saldoActual = prestamoDoc.getDouble("saldoAnterior") ?: 0.0 // Usar el campo correcto
+                // "saldo" es el campo de saldo vivo que usa el resto de la app
+                // (Cuotas, VerPrestamo, Notificaciones, RegistrarPago); "saldoAnterior"
+                // es el monto original del préstamo al desembolsarlo, no el saldo actual.
+                saldoActual = prestamoDoc.getDouble("saldo") ?: 0.0
 
-                // Si no existe saldoAnterior, usar totalPagar
                 if (saldoActual == 0.0) {
                     saldoActual = prestamoDoc.getDouble("totalPagar") ?: 0.0
                 }
@@ -286,65 +288,88 @@ fun EditarPagoScreen(
                                     return@launch
                                 }
 
-                                // Obtener datos actualizados del préstamo
-                                val prestamoDoc = db.collection("prestamos").document(prestamoId).get().await()
-                                val saldoActualPrestamo = prestamoDoc.getDouble("saldoAnterior") ?: 0.0
-                                val cuotaEstimacion = prestamoDoc.getDouble("cuota") ?: 0.0
-                                val plazo = prestamoDoc.getString("plazo") ?: "Mensual"
-
-                                // Calcular nueva fecha usando la lógica actualizada
-                                val cuotasCubiertas = if (cuotaEstimacion > 0) {
-                                    (totalPago / cuotaEstimacion).toInt().coerceAtLeast(1)
-                                } else {
-                                    1
-                                }
-
-                                val calendario = Calendar.getInstance()
-                                val proximaFecha = calcularProximaFechaPago(plazo, cuotasCubiertas, calendario)
-                                val nuevoSaldo = (saldoActualPrestamo - totalPago).coerceAtLeast(0.0)
-
-                                // Actualizar pago
+                                // Ubicar el pago exacto que se está editando
                                 val pagosRef = db.collection("pagos")
                                     .whereEqualTo("prestamoId", prestamoId)
                                     .whereEqualTo("cuotas", cuota)
                                     .whereEqualTo("clienteNombre", clienteNombre)
                                     .get().await()
-
                                 val docId = pagosRef.documents.firstOrNull()?.id
-                                if (docId != null) {
-                                    db.collection("pagos").document(docId).update(
-                                        mapOf(
-                                            "monto" to nuevoMonto,
-                                            "mora" to nuevaMora,
-                                            "lugar" to lugar,
-                                            "firma" to firmaPrestamista,
-                                            "tipoPago" to tipoPago,
-                                            "saldoRestante" to nuevoSaldo,
-                                            "fechaActualizacion" to com.google.firebase.Timestamp.now()
-                                        )
-                                    ).await()
 
-                                    // Actualizar préstamo con la nueva lógica
-                                    val updateData = mutableMapOf<String, Any>(
-                                        "saldoAnterior" to nuevoSaldo,
-                                        "montoPagado" to (prestamoDoc.getDouble("montoPagado") ?: 0.0) + totalPago,
-                                        "estado" to if (nuevoSaldo <= 0.0) "saldado" else "activo",
+                                if (docId == null) {
+                                    Toast.makeText(context, "Pago no encontrado", Toast.LENGTH_SHORT).show()
+                                    return@launch
+                                }
+
+                                val prestamoDoc = db.collection("prestamos").document(prestamoId).get().await()
+                                val montoBase = prestamoDoc.getDouble("monto") ?: 0.0
+                                val interesTotalBase = prestamoDoc.getDouble("interesTotal")
+                                    ?: prestamoDoc.getDouble("interes") ?: 0.0
+                                val totalPagarDoc = prestamoDoc.getDouble("totalPagar") ?: (montoBase + interesTotalBase)
+                                val moraActualDoc = prestamoDoc.getDouble("mora") ?: 0.0
+                                val cuotaEstimacion = prestamoDoc.getDouble("cuota") ?: 0.0
+                                val plazo = prestamoDoc.getString("plazo") ?: "Mensual"
+
+                                // Recalcular el saldo desde CERO con todos los pagos del préstamo
+                                // (misma fórmula que VerPrestamoScreen: saldo = base - cuotasPagadas + moraPendiente),
+                                // usando el monto/mora YA EDITADOS para este pago en particular. Restar
+                                // solo el total editado de un "saldo" leído a mitad de camino duplicaba
+                                // la porción no editada del pago -este recálculo completo lo evita-.
+                                val todosPagos = db.collection("pagos")
+                                    .whereEqualTo("prestamoId", prestamoId)
+                                    .get().await()
+                                var totalCuotasPagadas = 0.0
+                                var totalMoraPagada = 0.0
+                                for (p in todosPagos.documents) {
+                                    val esEstePago = p.id == docId
+                                    totalCuotasPagadas += if (esEstePago) nuevoMonto else (p.getDouble("monto") ?: 0.0)
+                                    totalMoraPagada += if (esEstePago) nuevaMora else (p.getDouble("mora") ?: 0.0)
+                                }
+                                var moraHistorica = moraActualDoc
+                                if (moraActualDoc > 0 && moraActualDoc < totalMoraPagada) {
+                                    moraHistorica = totalMoraPagada + moraActualDoc
+                                }
+                                val moraPendiente = (moraHistorica - totalMoraPagada).coerceAtLeast(0.0)
+                                val nuevoSaldo = (totalPagarDoc - totalCuotasPagadas + moraPendiente).coerceAtLeast(0.0)
+
+                                val cuotasCubiertas = if (cuotaEstimacion > 0) {
+                                    (totalPago / cuotaEstimacion).toInt().coerceAtLeast(1)
+                                } else {
+                                    1
+                                }
+                                val calendario = Calendar.getInstance()
+                                val proximaFecha = calcularProximaFechaPago(plazo, cuotasCubiertas, calendario)
+
+                                db.collection("pagos").document(docId).update(
+                                    mapOf(
+                                        "monto" to nuevoMonto,
+                                        "mora" to nuevaMora,
+                                        "lugar" to lugar,
+                                        "firma" to firmaPrestamista,
+                                        "tipoPago" to tipoPago,
+                                        "saldoRestante" to nuevoSaldo,
                                         "fechaActualizacion" to com.google.firebase.Timestamp.now()
                                     )
+                                ).await()
 
-                                    if (nuevoSaldo > 0.0) {
-                                        updateData["proximoPago"] = proximaFecha
-                                    } else {
-                                        updateData["proximoPago"] = ""
-                                    }
+                                val updateData = mutableMapOf<String, Any>(
+                                    "saldo" to nuevoSaldo,
+                                    "montoPagado" to (totalCuotasPagadas + totalMoraPagada),
+                                    "estado" to if (nuevoSaldo <= 0.01) "saldado" else "activo",
+                                    "fechaActualizacion" to com.google.firebase.Timestamp.now()
+                                )
 
-                                    db.collection("prestamos").document(prestamoId).update(updateData).await()
-
-                                    Toast.makeText(context, "Pago actualizado correctamente", Toast.LENGTH_SHORT).show()
-                                    navController.popBackStack()
+                                if (nuevoSaldo > 0.01) {
+                                    updateData["proximoPago"] = proximaFecha
                                 } else {
-                                    Toast.makeText(context, "Pago no encontrado", Toast.LENGTH_SHORT).show()
+                                    updateData["proximoPago"] = ""
+                                    updateData["fechaCancelacion"] = com.google.firebase.Timestamp.now()
                                 }
+
+                                db.collection("prestamos").document(prestamoId).update(updateData).await()
+
+                                Toast.makeText(context, "Pago actualizado correctamente", Toast.LENGTH_SHORT).show()
+                                navController.popBackStack()
                             } catch (e: Exception) {
                                 Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
                             } finally {

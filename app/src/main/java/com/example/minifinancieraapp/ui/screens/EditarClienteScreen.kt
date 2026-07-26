@@ -251,14 +251,16 @@ fun EditarClienteScreen(navController: NavController, clienteId: String) {
                             }
                         }
 
+                        // Los nombres siempre se guardan en mayúsculas: consistencia
+                        // en listas/recibos y requisito de la búsqueda por nombre.
                         val conyugeMap = mapOf(
-                            "nombre" to camposTexto["nombreEsposo"].orEmpty(),
+                            "nombre" to camposTexto["nombreEsposo"].orEmpty().uppercase().trim(),
                             "identidad" to camposTexto["identidadEsposo"].orEmpty(),
                             "telefono" to camposTexto["telefonoEsposo"].orEmpty()
                         )
 
                         val ref1Map = mapOf(
-                            "nombre" to camposTexto["refNombre1"].orEmpty(),
+                            "nombre" to camposTexto["refNombre1"].orEmpty().uppercase().trim(),
                             "identidad" to camposTexto["refIdentidad1"].orEmpty(),
                             "telefono" to camposTexto["refTelefono1"].orEmpty(),
                             "parentesco" to camposTexto["refParentesco1"].orEmpty(),
@@ -266,7 +268,7 @@ fun EditarClienteScreen(navController: NavController, clienteId: String) {
                         )
 
                         val ref2Map = mapOf(
-                            "nombre" to camposTexto["refNombre2"].orEmpty(),
+                            "nombre" to camposTexto["refNombre2"].orEmpty().uppercase().trim(),
                             "identidad" to camposTexto["refIdentidad2"].orEmpty(),
                             "telefono" to camposTexto["refTelefono2"].orEmpty(),
                             "parentesco" to camposTexto["refParentesco2"].orEmpty(),
@@ -278,6 +280,8 @@ fun EditarClienteScreen(navController: NavController, clienteId: String) {
                             .toMap() +
                                 launcherKeys.associateWith { nuevasUrls[it] ?: fotosUrls[it].orEmpty() } +
                                 mapOf(
+                                    "nombre" to camposTexto["nombre"].orEmpty().uppercase().trim(),
+                                    "nombreEmpresa" to camposTexto["nombreEmpresa"].orEmpty().uppercase().trim(),
                                     "conyuge" to conyugeMap,
                                     "ref1" to ref1Map,
                                     "ref2" to ref2Map,

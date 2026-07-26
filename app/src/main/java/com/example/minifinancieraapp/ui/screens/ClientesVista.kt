@@ -11,6 +11,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -20,11 +22,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
+import com.example.capitalexpressapp.core.coincideAproximado
+import com.example.capitalexpressapp.core.formatearLempiras
 import com.example.capitalexpressapp.util.hayInternet
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
@@ -54,8 +59,12 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
     var clienteAInactivar by remember { mutableStateOf<ClienteVistaModel?>(null) }
     var estadoSeleccionado by remember { mutableStateOf("Todos") }
     var expanded by remember { mutableStateOf(false) }
-    var isLoading by remember { mutableStateOf(true) }
+    var isLoading by remember { mutableStateOf(false) }
     var mostrarResumen by remember { mutableStateOf(false) }
+    // ✅ Por defecto NO se trae toda la colección: se espera a que el usuario
+    // busque o pida "Ver todos" para hacer la carga completa (una sola vez,
+    // después queda en memoria y las búsquedas siguientes son instantáneas).
+    var datosYaCargados by remember { mutableStateOf(false) }
 
     val opcionesEstado = listOf("Todos", "activo", "inactivo", "saldado")
 
@@ -157,18 +166,16 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
             Toast.makeText(context, "Error cargando clientes: ${e.message}", Toast.LENGTH_LONG).show()
         } finally {
             isLoading = false
+            datosYaCargados = true
         }
     }
 
-    // Cargar al inicio
-    LaunchedEffect(Unit) {
-        cargarClientesUltraRapido()
-    }
-
-    // ✅ FIX: "Todos" muestra absolutamente todos sin excluir ningún estado
+    // ✅ FIX: "Todos" muestra absolutamente todos sin excluir ningún estado.
+    // Búsqueda "inteligente": tolera errores de tipeo, nombre/apellido invertido
+    // y segundo nombre salteado (ver BusquedaUtils.coincideAproximado).
     val clientesFiltrados = clientes.filter {
         (estadoSeleccionado == "Todos" || it.estado.equals(estadoSeleccionado, ignoreCase = true)) &&
-                it.nombre.contains(search, ignoreCase = true)
+                (search.isBlank() || coincideAproximado(search, it.nombre))
     }
 
     // Calcular estadísticas globales de forma eficiente
@@ -309,7 +316,7 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
                     )
                     StatCardMini(
                         title = "Pendiente",
-                        value = "L.${String.format("%.0f", estadisticas.totalMontoPendiente)}",
+                        value = formatearLempiras(estadisticas.totalMontoPendiente),
                         icon = Icons.Default.PendingActions,
                         color = Color.White
                     )
@@ -388,7 +395,7 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text("Prestado", fontSize = 10.sp, color = Color.Gray)
                                 Text(
-                                    "L.${String.format("%.0f", estadisticas.totalMontoPrestado)}",
+                                    formatearLempiras(estadisticas.totalMontoPrestado),
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -396,7 +403,7 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text("Abonado", fontSize = 10.sp, color = Color.Gray)
                                 Text(
-                                    "L.${String.format("%.0f", estadisticas.totalMontoAbonado)}",
+                                    formatearLempiras(estadisticas.totalMontoAbonado),
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -416,7 +423,7 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
                 OutlinedTextField(
                     value = search,
                     onValueChange = { search = it },
-                    label = { Text("Buscar", fontSize = 12.sp) },
+                    label = { Text("Buscar por nombre", fontSize = 12.sp) },
                     modifier = Modifier.weight(1f),
                     leadingIcon = {
                         Icon(
@@ -425,7 +432,18 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
                             modifier = Modifier.size(20.dp)
                         )
                     },
-                    singleLine = true
+                    trailingIcon = {
+                        if (search.isNotEmpty()) {
+                            IconButton(onClick = { search = "" }) {
+                                Icon(Icons.Default.Close, contentDescription = "Limpiar", modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        scope.launch { cargarClientesUltraRapido() }
+                    })
                 )
 
                 ExposedDropdownMenuBox(
@@ -461,7 +479,42 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
                 }
             }
 
-            if (isLoading) {
+            if (!datosYaCargados && !isLoading) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { scope.launch { cargarClientesUltraRapido() } },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Buscar")
+                    }
+                    OutlinedButton(
+                        onClick = { scope.launch { cargarClientesUltraRapido() } },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Ver todos")
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "Escribí un nombre y tocá \"Buscar\", o tocá \"Ver todos\" para la lista completa",
+                        color = Color.Gray,
+                        fontSize = 13.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            } else if (isLoading) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
@@ -832,9 +885,9 @@ fun ClienteCardMejorado(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
-                            MiniStatItem("Prestado", "L. ${String.format("%.0f", cliente.monto)}", "💰")
-                            MiniStatItem("Abonado", "L. ${String.format("%.0f", cliente.totalAbonado)}", "💵")
-                            MiniStatItem("Pendiente", "L. ${String.format("%.0f", cliente.saldoPendiente)}", "⚠️")
+                            MiniStatItem("Prestado", formatearLempiras(cliente.monto), "💰")
+                            MiniStatItem("Abonado", formatearLempiras(cliente.totalAbonado), "💵")
+                            MiniStatItem("Pendiente", formatearLempiras(cliente.saldoPendiente), "⚠️")
                         }
                     }
                 }

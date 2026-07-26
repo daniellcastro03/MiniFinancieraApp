@@ -54,7 +54,8 @@ fun HistorialGlobalScreen(navController: NavController) {
     val formatoMoneda = remember { NumberFormat.getCurrencyInstance(Locale("es", "HN")) }
 
     val opciones = listOf("Todos", "Hoy", "Semana", "Mes", "Año")
-    var opcionSeleccionada by remember { mutableStateOf("Todos") }
+    // Por defecto "Hoy" para no renderizar todo el historial de golpe
+    var opcionSeleccionada by remember { mutableStateOf("Hoy") }
 
     fun aplicarFiltro() {
         val hoy = Calendar.getInstance()
@@ -301,7 +302,9 @@ fun HistorialGlobalScreen(navController: NavController) {
                     }
                 } else {
                     LazyColumn(
-                        modifier = Modifier.padding(horizontal = 16.dp),
+                        modifier = Modifier
+                            .padding(horizontal = 16.dp)
+                            .fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         items(pagosFiltrados) { pago ->

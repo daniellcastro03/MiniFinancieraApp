@@ -251,11 +251,24 @@ suspend fun procesarPrestamoUltraOptimizado(
 
         // Datos de mora
         val moraActual      = doc.getDouble("mora") ?: 0.0
-        val tieneMoraActiva = moraActual > 0.0
         val morasAplicadas  = (doc.get("morasAplicadas") as? List<*>)?.size ?: 0
         val fechaUltimaMora = doc.getTimestamp("fechaUltimaMora")?.toDate()
 
         val pagosDelPrestamo = pagosCache[prestamoId] ?: emptyList()
+
+        // ✅ FIX: "mora" es un acumulado histórico que solo se pone en 0 cuando el
+        // préstamo se salda por completo (no cuando solo se paga la mora pendiente),
+        // así que hay que netearlo contra lo ya pagado -misma fórmula que
+        // VerPrestamoScreen/CuotasPrestamoScreen/RegistrarPagoScreen- para saber si
+        // realmente sigue habiendo mora pendiente. Sin este neteo, una vez aplicada
+        // una mora quedaba "activa" para siempre aunque ya estuviera pagada, y el
+        // botón de aplicar mora seguía sugiriendo montos cada vez más grandes.
+        val totalMoraPagada = pagosDelPrestamo.sumOf { (it["mora"] as? Number)?.toDouble() ?: 0.0 }
+        var moraHistorica = moraActual
+        if (moraActual > 0 && moraActual < totalMoraPagada) {
+            moraHistorica = totalMoraPagada + moraActual
+        }
+        val tieneMoraActiva = (moraHistorica - totalMoraPagada) > 0.01
         val montoPorCuota    = mutableMapOf<Int, Double>()
 
         for (pago in pagosDelPrestamo) {

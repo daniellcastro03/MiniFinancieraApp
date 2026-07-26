@@ -32,8 +32,8 @@ fun CobradoresScreen(navController: NavController) {
             TopAppBar(title = { Text("Listado de Cobradores") })
         }
     ) { padding ->
-        Column(modifier = Modifier.padding(padding).padding(16.dp)) {
-            LazyColumn {
+        Column(modifier = Modifier.padding(padding).padding(16.dp).fillMaxSize()) {
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
                 items(cobradores) { nombre ->
                     Card(
                         modifier = Modifier

@@ -4,6 +4,7 @@ import NotificacionesScreen
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
@@ -12,7 +13,6 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.example.capitalexpressapp.ui.screens.BackupScreen
 import com.example.capitalexpressapp.ui.screens.CobrosAdminScreen
 import com.example.capitalexpressapp.ui.screens.CrearPrestamoScreen
 import com.example.capitalexpressapp.ui.screens.CrearUsuarioScreen
@@ -33,6 +33,7 @@ import com.example.minifinancieraapp.ui.screens.*
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         setContent {
             CapitalExpressAppTheme {
@@ -242,10 +243,6 @@ class MainActivity : ComponentActivity() {
                         // ✅ RUTA SIMPLIFICADA PARA ADMIN (sin parámetros innecesarios)
                         composable("solicitudesAdmin") {
                             SolicitudesAdminScreen(navController)
-                        }
-
-                        composable("BackupScreen") {
-                            BackupScreen(navController)
                         }
 
                         composable("SincronizarAbonosPendientesScreen") {

@@ -742,9 +742,11 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
     var filtroCliente by remember { mutableStateOf("") }
     var filtroCobradorId by remember { mutableStateOf("") }
     var filtroCobradorNombre by remember { mutableStateOf("") }
-    var fechaInicio by remember { mutableStateOf<Date?>(null) }
+    // Por defecto "Hoy" (mismos valores que dispara el chip "Hoy") para no
+    // renderizar todo el historial de golpe; "Limpiar"/otros chips lo amplían.
+    var fechaInicio by remember { mutableStateOf<Date?>(Date()) }
     var exportandoPDF by remember { mutableStateOf(false) }
-    var fechaFin by remember { mutableStateOf<Date?>(null) }
+    var fechaFin by remember { mutableStateOf<Date?>(Date()) }
     var cargando by remember { mutableStateOf(true) }
     var mostrarFiltros by remember { mutableStateOf(false) }
     var pagoAEliminar by remember { mutableStateOf<PagoItem?>(null) }

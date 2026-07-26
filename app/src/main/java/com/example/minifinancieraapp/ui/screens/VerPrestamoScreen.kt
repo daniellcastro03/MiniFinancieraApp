@@ -19,6 +19,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import com.example.capitalexpressapp.core.formatearLempiras
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
@@ -749,14 +750,14 @@ fun VerPrestamoScreen(
                         title = "Información Financiera",
                         icon = Icons.Default.AttachMoney
                     ) {
-                        InfoRow("Monto prestado", "L. ${"%.2f".format(p.monto)}")
+                        InfoRow("Monto prestado", formatearLempiras(p.monto))
                         InfoRow("Interés mensual", "${"%.1f".format(p.interesMensual)}%")
-                        InfoRow("Interés total", "L. ${"%.2f".format(p.interesTotal)}")
-                        InfoRow("Total a pagar", "L. ${"%.2f".format(p.totalPagar)}")
-                        InfoRow("Monto pagado", "L. ${"%.2f".format(p.montoPagado)}")
+                        InfoRow("Interés total", formatearLempiras(p.interesTotal))
+                        InfoRow("Total a pagar", formatearLempiras(p.totalPagar))
+                        InfoRow("Monto pagado", formatearLempiras(p.montoPagado))
                         InfoRow(
                             "Saldo pendiente",
-                            "L. ${"%.2f".format(p.saldoPendiente)}",
+                            formatearLempiras(p.saldoPendiente),
                             valueColor = if (p.saldoPendiente > 0) Color.Red else Color.Green
                         )
                     }
@@ -769,7 +770,7 @@ fun VerPrestamoScreen(
                     ) {
                         InfoRow("Número de cuotas", p.cuotas.toString())
                         InfoRow("Plazo", p.plazo)
-                        InfoRow("Cuota", "L. ${"%.0f".format(p.cuota)}")
+                        InfoRow("Cuota", formatearLempiras(p.cuota))
                         if (p.diasEfectivos > 0) {
                             InfoRow("Días efectivos", p.diasEfectivos.toString())
                         }

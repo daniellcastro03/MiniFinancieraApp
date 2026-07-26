@@ -22,8 +22,8 @@ android {
         applicationId = "com.example.capitalexpressapp"
         minSdk = 23
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -52,6 +52,9 @@ android {
 }
 
 dependencies {
+    // Splash screen liviana (androidx.core.splashscreen) al abrir la app
+    implementation("androidx.core:core-splashscreen:1.0.1")
+
     // Jetpack Compose
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

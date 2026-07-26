@@ -1,6 +1,5 @@
 package com.example.capitalexpressapp.ui.screens
 
-import android.net.Uri
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
@@ -19,11 +18,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -38,6 +36,8 @@ import com.example.minifinancieraapp.util.SessionManager
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+private val FondoLogin = Color(0xFF0B0B0D)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -57,7 +57,7 @@ fun LoginScreen(navController: NavController) {
     val logoVisible = remember { mutableStateOf(false) }
     val contentVisible = remember { mutableStateOf(false) }
 
-    // Animación de pulso suave
+    // Animación de pulso suave (liviana: solo interpola un Float, sin nada pesado)
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseAnimation by infiniteTransition.animateFloat(
         initialValue = 0.95f,
@@ -70,7 +70,7 @@ fun LoginScreen(navController: NavController) {
 
     LaunchedEffect(Unit) {
         logoVisible.value = true
-        delay(300)
+        delay(250)
         contentVisible.value = true
 
         if (!NetworkUtils.isInternetAvailable(context)) {
@@ -91,96 +91,48 @@ fun LoginScreen(navController: NavController) {
                     Snackbar(
                         snackbarData = snackbarData,
                         shape = RoundedCornerShape(12.dp),
-                        containerColor = Color(0xFF1565C0),
+                        containerColor = Color(0xFF232326),
                         contentColor = Color.White
                     )
                 }
             )
-        }
+        },
+        containerColor = FondoLogin
     ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color(0xFF1565C0), // Azul primario
-                            Color(0xFF0D47A1), // Azul más oscuro
-                            Color(0xFF01579B)  // Azul profundo
-                        )
-                    )
-                )
+                .background(FondoLogin)
                 .padding(padding)
         ) {
-            // Elementos decorativos de fondo
-            Box(modifier = Modifier.fillMaxSize()) {
-                // Círculos decorativos con blur
-                Box(
-                    modifier = Modifier
-                        .size(300.dp)
-                        .offset(x = (-100).dp, y = (-50).dp)
-                        .blur(80.dp)
-                        .background(
-                            Color(0xFF42A5F5).copy(alpha = 0.3f),
-                            shape = CircleShape
-                        )
-                )
-
-                Box(
-                    modifier = Modifier
-                        .size(250.dp)
-                        .align(Alignment.BottomEnd)
-                        .offset(x = 100.dp, y = 100.dp)
-                        .blur(70.dp)
-                        .background(
-                            Color(0xFF1E88E5).copy(alpha = 0.3f),
-                            shape = CircleShape
-                        )
-                )
-
-                Box(
-                    modifier = Modifier
-                        .size(200.dp)
-                        .align(Alignment.CenterEnd)
-                        .offset(x = 50.dp)
-                        .blur(60.dp)
-                        .background(
-                            Color(0xFF2196F3).copy(alpha = 0.2f),
-                            shape = CircleShape
-                        )
-                )
-            }
-
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 24.dp),
+                    .padding(horizontal = 32.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // Logo animado
                 AnimatedVisibility(
                     visible = logoVisible.value,
-                    enter = fadeIn(animationSpec = tween(800)) +
-                            scaleIn(animationSpec = tween(800, easing = FastOutSlowInEasing))
+                    enter = fadeIn(animationSpec = tween(700)) +
+                            scaleIn(animationSpec = tween(700, easing = FastOutSlowInEasing))
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(bottom = 40.dp)
+                        modifier = Modifier.padding(bottom = 48.dp)
                     ) {
-                        Box(
-                            contentAlignment = Alignment.Center
-                        ) {
-                            // Resplandor detrás del logo
+                        Box(contentAlignment = Alignment.Center) {
+                            // Resplandor sutil detrás del logo
                             Box(
                                 modifier = Modifier
-                                    .size(180.dp)
-                                    .scale(pulseAnimation * 0.15f + 0.85f)
-                                    .blur(40.dp)
+                                    .size(170.dp)
+                                    .scale(pulseAnimation * 0.1f + 0.9f)
+                                    .blur(55.dp)
                                     .background(
                                         Brush.radialGradient(
                                             colors = listOf(
-                                                Color(0xFF64B5F6).copy(alpha = 0.6f),
+                                                Color.White.copy(alpha = 0.14f),
                                                 Color.Transparent
                                             )
                                         ),
@@ -188,247 +140,152 @@ fun LoginScreen(navController: NavController) {
                                     )
                             )
 
-                            // Logo con sombra elegante
-                            Box(
+                            Image(
+                                painter = painterResource(id = R.drawable.logo_capital),
+                                contentDescription = "Logo Capital Express",
                                 modifier = Modifier
-                                    .size(140.dp)
-                                    .shadow(
-                                        elevation = 30.dp,
-                                        shape = CircleShape,
-                                        spotColor = Color(0xFF90CAF9).copy(alpha = 0.8f)
-                                    )
-                                    .clip(CircleShape)
-                                    .background(Color.White),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Image(
-                                    painter = painterResource(id = R.drawable.logo_capital),
-                                    contentDescription = "Logo Capital Express",
-                                    modifier = Modifier
-                                        .size(100.dp)
-                                        .scale(pulseAnimation * 0.05f + 0.95f)
-                                )
-                            }
+                                    .size(112.dp)
+                                    .scale(pulseAnimation * 0.04f + 0.96f)
+                            )
                         }
 
-                        Spacer(modifier = Modifier.height(32.dp))
+                        Spacer(modifier = Modifier.height(28.dp))
 
-                        // Título elegante
                         Text(
                             text = "CAPITAL EXPRESS",
-                            fontSize = 32.sp,
+                            fontSize = 24.sp,
                             color = Color.White,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 2.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 3.sp,
                             textAlign = TextAlign.Center
                         )
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
 
                         Text(
                             text = "Tu socio financiero de confianza",
-                            fontSize = 14.sp,
-                            color = Color.White.copy(alpha = 0.9f),
-                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp,
+                            color = Color.White.copy(alpha = 0.5f),
                             textAlign = TextAlign.Center
                         )
                     }
                 }
 
-                // Formulario de login moderno
+                // Formulario de login minimalista
                 AnimatedVisibility(
                     visible = contentVisible.value,
                     enter = slideInVertically(
-                        initialOffsetY = { it },
-                        animationSpec = tween(600, easing = FastOutSlowInEasing)
-                    ) + fadeIn(animationSpec = tween(600))
+                        initialOffsetY = { it / 3 },
+                        animationSpec = tween(500, easing = FastOutSlowInEasing)
+                    ) + fadeIn(animationSpec = tween(500))
                 ) {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .shadow(
-                                elevation = 40.dp,
-                                shape = RoundedCornerShape(32.dp),
-                                spotColor = Color.Black.copy(alpha = 0.25f)
-                            ),
-                        shape = RoundedCornerShape(32.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = Color.White
-                        )
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(28.dp)
                     ) {
-                        Column(
-                            modifier = Modifier.padding(32.dp),
-                            verticalArrangement = Arrangement.spacedBy(24.dp)
-                        ) {
-                            // Título del formulario
-                            Text(
-                                text = "Iniciar Sesión",
-                                fontSize = 28.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF1565C0),
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                        CampoLogin(
+                            value = codigo.value,
+                            onValueChange = { codigo.value = it },
+                            placeholder = "Código de usuario",
+                            icono = Icons.Default.Person,
+                            keyboardType = KeyboardType.Number
+                        )
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                        CampoLogin(
+                            value = password.value,
+                            onValueChange = { password.value = it },
+                            placeholder = "Contraseña",
+                            icono = Icons.Default.Lock,
+                            esPassword = true,
+                            passwordVisible = passwordVisible.value,
+                            onTogglePasswordVisible = { passwordVisible.value = !passwordVisible.value }
+                        )
 
-                            // Campo de código
-                            OutlinedTextField(
-                                value = codigo.value,
-                                onValueChange = { codigo.value = it },
-                                label = { Text("Código único") },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.Person,
-                                        contentDescription = null,
-                                        tint = Color(0xFF1565C0)
-                                    )
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                colors = modernTextFieldColors(),
-                                shape = RoundedCornerShape(16.dp),
-                                singleLine = true
-                            )
+                        Spacer(modifier = Modifier.height(4.dp))
 
-                            // Campo de contraseña
-                            OutlinedTextField(
-                                value = password.value,
-                                onValueChange = { password.value = it },
-                                label = { Text("Contraseña") },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.Lock,
-                                        contentDescription = null,
-                                        tint = Color(0xFF1565C0)
-                                    )
-                                },
-                                trailingIcon = {
-                                    IconButton(
-                                        onClick = { passwordVisible.value = !passwordVisible.value }
-                                    ) {
-                                        Icon(
-                                            imageVector = if (passwordVisible.value)
-                                                Icons.Default.Visibility
-                                            else
-                                                Icons.Default.VisibilityOff,
-                                            contentDescription = if (passwordVisible.value)
-                                                "Ocultar contraseña"
-                                            else
-                                                "Mostrar contraseña",
-                                            tint = Color(0xFF1565C0)
-                                        )
+                        // Botón de login
+                        Button(
+                            onClick = {
+                                val code = codigo.value.trim()
+                                val pass = password.value.trim()
+
+                                if (code.isEmpty() || pass.isEmpty()) {
+                                    coroutineScope.launch {
+                                        snackbarHostState.showSnackbar("Por favor, completa todos los campos")
                                     }
-                                },
-                                visualTransformation = if (passwordVisible.value)
-                                    VisualTransformation.None
-                                else
-                                    PasswordVisualTransformation(),
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = modernTextFieldColors(),
-                                shape = RoundedCornerShape(16.dp),
-                                singleLine = true
-                            )
+                                    return@Button
+                                }
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                                isLoading.value = true
 
-                            // Botón de login moderno
-                            Button(
-                                onClick = {
-                                    val code = codigo.value.trim()
-                                    val pass = password.value.trim()
+                                db.collection("usuarios")
+                                    .whereEqualTo("codigo", code)
+                                    .whereEqualTo("password", pass)
+                                    .get()
+                                    .addOnSuccessListener { result ->
+                                        isLoading.value = false
+                                        if (result.isEmpty) {
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("Credenciales incorrectas")
+                                            }
+                                        } else {
+                                            val userDoc = result.documents[0]
+                                            val uid = userDoc.id
+                                            val rol = userDoc.getString("rol") ?: ""
+                                            val nombre = userDoc.getString("nombre") ?: ""
+                                            val estado = userDoc.getString("estado") ?: "activo"
 
-                                    if (code.isEmpty() || pass.isEmpty()) {
-                                        coroutineScope.launch {
-                                            snackbarHostState.showSnackbar("Por favor, completa todos los campos")
-                                        }
-                                        return@Button
-                                    }
-
-                                    isLoading.value = true
-
-                                    db.collection("usuarios")
-                                        .whereEqualTo("codigo", code)
-                                        .whereEqualTo("password", pass)
-                                        .get()
-                                        .addOnSuccessListener { result ->
-                                            isLoading.value = false
-                                            if (result.isEmpty) {
+                                            if (estado != "activo") {
                                                 coroutineScope.launch {
-                                                    snackbarHostState.showSnackbar("Credenciales incorrectas")
+                                                    snackbarHostState.showSnackbar("Tu cuenta está inactiva. Contacta al administrador.")
                                                 }
                                             } else {
-                                                val userDoc = result.documents[0]
-                                                val uid = userDoc.id
-                                                val rol = userDoc.getString("rol") ?: ""
-                                                val nombre = userDoc.getString("nombre") ?: ""
-                                                val estado = userDoc.getString("estado") ?: "activo"
-
-                                                if (estado != "activo") {
-                                                    coroutineScope.launch {
-                                                        snackbarHostState.showSnackbar("Tu cuenta está inactiva. Contacta al administrador.")
-                                                    }
-                                                } else {
-                                                    coroutineScope.launch {
-                                                        sessionManager.saveSession(uid, nombre, rol)
-                                                    }
-                                                    when (rol) {
-                                                        "admin" -> navController.navigate("AdminScreen/$uid/admin")
-                                                        "cobrador" -> navController.navigate("CobradorPantalla/$uid")
-                                                        else -> coroutineScope.launch {
-                                                            snackbarHostState.showSnackbar("Rol no reconocido: $rol")
-                                                        }
+                                                coroutineScope.launch {
+                                                    sessionManager.saveSession(uid, nombre, rol)
+                                                }
+                                                when (rol) {
+                                                    "admin" -> navController.navigate("AdminScreen/$uid/admin")
+                                                    "cobrador" -> navController.navigate("CobradorPantalla/$uid")
+                                                    else -> coroutineScope.launch {
+                                                        snackbarHostState.showSnackbar("Rol no reconocido: $rol")
                                                     }
                                                 }
                                             }
                                         }
-                                        .addOnFailureListener {
-                                            isLoading.value = false
-                                            coroutineScope.launch {
-                                                snackbarHostState.showSnackbar("Error de conexión. Verifica tu internet.")
-                                            }
-                                        }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF1565C0),
-                                    disabledContainerColor = Color(0xFF1565C0).copy(alpha = 0.6f)
-                                ),
-                                shape = RoundedCornerShape(16.dp),
-                                enabled = !isLoading.value,
-                                elevation = ButtonDefaults.buttonElevation(
-                                    defaultElevation = 4.dp,
-                                    pressedElevation = 8.dp
-                                )
-                            ) {
-                                if (isLoading.value) {
-                                    Row(
-                                        horizontalArrangement = Arrangement.Center,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(20.dp),
-                                            color = Color.White,
-                                            strokeWidth = 2.dp
-                                        )
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text(
-                                            "Iniciando...",
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 16.sp
-                                        )
                                     }
-                                } else {
-                                    Text(
-                                        "Iniciar Sesión",
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp
+                                    .addOnFailureListener {
+                                        isLoading.value = false
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar("Error de conexión. Verifica tu internet.")
+                                        }
+                                    }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(54.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color.White,
+                                contentColor = Color.Black,
+                                disabledContainerColor = Color.White.copy(alpha = 0.4f)
+                            ),
+                            shape = RoundedCornerShape(28.dp),
+                            enabled = !isLoading.value
+                        ) {
+                            if (isLoading.value) {
+                                Row(
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        color = Color.Black,
+                                        strokeWidth = 2.dp
                                     )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text("Iniciando...", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                 }
+                            } else {
+                                Text("Iniciar Sesión", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                             }
                         }
                     }
@@ -439,12 +296,45 @@ fun LoginScreen(navController: NavController) {
 }
 
 @Composable
-private fun modernTextFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = Color(0xFF1565C0),
-    unfocusedBorderColor = Color(0xFFBDBDBD),
-    cursorColor = Color(0xFF1565C0),
-    focusedLabelColor = Color(0xFF1565C0),
-    unfocusedLabelColor = Color(0xFF757575),
-    focusedTextColor = Color(0xFF212121),
-    unfocusedTextColor = Color(0xFF212121)
-)
+private fun CampoLogin(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    icono: ImageVector,
+    keyboardType: KeyboardType = KeyboardType.Text,
+    esPassword: Boolean = false,
+    passwordVisible: Boolean = false,
+    onTogglePasswordVisible: (() -> Unit)? = null
+) {
+    TextField(
+        value = value,
+        onValueChange = onValueChange,
+        placeholder = { Text(placeholder, color = Color.White.copy(alpha = 0.35f)) },
+        leadingIcon = { Icon(icono, contentDescription = null, tint = Color.White.copy(alpha = 0.6f)) },
+        trailingIcon = if (esPassword) {
+            {
+                IconButton(onClick = { onTogglePasswordVisible?.invoke() }) {
+                    Icon(
+                        imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                        contentDescription = if (passwordVisible) "Ocultar contraseña" else "Mostrar contraseña",
+                        tint = Color.White.copy(alpha = 0.6f)
+                    )
+                }
+            }
+        } else null,
+        visualTransformation = if (esPassword && !passwordVisible) PasswordVisualTransformation() else VisualTransformation.None,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        modifier = Modifier.fillMaxWidth(),
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = Color.Transparent,
+            unfocusedContainerColor = Color.Transparent,
+            disabledContainerColor = Color.Transparent,
+            focusedTextColor = Color.White,
+            unfocusedTextColor = Color.White,
+            focusedIndicatorColor = Color.White,
+            unfocusedIndicatorColor = Color.White.copy(alpha = 0.35f),
+            cursorColor = Color.White
+        )
+    )
+}

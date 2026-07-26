@@ -572,11 +572,13 @@ fun CrearClienteScreen(navController: NavController) {
                                 // ✅ OPTIMIZACIÓN 4: Preparar datos primero, guardar después
                                 progreso = "Guardando datos..."
 
+                                // Los nombres siempre se guardan en mayúsculas: consistencia
+                                // en listas/recibos y requisito de la búsqueda por nombre.
                                 val data = mutableMapOf<String, Any>(
-                                    "nombre" to nombre,
+                                    "nombre" to nombre.uppercase().trim(),
                                     "identidad" to identidad.trim(),
                                     "telefono" to telefono,
-                                    "nombreEmpresa" to nombreEmpresa,
+                                    "nombreEmpresa" to nombreEmpresa.uppercase().trim(),
                                     "direccionCasa" to direccionCasa,
                                     "direccionNegocio" to direccionNegocio,
                                     "garantia" to garantia,
@@ -584,14 +586,14 @@ fun CrearClienteScreen(navController: NavController) {
                                     "estadoCivil" to estadoCivil,
                                     "fechaCreacion" to System.currentTimeMillis(),
                                     "ref1" to mapOf(
-                                        "nombre" to ref1Nombre,
+                                        "nombre" to ref1Nombre.uppercase().trim(),
                                         "identidad" to ref1Identidad,
                                         "telefono" to ref1Telefono,
                                         "parentesco" to ref1Parentesco,
                                         "direccion" to ref1Direccion
                                     ),
                                     "ref2" to mapOf(
-                                        "nombre" to ref2Nombre,
+                                        "nombre" to ref2Nombre.uppercase().trim(),
                                         "identidad" to ref2Identidad,
                                         "telefono" to ref2Telefono,
                                         "parentesco" to ref2Parentesco,
@@ -602,7 +604,7 @@ fun CrearClienteScreen(navController: NavController) {
                                 // Añadir datos del cónyuge si está casado
                                 if (estadoCivil == "Casado") {
                                     data["conyuge"] = mapOf(
-                                        "nombre" to nombreConyuge,
+                                        "nombre" to nombreConyuge.uppercase().trim(),
                                         "identidad" to identidadConyuge,
                                         "telefono" to telefonoConyuge
                                     )

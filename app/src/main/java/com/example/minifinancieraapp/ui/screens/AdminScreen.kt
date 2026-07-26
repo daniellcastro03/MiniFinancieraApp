@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
 import com.example.capitalexpressapp.core.ActualizacionOverlay
+import com.example.capitalexpressapp.core.migrarNombresClientesAMayusculas
 import com.example.minifinancieraapp.util.SessionManager
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
@@ -50,6 +51,10 @@ fun AdminScreen(navController: NavController, uid: String, rol: String) {
             Toast.makeText(context, "No hay actualizaciones disponibles", Toast.LENGTH_SHORT).show()
         }
     )
+
+    LaunchedEffect(Unit) {
+        migrarNombresClientesAMayusculas(context)
+    }
 
     LaunchedEffect(uid) {
         try {
@@ -362,18 +367,6 @@ fun AdminScreen(navController: NavController, uid: String, rol: String) {
                     color = Color(0xFFE74C3C)
                 ) {
                     navController.navigate("NotificacionesScreen/$uid/$rol")
-                }
-            }
-
-            // BACKUP
-            item {
-                AdminOpcionCard(
-                    icon = Icons.Default.Backup,
-                    label = "Backup del Sistema",
-                    subtitle = "Respaldar información importante",
-                    color = Color(0xFF34495E)
-                ) {
-                    navController.navigate("BackupScreen")
                 }
             }
 

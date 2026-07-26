@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -16,6 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import com.example.capitalexpressapp.core.formatearLempiras
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
@@ -187,17 +188,24 @@ fun CobrosAdminScreen(navController: NavController, adminUid: String) {
                         colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E8))
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
-                            Text("📊 Resumen General", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Assessment, contentDescription = null, modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Resumen General", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            }
                             Spacer(modifier = Modifier.height(8.dp))
                             Text("Total préstamos: ${prestamos.size}")
-                            Text("Monto prestado: L. ${"%.2f".format(prestamos.sumOf { it.monto })}")
-                            Text("Total a cobrar: L. ${"%.2f".format(prestamos.sumOf { it.totalPagar })}")
-                            Text("Ya pagado: L. ${"%.2f".format(prestamos.sumOf { it.montoPagado })}")
-                            Text("Saldo pendiente: L. ${"%.2f".format(prestamos.sumOf { it.saldo })}")
+                            Text("Monto prestado: ${formatearLempiras(prestamos.sumOf { it.monto })}")
+                            Text("Total a cobrar: ${formatearLempiras(prestamos.sumOf { it.totalPagar })}")
+                            Text("Ya pagado: ${formatearLempiras(prestamos.sumOf { it.montoPagado })}")
+                            Text("Saldo pendiente: ${formatearLempiras(prestamos.sumOf { it.saldo })}")
                         }
                     }
 
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         items(prestamos) { prestamo ->
                             Card(
                                 modifier = Modifier
@@ -225,19 +233,27 @@ fun CobrosAdminScreen(navController: NavController, adminUid: String) {
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text("💰 Monto: L. ${"%.2f".format(prestamo.monto)}")
-                                            Text("📊 Total: L. ${"%.2f".format(prestamo.totalPagar)}")
-                                            Text("✅ Pagado: L. ${"%.2f".format(prestamo.montoPagado)}")
+                                            Text("Monto: ${formatearLempiras(prestamo.monto)}")
+                                            Text("Total: ${formatearLempiras(prestamo.totalPagar)}")
+                                            Text("Pagado: ${formatearLempiras(prestamo.montoPagado)}")
                                         }
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text("⏰ Plazo: ${prestamo.plazo}")
-                                            Text("💵 Cuota: L. ${"%.0f".format(prestamo.cuota)}")
-                                            Text("👮 Cobrador: ${prestamo.cobrador}")
+                                            Text("Plazo: ${prestamo.plazo}")
+                                            Text("Cuota: ${formatearLempiras(prestamo.cuota)}")
+                                            Text("Cobrador: ${prestamo.cobrador}")
                                         }
                                     }
                                     Spacer(modifier = Modifier.height(8.dp))
-                                    Text("📅 Fecha: ${prestamo.fecha}")
-                                    Text("🔔 Próximo pago: ${prestamo.proximoPago}")
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.CalendarToday, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Fecha: ${prestamo.fecha}")
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Próximo pago: ${prestamo.proximoPago}")
+                                    }
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Card(
                                         colors = CardDefaults.cardColors(
@@ -245,7 +261,7 @@ fun CobrosAdminScreen(navController: NavController, adminUid: String) {
                                         )
                                     ) {
                                         Text(
-                                            "💳 Saldo: L. ${"%.2f".format(prestamo.saldo)}",
+                                            "Saldo: ${formatearLempiras(prestamo.saldo)}",
                                             modifier = Modifier.padding(8.dp),
                                             fontSize = 16.sp,
                                             fontWeight = FontWeight.Bold,

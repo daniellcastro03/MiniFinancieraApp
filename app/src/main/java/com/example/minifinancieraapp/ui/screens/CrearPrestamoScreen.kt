@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import com.example.capitalexpressapp.core.formatearLempiras
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -1000,7 +1001,7 @@ private fun ResumenCard(
                 Column {
                     Text("Total a pagar", fontSize = 11.sp, color = Color.White.copy(alpha = 0.5f))
                     Text(
-                        "L. ${"%.2f".format(totalAPagar)}",
+                        formatearLempiras(totalAPagar),
                         fontSize   = 26.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color      = Color.White
@@ -1009,7 +1010,7 @@ private fun ResumenCard(
                 Column(horizontalAlignment = Alignment.End) {
                     Text("Cuota estimada", fontSize = 11.sp, color = Color.White.copy(alpha = 0.5f))
                     Text(
-                        "L. ${"%.0f".format(cuotaEstimada)}",
+                        formatearLempiras(cuotaEstimada),
                         fontSize   = 20.sp,
                         fontWeight = FontWeight.Bold,
                         color      = CP.BlueSoft
@@ -1021,8 +1022,8 @@ private fun ResumenCard(
 
             // Detalles en grid 2x2
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                ResumenItem("Monto",         "L. ${"%.2f".format(montoDouble)}",         modifier = Modifier.weight(1f))
-                ResumenItem("Interés total", "L. ${"%.2f".format(interesCalculado)}",    modifier = Modifier.weight(1f))
+                ResumenItem("Monto",         formatearLempiras(montoDouble),         modifier = Modifier.weight(1f))
+                ResumenItem("Interés total", formatearLempiras(interesCalculado),    modifier = Modifier.weight(1f))
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ResumenItem("Cuotas",        "$cuotasInt ($selectedPlazo)",               modifier = Modifier.weight(1f))
@@ -1049,7 +1050,7 @@ private fun ResumenCard(
             if (moraDouble > 0) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Icon(Icons.Default.Warning, contentDescription = null, tint = CP.Orange, modifier = Modifier.size(14.dp))
-                    Text("Mora diaria: L. ${"%.2f".format(moraDouble)}", fontSize = 12.sp, color = CP.Orange)
+                    Text("Mora diaria: ${formatearLempiras(moraDouble)}", fontSize = 12.sp, color = CP.Orange)
                 }
             }
             if (fotosCount > 0) {

@@ -3,6 +3,7 @@ package com.example.capitalexpressapp.ui.screens
 import android.app.DatePickerDialog
 import android.content.Context
 import android.widget.Toast
+import com.example.capitalexpressapp.core.formatearLempiras
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -270,14 +271,14 @@ fun DashboardScreen(navController: NavController) {
             ) {
                 ModernInfoCard(
                     title = "Prestado",
-                    value = "L. %.0f".format(totalPrestado),
+                    value = formatearLempiras(totalPrestado),
                     icon = Icons.Default.TrendingUp,
                     color = Color(0xFF8B5CF6),
                     modifier = Modifier.weight(1f)
                 )
                 ModernInfoCard(
                     title = "Pagado",
-                    value = "L. %.0f".format(totalPagado),
+                    value = formatearLempiras(totalPagado),
                     icon = Icons.Default.CheckCircle,
                     color = Color(0xFF10B981),
                     modifier = Modifier.weight(1f)
@@ -291,14 +292,14 @@ fun DashboardScreen(navController: NavController) {
             ) {
                 ModernInfoCard(
                     title = "Pendiente",
-                    value = "L. %.0f".format(totalPendiente),
+                    value = formatearLempiras(totalPendiente),
                     icon = Icons.Default.PendingActions,
                     color = Color(0xFFEF4444),
                     modifier = Modifier.weight(1f)
                 )
                 ModernInfoCard(
                     title = "Interés",
-                    value = "L. %.0f".format(totalInteres),
+                    value = formatearLempiras(totalInteres),
                     icon = Icons.Default.Percent,
                     color = Color(0xFFF59E0B),
                     modifier = Modifier.weight(1f)
@@ -312,7 +313,7 @@ fun DashboardScreen(navController: NavController) {
             ) {
                 ModernInfoCard(
                     title = "Moras Cobradas",
-                    value = "L. %.2f".format(totalMoras),
+                    value = formatearLempiras(totalMoras),
                     icon = Icons.Default.Warning,
                     color = Color(0xFFDC2626),
                     modifier = Modifier.weight(1f)

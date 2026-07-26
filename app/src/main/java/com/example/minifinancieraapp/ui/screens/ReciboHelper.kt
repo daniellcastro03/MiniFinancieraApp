@@ -2245,7 +2245,7 @@ object ReciboHelper {
             drawCompactLine("Abono", fmt(pagoIngresado))
 
             if (mora > 0.0) {
-                drawCompactLine("Interes", fmt(mora))
+                drawCompactLine("Mora", fmt(mora))
             }
 
             y += 8f

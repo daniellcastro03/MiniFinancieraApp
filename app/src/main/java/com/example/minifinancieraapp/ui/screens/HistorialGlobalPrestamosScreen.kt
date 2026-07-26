@@ -52,13 +52,16 @@ fun HistorialGlobalPrestamosScreen(navController: NavController) {
             TopAppBar(title = { Text("Historial de Préstamos Global") })
         }
     ) { padding ->
-        Column(modifier = Modifier.padding(padding).padding(16.dp)) {
+        Column(modifier = Modifier.padding(padding).padding(16.dp).fillMaxSize()) {
             if (cargando) {
                 CircularProgressIndicator()
             } else if (prestamos.isEmpty()) {
                 Text("No hay préstamos registrados.")
             } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     items(prestamos) { prestamo ->
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(16.dp)) {

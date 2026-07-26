@@ -393,7 +393,7 @@ fun CuotasPrestamoScreen(
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
                             Text(
-                                "Se eliminará la mora de L. ${dec.format(moraAplicada)} del saldo pendiente.",
+                                "Se eliminará la mora de L.${dec.format(moraAplicada)} del saldo pendiente.",
                                 color = CRed, fontWeight = FontWeight.SemiBold, fontSize = 14.sp
                             )
                             Spacer(Modifier.height(4.dp))
@@ -469,7 +469,7 @@ fun CuotasPrestamoScreen(
                                     withContext(Dispatchers.Main) {
                                         Toast.makeText(
                                             context,
-                                            "✅ Mora cancelada. Nuevo saldo: L. ${dec.format(nuevoSaldo)}",
+                                            "✅ Mora cancelada. Nuevo saldo: L.${dec.format(nuevoSaldo)}",
                                             Toast.LENGTH_LONG
                                         ).show()
                                     }
@@ -609,10 +609,10 @@ fun CuotasPrestamoScreen(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         InfoChip(Icons.Default.AttachMoney, "Capital",
-                                            "L. ${dec.format(totalCapital)}",
+                                            "L.${dec.format(totalCapital)}",
                                             modifier = Modifier.weight(1f))
                                         InfoChip(Icons.Default.AttachMoney, "Interés",
-                                            "L. ${dec.format(totalInteres)}",
+                                            "L.${dec.format(totalInteres)}",
                                             modifier = Modifier.weight(1f))
                                     }
                                     val cuotasNorm = cuotas.filter { it.descripcion != "Mora" }
@@ -652,16 +652,16 @@ fun CuotasPrestamoScreen(
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(
                                                     if (moraEstaPagada)
-                                                        "Mora pagada: L. ${dec.format(moraAplicada)}"
+                                                        "Mora pagada: L.${dec.format(moraAplicada)}"
                                                     else
-                                                        "Mora activa: L. ${dec.format(moraAplicada)}",
+                                                        "Mora activa: L.${dec.format(moraAplicada)}",
                                                     color = if (moraEstaPagada) CGreen else CRed,
                                                     fontWeight = FontWeight.Bold, fontSize = 14.sp
                                                 )
                                                 if (cuotaMora != null &&
                                                     cuotaMora.montoPagado > 0 && !moraEstaPagada)
                                                     Text(
-                                                        "Pagado: L. ${dec.format(cuotaMora.montoPagado)}",
+                                                        "Pagado: L.${dec.format(cuotaMora.montoPagado)}",
                                                         color = CAmber, fontSize = 12.sp
                                                     )
                                             }
@@ -719,14 +719,14 @@ fun CuotasPrestamoScreen(
                                             fontWeight = FontWeight.Medium
                                         )
                                         Text(
-                                            "L. ${dec.format(totalCapital + totalInteres + moraEnTotal)}",
+                                            "L.${dec.format(totalCapital + totalInteres + moraEnTotal)}",
                                             fontSize = 15.sp,
                                             fontWeight = FontWeight.ExtraBold,
                                             color = CBlue
                                         )
                                         if (moraAunPendiente && moraAplicada > 0.0)
                                             Text(
-                                                "↳ mora acumulada: L. ${dec.format(moraAplicada)}",
+                                                "↳ mora acumulada: L.${dec.format(moraAplicada)}",
                                                 fontSize = 10.sp,
                                                 color = CRed,
                                                 fontWeight = FontWeight.Medium
@@ -753,8 +753,8 @@ fun CuotasPrestamoScreen(
                                                 CRed.copy(alpha = 0.75f)
                                         )
                                         Text(
-                                            if (saldoRestante <= 0.01) "L. 0.00 ✓"
-                                            else "L. ${dec.format(saldoRestante)}",
+                                            if (saldoRestante <= 0.01) "L.0.00 ✓"
+                                            else "L.${dec.format(saldoRestante)}",
                                             fontSize = 15.sp,
                                             fontWeight = FontWeight.ExtraBold,
                                             color = if (saldoRestante <= 0.01) CGreen else CRed
@@ -1040,7 +1040,7 @@ fun CuotasPrestamoScreen(
                                                 if (nuevoSaldo <= 0.90)
                                                     "¡PRÉSTAMO N° $numPrestamo SALDADO! ✅"
                                                 else
-                                                    "Cuota pagada. Saldo: L. ${dec.format(nuevoSaldo)}",
+                                                    "Cuota pagada. Saldo: L.${dec.format(nuevoSaldo)}",
                                                 Toast.LENGTH_LONG
                                             ).show()
                                         }
@@ -1274,10 +1274,10 @@ private fun CuotaCard(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         if (cuota.capital > 0)
-                            Text("Capital: L. ${dec.format(cuota.capital)}",
+                            Text("Capital: L.${dec.format(cuota.capital)}",
                                 fontSize = 12.sp, color = CTextSec)
                         if (cuota.interes > 0)
-                            Text("Interés: L. ${dec.format(cuota.interes)}",
+                            Text("Interés: L.${dec.format(cuota.interes)}",
                                 fontSize = 12.sp, color = CTextSec)
                     }
                     Spacer(Modifier.height(4.dp))
@@ -1289,16 +1289,16 @@ private fun CuotaCard(
                     verticalAlignment     = Alignment.CenterVertically
                 ) {
                     Text(
-                        "Total: L. ${dec.format(cuota.total)}",
+                        "Total: L.${dec.format(cuota.total)}",
                         fontWeight = FontWeight.Bold, fontSize = 15.sp,
                         color = if (cuota.descripcion == "Mora") CRed else Color(0xFF0F172A)
                     )
                     if (cuota.montoPagado > 0) {
                         Column(horizontalAlignment = Alignment.End) {
-                            Text("Pagado: L. ${dec.format(cuota.montoPagado)}",
+                            Text("Pagado: L.${dec.format(cuota.montoPagado)}",
                                 color = CGreen, fontWeight = FontWeight.Medium, fontSize = 12.sp)
                             if (!cuota.estaCompleta)
-                                Text("Resta: L. ${dec.format(cuota.total - cuota.montoPagado)}",
+                                Text("Resta: L.${dec.format(cuota.total - cuota.montoPagado)}",
                                     color = CAmber, fontSize = 11.sp)
                         }
                     }
