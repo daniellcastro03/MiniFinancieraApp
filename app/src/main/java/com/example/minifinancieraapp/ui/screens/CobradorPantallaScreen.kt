@@ -55,6 +55,8 @@ fun CobradorPantallaScreen(navController: NavController, uid: String) {
         hayAbonosPendientes = lista.isNotEmpty()
     }
 
+    val drawerController = com.example.capitalexpressapp.core.LocalDrawerController.current
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -65,6 +67,11 @@ fun CobradorPantallaScreen(navController: NavController, uid: String) {
                         fontWeight = FontWeight.Bold,
                         fontSize = 18.sp
                     )
+                },
+                navigationIcon = {
+                    IconButton(onClick = { drawerController.abrir() }) {
+                        Icon(Icons.Default.Menu, contentDescription = "Menú", tint = Color.White)
+                    }
                 },
                 actions = {
                     IconButton(onClick = { mostrarDialogoCerrarSesion = true }) {

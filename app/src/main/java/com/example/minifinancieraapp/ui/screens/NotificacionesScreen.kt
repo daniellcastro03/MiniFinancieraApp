@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
+import com.example.capitalexpressapp.core.formatearLempiras
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
@@ -380,7 +381,9 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
     var hasError     by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
 
-    var filtroTipo    by rememberSaveable { mutableStateOf("Todos") }
+    // Por defecto "hoy" para no renderizar de golpe todos los préstamos activos;
+    // el usuario puede cambiar el filtro (chip "Todos"/"vencido"/etc.) cuando quiera.
+    var filtroTipo    by rememberSaveable { mutableStateOf("hoy") }
     var textoBusqueda by rememberSaveable { mutableStateOf("") }
 
     var mostrarDialogoMora  by remember { mutableStateOf(false) }
@@ -850,7 +853,7 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
 
                         Toast.makeText(
                             context,
-                            "✅ Mora de L. ${"%.2f".format(montoMora)} aplicada",
+                            "Mora de ${formatearLempiras(montoMora)} aplicada",
                             Toast.LENGTH_SHORT
                         ).show()
                         cargarNotificaciones()
@@ -1068,7 +1071,7 @@ private fun NotifCard(
                     Column {
                         Text("Saldo pendiente", fontSize = 11.sp, color = NC.TextMuted, fontWeight = FontWeight.Medium)
                         Text(
-                            "L. ${dec.format(notif.montoSaldoPendiente)}",
+                            formatearLempiras(notif.montoSaldoPendiente),
                             fontSize   = 20.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color      = NC.TextPrimary
@@ -1470,7 +1473,7 @@ fun DialogoAplicarMora(
 
                 // ✅ Fórmula correcta: totalPagar × 0.5% × días
                 Text(
-                    "Cálculo: Total a pagar (L. ${dec.format(totalPagar)}) × 0.5% × $diasMora días = L. ${"%.2f".format(moraCalculadaRef)}",
+                    "Cálculo: Total a pagar (${formatearLempiras(totalPagar)}) × 0.5% × $diasMora días = ${formatearLempiras(moraCalculadaRef)}",
                     fontSize = 11.sp,
                     color    = NC.TextMuted
                 )

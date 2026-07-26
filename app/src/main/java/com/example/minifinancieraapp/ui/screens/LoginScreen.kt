@@ -18,7 +18,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -126,13 +128,13 @@ fun LoginScreen(navController: NavController) {
                             // Resplandor sutil detrás del logo
                             Box(
                                 modifier = Modifier
-                                    .size(170.dp)
+                                    .size(180.dp)
                                     .scale(pulseAnimation * 0.1f + 0.9f)
                                     .blur(55.dp)
                                     .background(
                                         Brush.radialGradient(
                                             colors = listOf(
-                                                Color.White.copy(alpha = 0.14f),
+                                                Color.White.copy(alpha = 0.18f),
                                                 Color.Transparent
                                             )
                                         ),
@@ -140,13 +142,24 @@ fun LoginScreen(navController: NavController) {
                                     )
                             )
 
-                            Image(
-                                painter = painterResource(id = R.drawable.logo_capital),
-                                contentDescription = "Logo Capital Express",
+                            // Fondo redondo claro para que el logo se destaque sobre
+                            // el fondo oscuro de la pantalla (si no, se pierde).
+                            Box(
                                 modifier = Modifier
-                                    .size(112.dp)
-                                    .scale(pulseAnimation * 0.04f + 0.96f)
-                            )
+                                    .size(132.dp)
+                                    .shadow(elevation = 16.dp, shape = CircleShape)
+                                    .clip(CircleShape)
+                                    .background(Color.White),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Image(
+                                    painter = painterResource(id = R.drawable.logo_capital),
+                                    contentDescription = "Logo Capital Express",
+                                    modifier = Modifier
+                                        .size(96.dp)
+                                        .scale(pulseAnimation * 0.04f + 0.96f)
+                                )
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(28.dp))

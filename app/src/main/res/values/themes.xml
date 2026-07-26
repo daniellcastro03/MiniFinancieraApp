@@ -3,10 +3,12 @@
 
     <style name="Theme.MiniFinancieraApp" parent="android:Theme.Material.Light.NoActionBar" />
 
+    <!-- Sin icono propio: el logo_capital.png es rectangular y grande, y la zona
+         segura del splash lo recortaba feo. Usamos el ícono del launcher (ya viene
+         recortado/adaptado correctamente) y dejamos que el nombre de la empresa
+         se vea como texto, ya animado, apenas entra LoginScreen. -->
     <style name="Theme.App.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_background</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/logo_capital</item>
-        <item name="windowSplashScreenIconBackgroundColor">@color/splash_background</item>
         <item name="postSplashScreenTheme">@style/Theme.MiniFinancieraApp</item>
     </style>
 </resources>

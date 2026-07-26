@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import androidx.navigation.NavController
+import com.example.capitalexpressapp.core.formatearLempiras
 import com.example.capitalexpressapp.ui.screens.calcularDiasEfectivos
 import com.example.capitalexpressapp.util.PrestamoNumberHelper
 import com.example.capitalexpressapp.util.ReciboHelper
@@ -747,7 +748,7 @@ fun SolicitudCardModerna(
                             letterSpacing = 0.5.sp
                         )
                         Text(
-                            "L. ${"%.2f".format(solicitud.monto)}",
+                            formatearLempiras(solicitud.monto),
                             fontSize = 28.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = SolicitudColors.Info
@@ -774,19 +775,22 @@ fun SolicitudCardModerna(
                     icon = Icons.Default.CalendarToday,
                     label = "Cuotas",
                     value = "${solicitud.cuotas}",
-                    color = SolicitudColors.Primary
+                    color = SolicitudColors.Primary,
+                    modifier = Modifier.weight(1f)
                 )
                 InfoChipModerno(
                     icon = Icons.Default.Schedule,
                     label = "Plazo",
                     value = solicitud.plazo,
-                    color = SolicitudColors.Purple
+                    color = SolicitudColors.Purple,
+                    modifier = Modifier.weight(1f)
                 )
                 InfoChipModerno(
                     icon = Icons.Default.Event,
                     label = "Fecha",
                     value = solicitud.fecha,
-                    color = SolicitudColors.Success
+                    color = SolicitudColors.Success,
+                    modifier = Modifier.weight(1f)
                 )
             }
 
@@ -803,13 +807,13 @@ fun SolicitudCardModerna(
                     val interesTexto = if (solicitud.usarInteresMensual) {
                         "${"%.1f".format(solicitud.interesMensual)}% mensual"
                     } else {
-                        "L. ${"%.2f".format(solicitud.interesTotalFijo)} fijo"
+                        "${formatearLempiras(solicitud.interesTotalFijo)} fijo"
                     }
 
                     DetalleRow("Tipo de interés", interesTexto)
 
                     if (solicitud.mora > 0) {
-                        DetalleRow("Mora diaria", "L. ${"%.2f".format(solicitud.mora)}")
+                        DetalleRow("Mora diaria", formatearLempiras(solicitud.mora))
                     }
 
                     if (solicitud.lugar.isNotBlank()) {
@@ -921,20 +925,39 @@ fun InfoChipModerno(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     value: String,
-    color: Color
+    color: Color,
+    modifier: Modifier = Modifier
 ) {
     Surface(
+        modifier = modifier,
         color = color.copy(alpha = 0.1f),
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier
+                .padding(horizontal = 8.dp, vertical = 12.dp)
+                .fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(20.dp))
-            Text(value, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = color)
-            Text(label, fontSize = 10.sp, color = color.copy(alpha = 0.7f), fontWeight = FontWeight.Medium)
+            Text(
+                value,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = color,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center
+            )
+            Text(
+                label,
+                fontSize = 10.sp,
+                color = color.copy(alpha = 0.7f),
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
         }
     }
 }

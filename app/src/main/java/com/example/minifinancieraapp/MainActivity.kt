@@ -6,13 +6,26 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Surface
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.capitalexpressapp.core.DrawerController
+import com.example.capitalexpressapp.core.LocalDrawerController
+import com.example.capitalexpressapp.core.MenuLateralContenido
 import com.example.capitalexpressapp.ui.screens.CobrosAdminScreen
 import com.example.capitalexpressapp.ui.screens.CrearPrestamoScreen
 import com.example.capitalexpressapp.ui.screens.CrearUsuarioScreen
@@ -30,6 +43,8 @@ import com.example.capitalexpressapp.ui.screens.SolicitudesAdminScreen
 import com.example.capitalexpressapp.ui.screens.VerPrestamoScreen
 import com.example.capitalexpressapp.ui.theme.CapitalExpressAppTheme
 import com.example.minifinancieraapp.ui.screens.*
+import com.example.minifinancieraapp.util.SessionManager
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,7 +53,33 @@ class MainActivity : ComponentActivity() {
         setContent {
             CapitalExpressAppTheme {
                 val navController = rememberNavController()
+                val context = LocalContext.current
+                val sessionManager = remember { SessionManager(context) }
+                val drawerState = rememberDrawerState(DrawerValue.Closed)
+                val scope = rememberCoroutineScope()
 
+                // El menú lateral solo tiene sentido con sesión iniciada (no en "login").
+                val navBackStackEntry by navController.currentBackStackEntryAsState()
+                val sesionActiva = navBackStackEntry?.destination?.route != "login" &&
+                        navBackStackEntry?.destination?.route != null
+
+                ModalNavigationDrawer(
+                    drawerState = drawerState,
+                    gesturesEnabled = sesionActiva,
+                    drawerContent = {
+                        ModalDrawerSheet {
+                            MenuLateralContenido(
+                                navController = navController,
+                                uid = sessionManager.getUid(),
+                                rol = sessionManager.getRol(),
+                                onCerrar = { scope.launch { drawerState.close() } }
+                            )
+                        }
+                    }
+                ) {
+                CompositionLocalProvider(
+                    LocalDrawerController provides DrawerController(abrir = { scope.launch { drawerState.open() } })
+                ) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     NavHost(navController = navController, startDestination = "login") {
 
@@ -337,6 +378,8 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
+                }
+                }
                 }
             }
         }

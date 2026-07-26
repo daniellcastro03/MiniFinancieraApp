@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Assignment
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,6 +36,8 @@ import com.google.firebase.firestore.FirebaseFirestoreSettings
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
+import com.example.capitalexpressapp.core.coincideAproximado
+import com.example.capitalexpressapp.core.formatearLempiras
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
@@ -244,9 +247,7 @@ fun FiltrosCompactos(
                         }
                     }
                 } else null,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
+                modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(24.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Color(0xFF0061A7),
@@ -410,7 +411,7 @@ fun TarjetaPrestamo(
                         color = Color(0xFF1A1A1A)
                     )
                     Text(
-                        "L. ${"%.0f".format(prestamo.monto)}",
+                        formatearLempiras(prestamo.monto),
                         color = Color(0xFF0061A7),
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 14.sp
@@ -437,7 +438,7 @@ fun TarjetaPrestamo(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                InfoCompacta("Cuota", "L. ${"%.0f".format(prestamo.cuota)}")
+                InfoCompacta("Cuota", formatearLempiras(prestamo.cuota))
                 InfoCompacta("Cuotas", "${prestamo.cuotas}")
                 InfoCompacta("Plazo", prestamo.plazo.take(10))
             }
@@ -448,9 +449,9 @@ fun TarjetaPrestamo(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    InfoCompacta("Pagado", "L. ${"%.0f".format(prestamo.montoPagado)}")
+                    InfoCompacta("Pagado", formatearLempiras(prestamo.montoPagado))
                     if (prestamo.saldo > 0.01 && prestamo.estado.lowercase() != "saldado") {
-                        InfoCompacta("Saldo", "L. ${"%.0f".format(prestamo.saldo)}")
+                        InfoCompacta("Saldo", formatearLempiras(prestamo.saldo))
                     }
                 }
             }
@@ -659,7 +660,7 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
     var prestamosOriginales by remember { mutableStateOf(listOf<PrestamoAdmin>()) }
     var prestamosFiltrados by remember { mutableStateOf(listOf<PrestamoAdmin>()) }
     var prestamoAEliminar by remember { mutableStateOf<PrestamoAdmin?>(null) }
-    var cargando by remember { mutableStateOf(true) }
+    var cargando by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
     var hayConexion by remember { mutableStateOf(true) }
     var mostrarEliminados by remember { mutableStateOf(false) }
@@ -667,6 +668,9 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
 
     var estadoSeleccionado by remember { mutableStateOf("Todos") }
     var search by remember { mutableStateOf("") }
+    // Igual que en Clientes: no se trae toda la colección hasta que el usuario
+    // busque o pida "Ver todos".
+    var datosYaCargados by remember { mutableStateOf(false) }
 
     val esAdmin = rol == "admin"
     val esCobrador = rol == "cobrador"
@@ -881,8 +885,11 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
         }
     }
 
-    LaunchedEffect(Unit) {
-        configurarListenerFirebase()
+    fun cargarSiHaceFalta() {
+        if (!datosYaCargados) {
+            datosYaCargados = true
+            configurarListenerFirebase()
+        }
     }
 
     DisposableEffect(Unit) {
@@ -903,9 +910,9 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                 val coincideEstado = estadoSeleccionado == "Todos" ||
                         prestamo.estado.equals(estadoSeleccionado, ignoreCase = true)
 
-                // ⭐ BÚSQUEDA POR CLIENTE Y NÚMERO DE PRÉSTAMO
+                // ⭐ BÚSQUEDA POR CLIENTE (tolera errores de tipeo/orden) Y NÚMERO DE PRÉSTAMO
                 val coincideBusqueda = search.isBlank() ||
-                        prestamo.cliente.contains(search, ignoreCase = true) ||
+                        coincideAproximado(search, prestamo.cliente) ||
                         prestamo.numeroPrestamo.contains(search, ignoreCase = true)
 
                 coincideEliminado && coincideEstado && coincideBusqueda
@@ -955,160 +962,214 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
             }
         }
     ) { padding ->
-        Column(
+        // Todo en un solo LazyColumn (filtros, estadísticas y lista) para que el
+        // scroll mueva la pantalla completa, sin controles fijos arriba.
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            FiltrosCompactos(
-                estadoSeleccionado = estadoSeleccionado,
-                onEstadoChange = { estadoSeleccionado = it },
-                search = search,
-                onSearchChange = { search = it },
-                mostrarEliminados = mostrarEliminados,
-                onMostrarEliminadosChange = { mostrarEliminados = it },
-                esAdmin = esAdmin,
-                onResetFiltros = ::resetearFiltros
-            )
-
-            if (!cargando && prestamosFiltrados.isNotEmpty() && !mostrarEliminados) {
-                EstadisticasRapidas(prestamosFiltrados)
+            item {
+                FiltrosCompactos(
+                    estadoSeleccionado = estadoSeleccionado,
+                    onEstadoChange = { estadoSeleccionado = it },
+                    search = search,
+                    onSearchChange = { search = it },
+                    mostrarEliminados = mostrarEliminados,
+                    onMostrarEliminadosChange = { mostrarEliminados = it },
+                    esAdmin = esAdmin,
+                    onResetFiltros = ::resetearFiltros
+                )
             }
 
-            if (errorMessage.isNotBlank()) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Filled.Warning,
-                            contentDescription = "Error",
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                "Error de conexión",
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onErrorContainer
-                            )
-                            Text(
-                                errorMessage,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                fontSize = 14.sp
-                            )
+            if (!datosYaCargados && !cargando) {
+                item {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { cargarSiHaceFalta() },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A7))
+                            ) {
+                                Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Buscar")
+                            }
+                            OutlinedButton(
+                                onClick = { cargarSiHaceFalta() },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Ver todos")
+                            }
                         }
-                    }
-                }
-
-                if (!hayConexion) {
-                    OutlinedButton(
-                        onClick = { configurarListenerFirebase() },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = Color(0xFF0061A7)
-                        )
-                    ) {
-                        Text("Reintentar conexión")
-                    }
-                }
-            }
-
-            when {
-                cargando -> {
-                    Box(
-                        Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator(
-                                color = if (mostrarEliminados) Color(0xFFD32F2F) else Color(0xFF0061A7),
-                                strokeWidth = 3.dp
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text(
-                                "Cargando préstamos...",
-                                color = Color.Gray,
-                                fontSize = 14.sp
-                            )
-                        }
-                    }
-                }
-
-                prestamosFiltrados.isEmpty() && errorMessage.isBlank() -> {
-                    Box(
-                        Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 32.dp),
+                            contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                "📋",
-                                fontSize = 48.sp
+                                "Escribí un cliente o número y tocá \"Buscar\", o tocá \"Ver todos\"",
+                                color = Color.Gray,
+                                fontSize = 13.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
                             )
-                            Text(
-                                if (mostrarEliminados) "No hay préstamos eliminados"
-                                else "No se encontraron préstamos",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color(0xFF666666)
-                            )
-                            Text(
-                                if (prestamosOriginales.isEmpty()) {
-                                    "No hay préstamos en la base de datos"
-                                } else {
-                                    "Ajusta los filtros para ver más resultados"
-                                },
-                                fontSize = 14.sp,
-                                color = Color.Gray
-                            )
+                        }
+                    }
+                }
+            } else {
+                if (!cargando && prestamosFiltrados.isNotEmpty() && !mostrarEliminados) {
+                    item { EstadisticasRapidas(prestamosFiltrados) }
+                }
 
-                            if (prestamosOriginales.isEmpty()) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedButton(
-                                        onClick = { configurarListenerFirebase() },
-                                        colors = ButtonDefaults.outlinedButtonColors(
-                                            contentColor = Color(0xFF0061A7)
+                if (errorMessage.isNotBlank()) {
+                    item {
+                        Column {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer
+                                ),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Warning,
+                                        contentDescription = "Error",
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Column {
+                                        Text(
+                                            "Error de conexión",
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onErrorContainer
                                         )
-                                    ) {
-                                        Text("Recargar")
+                                        Text(
+                                            errorMessage,
+                                            color = MaterialTheme.colorScheme.onErrorContainer,
+                                            fontSize = 14.sp
+                                        )
                                     }
+                                }
+                            }
 
-                                    if (!mostrarEliminados && esAdmin) {
-                                        Button(
-                                            onClick = { navController.navigate("crearPrestamo") },
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = Color(0xFF4CAF50)
-                                            )
-                                        ) {
-                                            Text("+ Crear préstamo")
-                                        }
-                                    }
+                            if (!hayConexion) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedButton(
+                                    onClick = { configurarListenerFirebase() },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        contentColor = Color(0xFF0061A7)
+                                    )
+                                ) {
+                                    Text("Reintentar conexión")
                                 }
                             }
                         }
                     }
                 }
 
-                else -> {
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        items(prestamosFiltrados) { prestamo ->
+                when {
+                    cargando -> {
+                        item {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 48.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    CircularProgressIndicator(
+                                        color = if (mostrarEliminados) Color(0xFFD32F2F) else Color(0xFF0061A7),
+                                        strokeWidth = 3.dp
+                                    )
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text(
+                                        "Cargando préstamos...",
+                                        color = Color.Gray,
+                                        fontSize = 14.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    prestamosFiltrados.isEmpty() && errorMessage.isBlank() -> {
+                        item {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 48.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Assignment,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(48.dp),
+                                        tint = Color(0xFFBDBDBD)
+                                    )
+                                    Text(
+                                        if (mostrarEliminados) "No hay préstamos eliminados"
+                                        else "No se encontraron préstamos",
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = Color(0xFF666666)
+                                    )
+                                    Text(
+                                        if (prestamosOriginales.isEmpty()) {
+                                            "No hay préstamos en la base de datos"
+                                        } else {
+                                            "Ajusta los filtros para ver más resultados"
+                                        },
+                                        fontSize = 14.sp,
+                                        color = Color.Gray
+                                    )
+
+                                    if (prestamosOriginales.isEmpty()) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            OutlinedButton(
+                                                onClick = { configurarListenerFirebase() },
+                                                colors = ButtonDefaults.outlinedButtonColors(
+                                                    contentColor = Color(0xFF0061A7)
+                                                )
+                                            ) {
+                                                Text("Recargar")
+                                            }
+
+                                            if (!mostrarEliminados && esAdmin) {
+                                                Button(
+                                                    onClick = { navController.navigate("crearPrestamo") },
+                                                    colors = ButtonDefaults.buttonColors(
+                                                        containerColor = Color(0xFF4CAF50)
+                                                    )
+                                                ) {
+                                                    Text("+ Crear préstamo")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    else -> {
+                        items(prestamosFiltrados, key = { it.id }) { prestamo ->
                             val nombresCobradores by produceState(
                                 initialValue = "Cargando...",
                                 key1 = prestamo.id
@@ -1156,8 +1217,8 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                     if (prestamo.numeroPrestamo.isNotEmpty()) {
                         Text("Número: ${prestamo.numeroPrestamo}")
                     }
-                    Text("Monto: L. ${"%.2f".format(prestamo.monto)}")
-                    Text("Total: L. ${"%.2f".format(prestamo.totalPagar)}")
+                    Text("Monto: ${formatearLempiras(prestamo.monto)}")
+                    Text("Total: ${formatearLempiras(prestamo.totalPagar)}")
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         "Esta acción se puede revertir desde la vista de eliminados.",

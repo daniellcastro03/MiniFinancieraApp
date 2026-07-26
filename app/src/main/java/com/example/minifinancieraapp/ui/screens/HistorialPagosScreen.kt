@@ -26,6 +26,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import com.example.capitalexpressapp.core.coincideAproximado
+import com.example.capitalexpressapp.core.formatearLempiras
 import com.example.capitalexpressapp.util.ReciboHelper
 import com.example.capitalexpressapp.util.NetworkUtils.isInternetAvailable
 import com.example.minifinancieraapp.ui.models.PagoItem
@@ -345,10 +347,6 @@ private fun calcularCuotasPendientesDesdeDocumentos(
         ))
     }
     return pendientes
-}
-
-fun formatearLempiras(valor: Double): String {
-    return "L. ${String.format("%.2f", valor)}"
 }
 
 private fun procesarDocumentoPagoMejorado(
@@ -747,7 +745,10 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
     var fechaInicio by remember { mutableStateOf<Date?>(Date()) }
     var exportandoPDF by remember { mutableStateOf(false) }
     var fechaFin by remember { mutableStateOf<Date?>(Date()) }
-    var cargando by remember { mutableStateOf(true) }
+    var cargando by remember { mutableStateOf(false) }
+    // No se trae la colección "pagos" hasta que el usuario lo pide -igual que
+    // en Clientes/Ver Préstamos-: evita el golpe de carga al solo abrir la pantalla.
+    var datosYaCargados by remember { mutableStateOf(false) }
     var mostrarFiltros by remember { mutableStateOf(false) }
     var pagoAEliminar by remember { mutableStateOf<PagoItem?>(null) }
     var estadoFiltro by remember { mutableStateOf(EstadoFiltro.TODOS) }
@@ -919,6 +920,7 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
 
     // ✅ BLOQUE 1 REEMPLAZADO: Una sola carga paralela, límite razonable
     fun cargarPagos() {
+        datosYaCargados = true
         scope.launch {
             try {
                 if (PagosCache.isValid()) {
@@ -1011,10 +1013,6 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                 cargandoPendientes = false
             }
         }
-    }
-
-    LaunchedEffect(Unit) {
-        cargarPagos()
     }
 
     Scaffold(
@@ -1271,7 +1269,12 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                                         .padding(40.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
-                                    Text("✅", fontSize = 48.sp)
+                                    Icon(
+                                        Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(48.dp),
+                                        tint = Color(0xFF2E7D32)
+                                    )
                                     Text(
                                         "¡No hay pagos pendientes!",
                                         fontWeight = FontWeight.Bold,
@@ -1300,6 +1303,50 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
 
                             items(cuotas) { cuota ->
                                 CuotaPendienteCard(cuota)
+                            }
+                        }
+                    }
+                } else if (!datosYaCargados) {
+                    item {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { cargarPagos() },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.Today, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Cargar pagos de hoy")
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        fechaInicio = null
+                                        fechaFin = null
+                                        cargarPagos()
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Ver todos")
+                                }
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "Por defecto solo se cargan los pagos de hoy para no traer todo el historial de una",
+                                    color = Color.Gray,
+                                    fontSize = 13.sp,
+                                    textAlign = TextAlign.Center
+                                )
                             }
                         }
                     }
@@ -2149,12 +2196,21 @@ fun ConfirmDeleteDialog(
                     }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    "⚠️ Esta acción no se puede deshacer y afectará el saldo del préstamo.",
-                    fontSize = 12.sp,
-                    color = Color(0xFFD32F2F),
-                    fontWeight = FontWeight.Medium
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = Color(0xFFD32F2F),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        "Esta acción no se puede deshacer y afectará el saldo del préstamo.",
+                        fontSize = 12.sp,
+                        color = Color(0xFFD32F2F),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
         },
         confirmButton = {

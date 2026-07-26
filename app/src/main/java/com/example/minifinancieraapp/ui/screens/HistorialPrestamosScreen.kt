@@ -24,6 +24,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
+import com.example.capitalexpressapp.core.coincideAproximado
+import com.example.capitalexpressapp.core.formatearLempiras
 import com.example.capitalexpressapp.util.ReciboHelper.generarReciboPrestamoPDF
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
@@ -155,7 +157,9 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
 
     var prestamosOriginales by remember { mutableStateOf<List<PrestamoHistorial>>(emptyList()) }
     var prestamosFiltrados by remember { mutableStateOf<List<PrestamoHistorial>>(emptyList()) }
-    var cargando by remember { mutableStateOf(true) }
+    var cargando by remember { mutableStateOf(false) }
+    // Igual que en Clientes/Ver Préstamos: no se trae todo hasta que el usuario lo pida.
+    var datosYaCargados by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
     var firestoreListener by remember { mutableStateOf<ListenerRegistration?>(null) }
 
@@ -196,7 +200,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
             val coincideBusqueda = if (busqueda.isBlank()) {
                 true
             } else {
-                prestamo.cliente.contains(busqueda, ignoreCase = true) ||
+                coincideAproximado(busqueda, prestamo.cliente) ||
                         prestamo.numeroPrestamo.contains(busqueda, ignoreCase = true)
             }
 
@@ -268,6 +272,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
     }
 
     fun configurarListenerFirebase() {
+        datosYaCargados = true
         cargando = true
         errorMessage = ""
 
@@ -401,10 +406,6 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
         }
     }
 
-    LaunchedEffect(Unit) {
-        configurarListenerFirebase()
-    }
-
     DisposableEffect(Unit) {
         onDispose {
             firestoreListener?.remove()
@@ -453,7 +454,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                 title = {
                     Column {
                         Text(
-                            "💼 Historial de Préstamos",
+                            "Historial de Préstamos",
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
                             fontSize = 18.sp
@@ -596,7 +597,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                 Icon(Icons.Default.Analytics, null, tint = Color.White, modifier = Modifier.size(20.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Column {
-                                    Text("📊 Resumen Financiero", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    Text("Resumen Financiero", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                     Text("Toca para ${if (resumenExpandido) "ocultar" else "mostrar"} estadísticas", color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp)
                                 }
                             }
@@ -632,9 +633,9 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                     Divider(color = Color.White.copy(alpha = 0.3f), thickness = 1.dp)
 
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                        StatCard("Prestado", "L. ${String.format("%.0f", estadisticas["montoPrestado"] as Double)}", Icons.Default.TrendingUp, Color.White)
-                                        StatCard("Pagado", "L. ${String.format("%.0f", estadisticas["montoPagado"] as Double)}", Icons.Default.Paid, Color.White)
-                                        StatCard("Pendiente", "L. ${String.format("%.0f", estadisticas["pendiente"] as Double)}", Icons.Default.PendingActions, Color.White)
+                                        StatCard("Prestado", formatearLempiras(estadisticas["montoPrestado"] as Double), Icons.Default.TrendingUp, Color.White)
+                                        StatCard("Pagado", formatearLempiras(estadisticas["montoPagado"] as Double), Icons.Default.Paid, Color.White)
+                                        StatCard("Pendiente", formatearLempiras(estadisticas["pendiente"] as Double), Icons.Default.PendingActions, Color.White)
                                     }
                                 }
                             }
@@ -652,7 +653,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                             Icon(Icons.Default.Search, null, tint = Color(0xFF2196F3), modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("🔍 Buscar y Filtrar", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF2196F3))
+                            Text("Buscar y Filtrar", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF2196F3))
                         }
 
                         OutlinedTextField(
@@ -663,7 +664,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                             trailingIcon = if (busqueda.isNotBlank()) {
                                 { IconButton(onClick = { busqueda = "" }) { Icon(Icons.Default.Clear, null, modifier = Modifier.size(14.dp)) } }
                             } else null,
-                            modifier = Modifier.fillMaxWidth().height(44.dp),
+                            modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(22.dp),
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
@@ -788,7 +789,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                 ) {
                                     Icon(Icons.Default.DateRange, null, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(3.dp))
-                                    Text(if (fechaInicio.isEmpty()) "📅 Desde" else fechaInicio, fontSize = 11.sp, maxLines = 1)
+                                    Text(if (fechaInicio.isEmpty()) "Desde" else fechaInicio, fontSize = 11.sp, maxLines = 1)
                                 }
 
                                 OutlinedButton(
@@ -799,7 +800,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                 ) {
                                     Icon(Icons.Default.DateRange, null, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(3.dp))
-                                    Text(if (fechaFin.isEmpty()) "📅 Hasta" else fechaFin, fontSize = 11.sp, maxLines = 1)
+                                    Text(if (fechaFin.isEmpty()) "Hasta" else fechaFin, fontSize = 11.sp, maxLines = 1)
                                 }
                             }
                         }
@@ -812,7 +813,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                     .padding(6.dp)
                             ) {
                                 Text(
-                                    text = "📋 ${prestamosFiltrados.size} de ${prestamosOriginales.size} préstamos",
+                                    text = "${prestamosFiltrados.size} de ${prestamosOriginales.size} préstamos",
                                     fontSize = 11.sp,
                                     color = Color(0xFF2196F3),
                                     fontWeight = FontWeight.Medium,
@@ -835,7 +836,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                 Icon(Icons.Filled.Warning, "Error", tint = Color(0xFFD32F2F), modifier = Modifier.size(20.dp))
                                 Spacer(Modifier.width(8.dp))
                                 Column {
-                                    Text("❌ Error de conexión", fontWeight = FontWeight.Bold, color = Color(0xFFD32F2F), fontSize = 14.sp)
+                                    Text("Error de conexión", fontWeight = FontWeight.Bold, color = Color(0xFFD32F2F), fontSize = 14.sp)
                                     Text(errorMessage, color = Color(0xFFD32F2F), fontSize = 12.sp)
                                 }
                             }
@@ -848,13 +849,51 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                             ) {
                                 Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("🔄 Reintentar", fontSize = 13.sp)
+                                Text("Reintentar", fontSize = 13.sp)
                             }
                         }
                     }
                 }
 
                 when {
+                    !datosYaCargados && !cargando -> {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { configurarListenerFirebase() },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3))
+                                ) {
+                                    Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Buscar")
+                                }
+                                OutlinedButton(
+                                    onClick = { configurarListenerFirebase() },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Ver todos")
+                                }
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "Escribí un cliente o número y tocá \"Buscar\", o tocá \"Ver todos\"",
+                                    color = Color.Gray,
+                                    fontSize = 13.sp,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+
                     cargando -> {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Card(
@@ -868,7 +907,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                     verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     CircularProgressIndicator(color = Color(0xFF2196F3), strokeWidth = 3.dp, modifier = Modifier.size(40.dp))
-                                    Text("⏳ Cargando préstamos...", color = Color(0xFF666666), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                    Text("Cargando préstamos...", color = Color(0xFF666666), fontSize = 14.sp, fontWeight = FontWeight.Medium)
                                     Text("Por favor espera", color = Color(0xFF999999), fontSize = 11.sp)
                                 }
                             }
@@ -887,10 +926,15 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                     verticalArrangement = Arrangement.spacedBy(12.dp),
                                     modifier = Modifier.padding(24.dp)
                                 ) {
-                                    Text("📋", fontSize = 48.sp)
+                                    Icon(
+                                        Icons.Default.Assignment,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(48.dp),
+                                        tint = Color(0xFFBDBDBD)
+                                    )
                                     Text("No se encontraron préstamos", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF333333), textAlign = TextAlign.Center)
                                     Text(
-                                        if (prestamosOriginales.isEmpty()) "📝 No hay préstamos registrados" else "🔍 Ajusta los filtros para ver más resultados",
+                                        if (prestamosOriginales.isEmpty()) "No hay préstamos registrados" else "Ajusta los filtros para ver más resultados",
                                         fontSize = 12.sp,
                                         color = Color(0xFF666666),
                                         textAlign = TextAlign.Center
@@ -905,7 +949,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                         ) {
                                             Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("➕ Crear préstamo", fontSize = 13.sp)
+                                            Text("Crear préstamo", fontSize = 13.sp)
                                         }
                                     }
                                 }
@@ -1077,30 +1121,34 @@ fun PrestamoCardHistorial(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(text = "👤 ${prestamo.cliente}", fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = Color(0xFF333333))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color(0xFF666666))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(text = prestamo.cliente, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = Color(0xFF333333))
+                        }
                         if (prestamo.numeroPrestamo.isNotEmpty()) {
-                            Text(text = "📋 Préstamo #${prestamo.numeroPrestamo}", fontSize = 11.sp, color = Color(0xFF666666))
+                            Text(text = "Préstamo #${prestamo.numeroPrestamo}", fontSize = 11.sp, color = Color(0xFF666666))
                         }
                     }
                     Box(modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(estadoColor).padding(horizontal = 10.dp, vertical = 4.dp)) {
-                        Text(text = "$estadoEmoji $estadoText", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(text = estadoText, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
 
             Column(modifier = Modifier.padding(12.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    InfoColumn("💰 Capital", "L. ${"%.0f".format(prestamo.monto)}", Color(0xFF2196F3))
-                    InfoColumn("📊 Total", "L. ${"%.0f".format(prestamo.totalPagar)}", Color(0xFF4CAF50))
-                    InfoColumn("💳 Pagado", "L. ${"%.0f".format(prestamo.montoPagado)}", Color(0xFF009688))
-                    InfoColumn("⏰ Saldo", "L. ${"%.0f".format(prestamo.saldo)}", Color(0xFFFF5722))
+                    InfoColumn("Capital", formatearLempiras(prestamo.monto), Color(0xFF2196F3))
+                    InfoColumn("Total", formatearLempiras(prestamo.totalPagar), Color(0xFF4CAF50))
+                    InfoColumn("Pagado", formatearLempiras(prestamo.montoPagado), Color(0xFF009688))
+                    InfoColumn("Saldo", formatearLempiras(prestamo.saldo), Color(0xFFFF5722))
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Column {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(text = "📈 Progreso", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color(0xFF666666))
+                        Text(text = "Progreso", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color(0xFF666666))
                         Text(text = "${(progreso * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
                     }
 
@@ -1116,9 +1164,9 @@ fun PrestamoCardHistorial(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(text = "📅 ${prestamo.fechaCreacion.take(10)}", fontSize = 11.sp, color = Color(0xFF666666))
+                        Text(text = prestamo.fechaCreacion.take(10), fontSize = 11.sp, color = Color(0xFF666666))
                         if (prestamo.proximoPago.isNotBlank() && prestamo.proximoPago != "-") {
-                            Text(text = "📋 ${prestamo.proximoPago}", fontSize = 11.sp, color = Color(0xFF2196F3), fontWeight = FontWeight.Medium)
+                            Text(text = prestamo.proximoPago, fontSize = 11.sp, color = Color(0xFF2196F3), fontWeight = FontWeight.Medium)
                         }
                     }
 
@@ -1127,7 +1175,13 @@ fun PrestamoCardHistorial(
                         modifier = Modifier.align(Alignment.CenterHorizontally),
                         colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF2196F3))
                     ) {
-                        Text(text = if (isExpanded) "🔼 Ocultar" else "🔽 Ver más", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                        Icon(
+                            if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = if (isExpanded) "Ocultar" else "Ver más", fontSize = 11.sp, fontWeight = FontWeight.Medium)
                     }
 
                     if (isExpanded) {
@@ -1137,25 +1191,25 @@ fun PrestamoCardHistorial(
                             shape = RoundedCornerShape(10.dp)
                         ) {
                             Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text("📋 Detalles del Préstamo", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF2196F3), modifier = Modifier.padding(bottom = 6.dp))
+                                Text("Detalles del Préstamo", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF2196F3), modifier = Modifier.padding(bottom = 6.dp))
 
-                                DetailRow("💰 Interés Total", "L. ${"%.2f".format(prestamo.interesTotal)}")
-                                DetailRow("💳 Cuota", "L. ${"%.2f".format(prestamo.cuota)}")
-                                DetailRow("🔢 Cuotas", "${prestamo.cuotas}")
-                                DetailRow("⏱️ Plazo", prestamo.plazo.ifBlank { "No especificado" })
-                                DetailRow("📍 Lugar", prestamo.lugar.ifBlank { "No especificado" })
-                                DetailRow("👨‍💼 Cobrador", prestamo.cobrador)
+                                DetailRow("Interés Total", formatearLempiras(prestamo.interesTotal))
+                                DetailRow("Cuota", formatearLempiras(prestamo.cuota))
+                                DetailRow("Cuotas", "${prestamo.cuotas}")
+                                DetailRow("Plazo", prestamo.plazo.ifBlank { "No especificado" })
+                                DetailRow("Lugar", prestamo.lugar.ifBlank { "No especificado" })
+                                DetailRow("Cobrador", prestamo.cobrador)
 
                                 if (prestamo.mora > 0) {
-                                    DetailRow("⚠️ Mora", "L. ${"%.2f".format(prestamo.mora)}")
+                                    DetailRow("Mora", formatearLempiras(prestamo.mora))
                                 }
 
                                 if (prestamo.observaciones.isNotBlank()) {
-                                    DetailRow("📝 Observaciones", prestamo.observaciones)
+                                    DetailRow("Observaciones", prestamo.observaciones)
                                 }
 
                                 if (prestamo.telefonoCobrador.isNotBlank() && prestamo.telefonoCobrador != "No especificado") {
-                                    DetailRow("📱 Teléfono", prestamo.telefonoCobrador)
+                                    DetailRow("Teléfono", prestamo.telefonoCobrador)
                                 }
                             }
                         }
@@ -1211,7 +1265,7 @@ fun PrestamoCardHistorial(
                                 ) {
                                     Icon(Icons.Default.Description, null, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(3.dp))
-                                    Text("📄 Recibo", fontSize = 11.sp)
+                                    Text("Recibo", fontSize = 11.sp)
                                 }
                             }
                         }

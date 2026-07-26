@@ -257,300 +257,301 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
             }
         }
     ) { padding ->
-        Column(
+        // Un solo LazyColumn para toda la pantalla: el resumen y los filtros son
+        // items más, así que al hacer scroll se van con la lista -nada queda
+        // fijo arriba-.
+        LazyColumn(
             modifier = Modifier
                 .padding(padding)
-                .fillMaxSize()
+                .fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 16.dp)
         ) {
             if (!hayConexion.value) {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(Color.Red)
-                        .padding(4.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "Sin conexión - Modo offline",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-            }
-
-            // Resumen compacto
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = Color(0xFF0061A7)
-                ),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    StatCardMini(
-                        title = "Total",
-                        value = estadisticas.totalClientes.toString(),
-                        icon = Icons.Default.People,
-                        color = Color.White
-                    )
-                    StatCardMini(
-                        title = "Activos",
-                        value = estadisticas.clientesActivos.toString(),
-                        icon = Icons.Default.TrendingUp,
-                        color = Color.White
-                    )
-                    StatCardMini(
-                        title = "Pagos Tarde",
-                        value = estadisticas.clientesConPagosTarde.toString(),
-                        icon = Icons.Default.Warning,
-                        color = if (estadisticas.clientesConPagosTarde > 0) Color(0xFFFFAB00) else Color.White
-                    )
-                    StatCardMini(
-                        title = "Pendiente",
-                        value = formatearLempiras(estadisticas.totalMontoPendiente),
-                        icon = Icons.Default.PendingActions,
-                        color = Color.White
-                    )
+                item {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(Color.Red)
+                            .padding(4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "Sin conexión - Modo offline",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
                 }
             }
 
-            // Resumen detallado desplegable
-            if (mostrarResumen) {
+            item {
+                // Resumen compacto
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 4.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFFE8F5E9)
+                        containerColor = Color(0xFF0061A7)
                     ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        StatCardMini(
+                            title = "Total",
+                            value = estadisticas.totalClientes.toString(),
+                            icon = Icons.Default.People,
+                            color = Color.White
+                        )
+                        StatCardMini(
+                            title = "Activos",
+                            value = estadisticas.clientesActivos.toString(),
+                            icon = Icons.Default.TrendingUp,
+                            color = Color.White
+                        )
+                        StatCardMini(
+                            title = "Pagos Tarde",
+                            value = estadisticas.clientesConPagosTarde.toString(),
+                            icon = Icons.Default.Warning,
+                            color = if (estadisticas.clientesConPagosTarde > 0) Color(0xFFFFAB00) else Color.White
+                        )
+                        StatCardMini(
+                            title = "Pendiente",
+                            value = formatearLempiras(estadisticas.totalMontoPendiente),
+                            icon = Icons.Default.PendingActions,
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+
+            if (mostrarResumen) {
+                item {
+                    // Resumen detallado desplegable
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFFE8F5E9)
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
                             Text(
-                                text = "⚡ Resumen Detallado",
+                                text = "Resumen Detallado",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF2E7D32)
                             )
-                            Text(
-                                text = "Ultra-rápido",
-                                fontSize = 10.sp,
-                                color = Color(0xFF2E7D32),
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("Con Préstamos", fontSize = 10.sp, color = Color.Gray)
-                                Text(
-                                    estadisticas.clientesConPrestamos.toString(),
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("Con Préstamos", fontSize = 10.sp, color = Color.Gray)
+                                    Text(
+                                        estadisticas.clientesConPrestamos.toString(),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("Saldados", fontSize = 10.sp, color = Color.Gray)
+                                    Text(
+                                        estadisticas.clientesSaldados.toString(),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("Préstamos", fontSize = 10.sp, color = Color.Gray)
+                                    Text(
+                                        estadisticas.totalPrestamosActivos.toString(),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("Saldados", fontSize = 10.sp, color = Color.Gray)
-                                Text(
-                                    estadisticas.clientesSaldados.toString(),
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("Préstamos", fontSize = 10.sp, color = Color.Gray)
-                                Text(
-                                    estadisticas.totalPrestamosActivos.toString(),
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("Prestado", fontSize = 10.sp, color = Color.Gray)
-                                Text(
-                                    formatearLempiras(estadisticas.totalMontoPrestado),
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("Abonado", fontSize = 10.sp, color = Color.Gray)
-                                Text(
-                                    formatearLempiras(estadisticas.totalMontoAbonado),
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("Prestado", fontSize = 10.sp, color = Color.Gray)
+                                    Text(
+                                        formatearLempiras(estadisticas.totalMontoPrestado),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("Abonado", fontSize = 10.sp, color = Color.Gray)
+                                    Text(
+                                        formatearLempiras(estadisticas.totalMontoAbonado),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // Filtros compactos
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value = search,
-                    onValueChange = { search = it },
-                    label = { Text("Buscar por nombre", fontSize = 12.sp) },
-                    modifier = Modifier.weight(1f),
-                    leadingIcon = {
-                        Icon(
-                            Icons.Default.Search,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    },
-                    trailingIcon = {
-                        if (search.isNotEmpty()) {
-                            IconButton(onClick = { search = "" }) {
-                                Icon(Icons.Default.Close, contentDescription = "Limpiar", modifier = Modifier.size(18.dp))
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = {
-                        scope.launch { cargarClientesUltraRapido() }
-                    })
-                )
-
-                ExposedDropdownMenuBox(
-                    expanded = expanded,
-                    onExpandedChange = { expanded = !expanded },
-                    modifier = Modifier.weight(0.8f)
+            item {
+                // Búsqueda: sola en su fila con ancho completo para que no se
+                // corte el texto (antes compartía fila con el filtro de Estado).
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
                     OutlinedTextField(
-                        value = estadoSeleccionado,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Estado", fontSize = 12.sp) },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-                        modifier = Modifier.menuAnchor(),
-                        singleLine = true
-                    )
-                    ExposedDropdownMenu(
-                        expanded = expanded,
-                        onDismissRequest = { expanded = false }
-                    ) {
-                        opcionesEstado.forEach { opcion ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(opcion.replaceFirstChar { it.uppercase() })
-                                },
-                                onClick = {
-                                    estadoSeleccionado = opcion
-                                    expanded = false
-                                }
+                        value = search,
+                        onValueChange = { search = it },
+                        label = { Text("Buscar por nombre") },
+                        modifier = Modifier.fillMaxWidth(),
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
                             )
+                        },
+                        trailingIcon = {
+                            if (search.isNotEmpty()) {
+                                IconButton(onClick = { search = "" }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Limpiar", modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = {
+                            scope.launch { cargarClientesUltraRapido() }
+                        })
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    ExposedDropdownMenuBox(
+                        expanded = expanded,
+                        onExpandedChange = { expanded = !expanded },
+                        modifier = Modifier.fillMaxWidth(0.6f)
+                    ) {
+                        OutlinedTextField(
+                            value = estadoSeleccionado,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Estado", fontSize = 12.sp) },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+                            modifier = Modifier.menuAnchor(),
+                            singleLine = true
+                        )
+                        ExposedDropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false }
+                        ) {
+                            opcionesEstado.forEach { opcion ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(opcion.replaceFirstChar { it.uppercase() })
+                                    },
+                                    onClick = {
+                                        estadoSeleccionado = opcion
+                                        expanded = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }
             }
 
             if (!datosYaCargados && !isLoading) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = { scope.launch { cargarClientesUltraRapido() } },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Buscar")
+                item {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { scope.launch { cargarClientesUltraRapido() } },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Buscar")
+                            }
+                            OutlinedButton(
+                                onClick = { scope.launch { cargarClientesUltraRapido() } },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Ver todos")
+                            }
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "Escribí un nombre y tocá \"Buscar\", o tocá \"Ver todos\" para la lista completa",
+                                color = Color.Gray,
+                                fontSize = 13.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
-                    OutlinedButton(
-                        onClick = { scope.launch { cargarClientesUltraRapido() } },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Ver todos")
-                    }
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(32.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "Escribí un nombre y tocá \"Buscar\", o tocá \"Ver todos\" para la lista completa",
-                        color = Color.Gray,
-                        fontSize = 13.sp,
-                        textAlign = TextAlign.Center
-                    )
                 }
             } else if (isLoading) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(64.dp),
-                            color = Color(0xFF0061A7)
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text("Cargando clientes...", color = Color.Gray)
-                        Text(
-                            "⚡ Optimizado para velocidad",
-                            color = Color(0xFF2E7D32),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 48.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(64.dp),
+                                color = Color(0xFF0061A7)
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text("Cargando clientes...", color = Color.Gray)
+                        }
                     }
                 }
             } else {
-                // ✅ FIX: Muestra total real vs filtrados para detectar clientes ocultos
-                Text(
-                    text = "Mostrando ${clientesFiltrados.size} de ${clientes.size} clientes",
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0061A7),
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                )
+                item {
+                    // ✅ FIX: Muestra total real vs filtrados para detectar clientes ocultos
+                    Text(
+                        text = "Mostrando ${clientesFiltrados.size} de ${clientes.size} clientes",
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0061A7),
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    )
+                }
 
-                LazyColumn(
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(clientesFiltrados, key = { it.id }) { cliente ->
+                items(clientesFiltrados, key = { it.id }) { cliente ->
+                    Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                         ClienteCardMejorado(
                             cliente = cliente,
                             navController = navController,
@@ -825,9 +826,17 @@ fun ClienteCardMejorado(
                         }
                     }
 
-                    Text("📞 ${cliente.telefono}", color = Color.Gray, fontSize = 13.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Phone, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(cliente.telefono, color = Color.Gray, fontSize = 13.sp)
+                    }
                     if (cliente.nombreEmpresa.isNotBlank()) {
-                        Text("🏢 ${cliente.nombreEmpresa}", color = Color.Gray, fontSize = 13.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Store, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(cliente.nombreEmpresa, color = Color.Gray, fontSize = 13.sp)
+                        }
                     }
                 }
 
@@ -861,22 +870,15 @@ fun ClienteCardMejorado(
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF0061A7))
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            text = "📊 Resumen de Préstamos",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly
-                        ) {
-                            MiniStatItem("Total", cliente.totalPrestamos.toString(), "📋")
-                            MiniStatItem("Activos", cliente.prestamosActivos.toString(), "⏳")
-                            MiniStatItem("Completados", cliente.prestamosCompletados.toString(), "✅")
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Assessment, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Resumen de Préstamos",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -885,9 +887,20 @@ fun ClienteCardMejorado(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
-                            MiniStatItem("Prestado", formatearLempiras(cliente.monto), "💰")
-                            MiniStatItem("Abonado", formatearLempiras(cliente.totalAbonado), "💵")
-                            MiniStatItem("Pendiente", formatearLempiras(cliente.saldoPendiente), "⚠️")
+                            MiniStatItem("Total", cliente.totalPrestamos.toString(), Icons.Default.Assignment)
+                            MiniStatItem("Activos", cliente.prestamosActivos.toString(), Icons.Default.Schedule)
+                            MiniStatItem("Completados", cliente.prestamosCompletados.toString(), Icons.Default.CheckCircle)
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            MiniStatItem("Prestado", formatearLempiras(cliente.monto), Icons.Default.AttachMoney)
+                            MiniStatItem("Abonado", formatearLempiras(cliente.totalAbonado), Icons.Default.Payments)
+                            MiniStatItem("Pendiente", formatearLempiras(cliente.saldoPendiente), Icons.Default.Warning)
                         }
                     }
                 }
@@ -899,28 +912,40 @@ fun ClienteCardMejorado(
                     colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
                 ) {
                     Column(modifier = Modifier.padding(8.dp)) {
-                        Text(
-                            text = "📅 Último pago: ${cliente.ultimoPago}",
-                            color = Color.Gray,
-                            fontSize = 12.sp
-                        )
-
-                        if (cliente.prestamosVencidos > 0) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CalendarToday, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "🚨 Préstamos vencidos: ${cliente.prestamosVencidos}",
-                                color = Color.Red,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
+                                text = "Último pago: ${cliente.ultimoPago}",
+                                color = Color.Gray,
+                                fontSize = 12.sp
                             )
                         }
 
+                        if (cliente.prestamosVencidos > 0) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = Color.Red, modifier = Modifier.size(13.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Préstamos vencidos: ${cliente.prestamosVencidos}",
+                                    color = Color.Red,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
                         if (cliente.tienePagosTarde) {
-                            Text(
-                                text = "⚠️ Este cliente tiene historial de pagos tardíos",
-                                color = Color(0xFFD84315),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFD84315), modifier = Modifier.size(13.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Este cliente tiene historial de pagos tardíos",
+                                    color = Color(0xFFD84315),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }
@@ -951,22 +976,39 @@ fun ClienteCardMejorado(
                         }
                     )
                 ) {
-                    Text(
-                        text = when (cliente.estado.lowercase()) {
-                            "activo"   -> "🟡 Activo"
-                            "inactivo" -> "🔴 Inactivo"
-                            "saldado"  -> "✅ Saldado"
-                            else       -> "📍 ${cliente.estado.replaceFirstChar { it.uppercase() }}"
-                        },
-                        color = when (cliente.estado.lowercase()) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val colorEstado = when (cliente.estado.lowercase()) {
                             "saldado"  -> Color(0xFF2E7D32)
                             "inactivo" -> Color(0xFFD32F2F)
                             "activo"   -> Color(0xFFFF8F00)
                             else       -> Color.Gray
-                        },
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(8.dp)
-                    )
+                        }
+                        Icon(
+                            imageVector = when (cliente.estado.lowercase()) {
+                                "activo"   -> Icons.Default.Schedule
+                                "inactivo" -> Icons.Default.Cancel
+                                "saldado"  -> Icons.Default.CheckCircle
+                                else       -> Icons.Default.Info
+                            },
+                            contentDescription = null,
+                            tint = colorEstado,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = when (cliente.estado.lowercase()) {
+                                "activo"   -> "Activo"
+                                "inactivo" -> "Inactivo"
+                                "saldado"  -> "Saldado"
+                                else       -> cliente.estado.replaceFirstChar { it.uppercase() }
+                            },
+                            color = colorEstado,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
 
                 Row {
@@ -1011,17 +1053,21 @@ fun ClienteCardMejorado(
 }
 
 @Composable
-fun MiniStatItem(title: String, value: String, emoji: String) {
+fun MiniStatItem(title: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.padding(2.dp)
     ) {
-        Text(
-            text = "$emoji $value",
-            color = Color.White,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+            Spacer(modifier = Modifier.width(3.dp))
+            Text(
+                text = value,
+                color = Color.White,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
         Text(
             text = title,
             color = Color.White,
