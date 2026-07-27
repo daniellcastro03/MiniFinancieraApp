@@ -927,7 +927,7 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
             try {
                 if (PagosCache.isValid()) {
                     pagos = PagosCache.pagos
-                    pagosFiltrados = PagosCache.pagos
+                    aplicarFiltros()
                     cargando = false
                     return@launch
                 }
@@ -940,7 +940,7 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                     pagos = try {
                         Gson().fromJson(json, Array<PagoItem>::class.java).toList()
                     } catch (_: Exception) { emptyList() }
-                    pagosFiltrados = pagos
+                    aplicarFiltros()
                     Toast.makeText(context, "Modo offline", Toast.LENGTH_SHORT).show()
                     cargando = false
                     return@launch
@@ -984,7 +984,10 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                 PagosCache.pagos = pagos
                 PagosCache.lastFetch = System.currentTimeMillis()
                 prefs.edit().putString("historial_pagos", Gson().toJson(pagos)).apply()
-                pagosFiltrados = pagos
+                // ✅ Antes esto pisaba pagosFiltrados con la lista completa sin
+                // filtrar, ignorando la fecha/filtros ya elegidos (por eso "Hoy"
+                // por defecto y los filtros de la tarjeta no se notaban).
+                aplicarFiltros()
 
             } catch (e: Exception) {
                 Log.e("CargarPagos", "ERROR: ${e.message}", e)
@@ -1125,6 +1128,7 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                                 aplicarFiltros()
                             },
                             onLimpiar = { limpiarFiltros() },
+                            onBuscar = { cargarPagos() },
                             pagosFiltrados = pagosFiltrados,
                             formatter = formatter,
                             context = context,
@@ -2272,6 +2276,7 @@ fun FiltrosCard(
     estadoFiltro: EstadoFiltro,
     onEstadoChange: (EstadoFiltro) -> Unit,
     onLimpiar: () -> Unit,
+    onBuscar: () -> Unit,
     pagosFiltrados: List<PagoItem>,
     formatter: SimpleDateFormat,
     context: Context,
@@ -2558,6 +2563,18 @@ fun FiltrosCard(
                         )
                     )
                 }
+            }
+
+            // ✅ Botón explícito para aplicar fecha/filtros: sin esto, elegir un
+            // rango de fechas antes de haber cargado algo no mostraba nada.
+            Button(
+                onClick = onBuscar,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A7))
+            ) {
+                Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Buscar", fontWeight = FontWeight.Bold)
             }
 
             HorizontalDivider(color = Color.LightGray.copy(alpha = 0.3f))
