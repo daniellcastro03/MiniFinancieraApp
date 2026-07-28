@@ -4,31 +4,30 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
 import com.example.capitalexpressapp.core.ActualizacionOverlay
+import com.example.capitalexpressapp.ui.theme.CEColors
+import com.example.capitalexpressapp.ui.theme.SeccionTitulo
 import com.example.minifinancieraapp.util.SessionManager
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -61,12 +60,21 @@ fun CobradorPantallaScreen(navController: NavController, uid: String) {
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = "Capital Express - Cobrador",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
+                    Column {
+                        Text(
+                            text = "Capital Express",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                        Text(
+                            text = "PANEL DE COBRANZA",
+                            color = CEColors.Secondary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            letterSpacing = 1.sp
+                        )
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = { drawerController.abrir() }) {
@@ -83,150 +91,115 @@ fun CobradorPantallaScreen(navController: NavController, uid: String) {
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF0061A7)
+                    containerColor = CEColors.Primary
                 )
             )
-        }
+        },
+        containerColor = CEColors.Surface
     ) { padding ->
         LazyColumn(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
-                .background(Color(0xFFF5F7FA)),
+                .background(CEColors.Surface),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(16.dp)
         ) {
-            // HEADER CON FOTO Y NOMBRE
+            // ENCABEZADO DE PERFIL
             item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .shadow(8.dp, RoundedCornerShape(16.dp)),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                brush = Brush.horizontalGradient(
-                                    colors = listOf(
-                                        Color(0xFF0061A7),
-                                        Color(0xFF0077CC)
-                                    )
-                                )
-                            )
-                            .padding(24.dp)
+                Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.fillMaxWidth()
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(CEColors.Primary),
+                            contentAlignment = Alignment.Center
                         ) {
-                            // FOTO DE PERFIL
                             if (fotoUrl.isNotBlank()) {
                                 Image(
                                     painter = rememberAsyncImagePainter(fotoUrl),
                                     contentDescription = "Foto de perfil",
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier
-                                        .size(80.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.White)
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(18.dp))
                                 )
                             } else {
-                                Box(
-                                    modifier = Modifier
-                                        .size(80.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.White),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        Icons.Default.Person,
-                                        contentDescription = "Perfil",
-                                        tint = Color(0xFF0061A7),
-                                        modifier = Modifier.size(40.dp)
-                                    )
-                                }
+                                Icon(
+                                    Icons.Default.AccountCircle,
+                                    contentDescription = "Perfil",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(32.dp)
+                                )
                             }
+                        }
 
-                            Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.width(16.dp))
 
+                        Column {
                             Text(
                                 text = "¡Bienvenido!",
-                                fontSize = 16.sp,
-                                color = Color.White.copy(alpha = 0.9f),
-                                fontWeight = FontWeight.Normal
+                                fontSize = 19.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = CEColors.Primary
                             )
-
                             Text(
                                 text = nombreCobrador.ifBlank { "Cobrador" },
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                textAlign = TextAlign.Center
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = CEColors.OnSurfaceVariant
                             )
                         }
                     }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    HorizontalDivider(color = CEColors.OutlineVariant)
                 }
             }
 
             // SECCIÓN DE OPCIONES PRINCIPALES
-            item {
-                Text(
-                    text = "Opciones Principales",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2C3E50),
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            }
+            item { SeccionTitulo("Opciones Principales") }
 
-            // FILA 1: REGISTRAR CLIENTE Y VER CLIENTES
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    CobradorOpcionCardCompacta(
+                    TarjetaGrid(
                         icon = Icons.Default.PersonAdd,
                         label = "Registrar Cliente",
-                        color = Color(0xFF27AE60),
+                        subtitle = "Alta de usuario",
                         modifier = Modifier.weight(1f)
                     ) {
                         navController.navigate("crearCliente")
                     }
-
-                    CobradorOpcionCardCompacta(
-                        icon = Icons.Default.People,
+                    TarjetaGridClara(
+                        icon = Icons.Default.Group,
                         label = "Ver Clientes",
-                        color = Color(0xFF3498DB),
                         modifier = Modifier.weight(1f)
                     ) {
                         navController.navigate("ClientesVista/$uid/cobrador")
                     }
                 }
             }
-
-            // FILA 2: VER PRÉSTAMOS Y MIS PAGOS
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    CobradorOpcionCardCompacta(
+                    TarjetaGridClara(
                         icon = Icons.Default.AccountBalance,
                         label = "Ver Préstamos",
-                        color = Color(0xFF9B59B6),
                         modifier = Modifier.weight(1f)
                     ) {
                         navController.navigate("PrestamoAdminScreen/$uid/cobrador")
                     }
-
-                    CobradorOpcionCardCompacta(
-                        icon = Icons.Default.Money,
+                    TarjetaGridClara(
+                        icon = Icons.AutoMirrored.Filled.ReceiptLong,
                         label = "Mis Pagos",
-                        color = Color(0xFFE67E22),
                         modifier = Modifier.weight(1f)
                     ) {
                         navController.navigate("PagosAsignadosCobrador")
@@ -235,100 +208,69 @@ fun CobradorPantallaScreen(navController: NavController, uid: String) {
             }
 
             // SECCIÓN DE GESTIÓN
-            item {
-                Text(
-                    text = "Gestión y Servicios",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2C3E50),
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            }
+            item { SeccionTitulo("Gestión y Servicios") }
 
-            // SOLICITAR PRÉSTAMO
             item {
-                CobradorOpcionCard(
-                    icon = Icons.Default.DateRange,
+                FilaOpcion(
+                    icon = Icons.Default.AddCard,
                     label = "Solicitar Préstamo",
                     subtitle = "Crear nueva solicitud",
-                    color = Color(0xFF8E44AD)
+                    iconoFondo = CEColors.SurfaceContainer,
+                    iconoColor = CEColors.Primary
                 ) {
                     navController.navigate("solicitudPrestamo/${nombreCobrador}")
                 }
             }
-
-            // NOTIFICACIONES
             item {
-                CobradorOpcionCard(
+                FilaOpcion(
                     icon = Icons.Default.Notifications,
                     label = "Ver Notificaciones",
                     subtitle = "Revisar mensajes y alertas",
-                    color = Color(0xFFE74C3C)
+                    iconoFondo = CEColors.Primary.copy(alpha = 0.06f),
+                    iconoColor = CEColors.Primary
                 ) {
                     navController.navigate("NotificacionesScreen/$uid/cobrador")
                 }
             }
 
             // SECCIÓN DE HISTORIAL
-            item {
-                Text(
-                    text = "Historial",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2C3E50),
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            }
+            item { SeccionTitulo("Historial") }
 
-            // FILA 3: HISTORIAL PAGOS Y HISTORIAL PRÉSTAMOS
             item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                FilaOpcion(
+                    icon = Icons.Default.Folder,
+                    label = "Historial Préstamos",
+                    subtitle = "Listado completo de movimientos",
+                    iconoFondo = CEColors.SurfaceContainer,
+                    iconoColor = CEColors.Primary
                 ) {
-                    CobradorOpcionCardCompacta(
-                        icon = Icons.Default.Folder,
-                        label = "Historial Préstamos",
-                        color = Color(0xFF3498DB),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        navController.navigate("HistorialPrestamosScreen/$uid/cobrador")
-                    }
+                    navController.navigate("HistorialPrestamosScreen/$uid/cobrador")
                 }
             }
 
-            // BOTONES DE SINCRONIZACIÓN
-            item {
-                Text(
-                    text = "Sincronización",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2C3E50),
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            }
+            // SINCRONIZACIÓN
+            item { SeccionTitulo("Sincronización") }
 
             item {
-                SincronizacionButton(
-                    text = "🔄 Sincronizar Solicitudes",
+                BotonSincronizacion(
+                    icon = Icons.Default.Sync,
+                    text = "Sincronizar Solicitudes",
                     onClick = { navController.navigate("SincronizarSolicitudesPendientes") }
                 )
             }
 
             if (hayAbonosPendientes) {
                 item {
-                    SincronizacionButton(
-                        text = "💰 Sincronizar Abonos",
+                    BotonSincronizacion(
+                        icon = Icons.Default.Sync,
+                        text = "Sincronizar Abonos",
                         onClick = { navController.navigate("SincronizarAbonosPendientes") },
-                        isHighlighted = true
+                        destacado = true
                     )
                 }
             }
 
-            // ESPACIO ADICIONAL AL FINAL
-            item {
-                Spacer(modifier = Modifier.height(16.dp))
-            }
+            item { Spacer(modifier = Modifier.height(16.dp)) }
         }
     }
 
@@ -339,13 +281,13 @@ fun CobradorPantallaScreen(navController: NavController, uid: String) {
                 Text(
                     "¿Cerrar sesión?",
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2C3E50)
+                    color = CEColors.Primary
                 )
             },
             text = {
                 Text(
                     "¿Estás seguro que deseas cerrar sesión?",
-                    color = Color(0xFF7F8C8D)
+                    color = CEColors.OnSurfaceVariant
                 )
             },
             confirmButton = {
@@ -355,12 +297,12 @@ fun CobradorPantallaScreen(navController: NavController, uid: String) {
                         popUpTo("CobradorPantalla/$uid") { inclusive = true }
                     }
                 }) {
-                    Text("Cerrar sesión", color = Color.Red, fontWeight = FontWeight.Bold)
+                    Text("Cerrar sesión", color = CEColors.Error, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { mostrarDialogoCerrarSesion = false }) {
-                    Text("Cancelar", color = Color(0xFF0061A7))
+                    Text("Cancelar", color = CEColors.ActionBlue)
                 }
             },
             shape = RoundedCornerShape(16.dp)
@@ -369,141 +311,24 @@ fun CobradorPantallaScreen(navController: NavController, uid: String) {
 }
 
 @Composable
-fun CobradorOpcionCard(
+fun BotonSincronizacion(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    subtitle: String,
-    color: Color,
-    onClick: () -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .shadow(6.dp, RoundedCornerShape(12.dp)),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Start
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(50.dp)
-                    .background(color.copy(alpha = 0.1f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = color,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(16.dp))
-
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    text = label,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2C3E50)
-                )
-                Text(
-                    text = subtitle,
-                    fontSize = 14.sp,
-                    color = Color(0xFF7F8C8D)
-                )
-            }
-
-            Icon(
-                Icons.Default.ArrowForward,
-                contentDescription = "Ir",
-                tint = Color(0xFFBDC3C7),
-                modifier = Modifier.size(20.dp)
-            )
-        }
-    }
-}
-
-@Composable
-fun CobradorOpcionCardCompacta(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    color: Color,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    Card(
-        modifier = modifier
-            .clickable { onClick() }
-            .shadow(4.dp, RoundedCornerShape(12.dp)),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(color.copy(alpha = 0.1f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = color,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = label,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                color = Color(0xFF2C3E50),
-                textAlign = TextAlign.Center
-            )
-        }
-    }
-}
-
-@Composable
-fun SincronizacionButton(
     text: String,
     onClick: () -> Unit,
-    isHighlighted: Boolean = false
+    destacado: Boolean = false
 ) {
     Button(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(4.dp, RoundedCornerShape(12.dp)),
+            .height(54.dp),
         colors = ButtonDefaults.buttonColors(
-            containerColor = if (isHighlighted) Color(0xFFE67E22) else Color(0xFF0061A7)
+            containerColor = if (destacado) Color(0xFFE67E22) else CEColors.Primary
         ),
-        shape = RoundedCornerShape(12.dp),
-        contentPadding = PaddingValues(vertical = 16.dp)
+        shape = RoundedCornerShape(14.dp)
     ) {
-        Text(
-            text = text,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.White
-        )
+        Icon(icon, contentDescription = null, tint = Color.White)
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(text, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
     }
 }

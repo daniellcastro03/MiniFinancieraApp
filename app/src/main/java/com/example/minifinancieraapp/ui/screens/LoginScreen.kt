@@ -12,6 +12,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -21,10 +22,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -40,9 +41,8 @@ import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private val FondoLoginTop = Color(0xFF10151F)
-private val FondoLoginBottom = Color(0xFF060709)
-private val AcentoLogin = Color(0xFF2F6FED)
+// Fondo real: foto del sistema de diseño Capital Express (res/drawable-nodpi/fondo_login.jpg).
+private val AcentoLogin = Color(0xFF007AFF)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,8 +58,7 @@ fun LoginScreen(navController: NavController) {
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
 
-    // Estados de animación
-    val logoVisible = remember { mutableStateOf(false) }
+    // Estado de animación de entrada de la tarjeta
     val contentVisible = remember { mutableStateOf(false) }
 
     // Animación de pulso suave (liviana: solo interpola un Float, sin nada pesado)
@@ -74,8 +73,7 @@ fun LoginScreen(navController: NavController) {
     )
 
     LaunchedEffect(Unit) {
-        logoVisible.value = true
-        delay(250)
+        delay(150)
         contentVisible.value = true
 
         if (!NetworkUtils.isInternetAvailable(context)) {
@@ -102,126 +100,36 @@ fun LoginScreen(navController: NavController) {
                 }
             )
         },
-        containerColor = FondoLoginTop
+        containerColor = Color(0xFF0A192F)
     ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(colors = listOf(FondoLoginTop, FondoLoginBottom))
-                )
                 .padding(padding)
         ) {
-            // Resplandores decorativos para que el fondo no se vea plano.
-            Box(
-                modifier = Modifier
-                    .size(320.dp)
-                    .align(Alignment.TopStart)
-                    .offset((-120).dp, (-120).dp)
-                    .blur(110.dp)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(AcentoLogin.copy(alpha = 0.35f), Color.Transparent)
-                        ),
-                        shape = CircleShape
-                    )
+            // Fondo: foto premium del sistema de diseño Capital Express
+            Image(
+                painter = painterResource(id = R.drawable.fondo_login),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
             )
+            // Velo oscuro para que el texto y la tarjeta resalten sobre la foto
             Box(
                 modifier = Modifier
-                    .size(260.dp)
-                    .align(Alignment.BottomEnd)
-                    .offset(90.dp, 90.dp)
-                    .blur(100.dp)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(Color(0xFF7C3AED).copy(alpha = 0.22f), Color.Transparent)
-                        ),
-                        shape = CircleShape
-                    )
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.45f))
             )
 
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 28.dp),
-                verticalArrangement = Arrangement.Top,
+                    .padding(horizontal = 24.dp),
+                verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Spacer(modifier = Modifier.height(64.dp))
-
-                // Logo + título, arriba de la pantalla (no centrado en el medio)
-                AnimatedVisibility(
-                    visible = logoVisible.value,
-                    enter = fadeIn(animationSpec = tween(700)) +
-                            scaleIn(animationSpec = tween(700, easing = FastOutSlowInEasing))
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(bottom = 40.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            // Resplandor sutil detrás del logo
-                            Box(
-                                modifier = Modifier
-                                    .size(140.dp)
-                                    .scale(pulseAnimation * 0.1f + 0.9f)
-                                    .blur(45.dp)
-                                    .background(
-                                        Brush.radialGradient(
-                                            colors = listOf(
-                                                Color.White.copy(alpha = 0.18f),
-                                                Color.Transparent
-                                            )
-                                        ),
-                                        shape = CircleShape
-                                    )
-                            )
-
-                            // Fondo redondo claro para que el logo se destaque sobre
-                            // el fondo oscuro de la pantalla (si no, se pierde).
-                            Box(
-                                modifier = Modifier
-                                    .size(96.dp)
-                                    .shadow(elevation = 14.dp, shape = CircleShape)
-                                    .clip(CircleShape)
-                                    .background(Color.White),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Image(
-                                    painter = painterResource(id = R.drawable.logo_capital),
-                                    contentDescription = "Logo Capital Express",
-                                    modifier = Modifier
-                                        .size(70.dp)
-                                        .scale(pulseAnimation * 0.04f + 0.96f)
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(20.dp))
-
-                        Text(
-                            text = "Capital Express.",
-                            fontSize = 34.sp,
-                            color = Color.White,
-                            fontWeight = FontWeight.Black,
-                            textAlign = TextAlign.Center
-                        )
-
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        Text(
-                            text = "Tu socio financiero de confianza",
-                            fontSize = 13.sp,
-                            color = Color.White.copy(alpha = 0.5f),
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                // Tarjeta del formulario: redondeada, con borde de acento y fondo
-                // semitransparente para que se note el degradé de atrás.
+                // Tarjeta de vidrio: marca, formulario y botón, todo integrado
+                // como en el mockup (glass-card sobre la foto de fondo).
                 AnimatedVisibility(
                     visible = contentVisible.value,
                     enter = slideInVertically(
@@ -233,25 +141,90 @@ fun LoginScreen(navController: NavController) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .border(
-                                width = 1.5.dp,
-                                color = AcentoLogin.copy(alpha = 0.6f),
-                                shape = RoundedCornerShape(32.dp)
+                                width = 1.dp,
+                                color = Color.White.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(28.dp)
                             )
-                            .clip(RoundedCornerShape(32.dp))
-                            .background(Color.White.copy(alpha = 0.06f))
-                            .padding(horizontal = 24.dp, vertical = 28.dp)
+                            .clip(RoundedCornerShape(28.dp))
+                            .background(Color.White.copy(alpha = 0.08f))
+                            .padding(horizontal = 24.dp, vertical = 32.dp)
                     ) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
-                        Text(
-                            "Iniciar Sesión",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
+                        // Marca: escudo + "CAPITAL EXPRESS"
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Shield,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Text(
+                                text = "CAPITAL EXPRESS",
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                letterSpacing = 0.5.sp
+                            )
+                        }
+
+                        // Logo circular (fondo del design system usa un icono genérico
+                        // aquí; mantenemos el logo real de la app para que se reconozca).
+                        Box(contentAlignment = Alignment.Center) {
+                            Box(
+                                modifier = Modifier
+                                    .size(110.dp)
+                                    .scale(pulseAnimation * 0.08f + 0.92f)
+                                    .blur(40.dp)
+                                    .background(
+                                        Brush.radialGradient(
+                                            colors = listOf(
+                                                Color.White.copy(alpha = 0.18f),
+                                                Color.Transparent
+                                            )
+                                        ),
+                                        shape = CircleShape
+                                    )
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(72.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Image(
+                                    painter = painterResource(id = R.drawable.logo_capital),
+                                    contentDescription = "Logo Capital Express",
+                                    modifier = Modifier
+                                        .size(52.dp)
+                                        .scale(pulseAnimation * 0.04f + 0.96f)
+                                )
+                            }
+                        }
+
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "Iniciar Sesión",
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Tu socio financiero de confianza",
+                                fontSize = 13.sp,
+                                color = Color.White.copy(alpha = 0.7f),
+                                textAlign = TextAlign.Center
+                            )
+                        }
 
                         CampoLogin(
                             value = codigo.value,
@@ -361,8 +334,6 @@ fun LoginScreen(navController: NavController) {
                     }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(48.dp))
             }
         }
     }

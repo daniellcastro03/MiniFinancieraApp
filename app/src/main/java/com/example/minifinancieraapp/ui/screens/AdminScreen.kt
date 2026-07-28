@@ -9,26 +9,31 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
 import com.example.capitalexpressapp.core.ActualizacionOverlay
+import com.example.capitalexpressapp.core.VERSION_APP
 import com.example.capitalexpressapp.core.migrarNombresClientesAMayusculas
+import com.example.capitalexpressapp.ui.theme.CEColors
+import com.example.capitalexpressapp.ui.theme.IconoCaja
+import com.example.capitalexpressapp.ui.theme.PremiumCard
+import com.example.capitalexpressapp.ui.theme.SeccionTitulo
+import com.example.capitalexpressapp.ui.theme.dashedBorder
 import com.example.minifinancieraapp.util.SessionManager
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
@@ -73,12 +78,21 @@ fun AdminScreen(navController: NavController, uid: String, rol: String) {
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = "Capital Express - Admin",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
+                    Column {
+                        Text(
+                            text = "Capital Express",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                        Text(
+                            text = "ADMIN PANEL",
+                            color = CEColors.Secondary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            letterSpacing = 1.sp
+                        )
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = { drawerController.abrir() }) {
@@ -86,6 +100,9 @@ fun AdminScreen(navController: NavController, uid: String, rol: String) {
                     }
                 },
                 actions = {
+                    IconButton(onClick = { navController.navigate("NotificacionesScreen/$uid/$rol") }) {
+                        Icon(Icons.Default.Notifications, contentDescription = "Notificaciones", tint = Color.White)
+                    }
                     IconButton(onClick = { mostrarDialogoCerrarSesion = true }) {
                         Icon(
                             Icons.AutoMirrored.Filled.Logout,
@@ -95,124 +112,128 @@ fun AdminScreen(navController: NavController, uid: String, rol: String) {
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF0061A7)
+                    containerColor = CEColors.Primary
                 )
             )
-        }
+        },
+        containerColor = CEColors.Surface
     ) { padding ->
         LazyColumn(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
-                .background(Color(0xFFF5F7FA)),
+                .background(CEColors.Surface),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(16.dp)
         ) {
-            // HEADER CON FOTO Y NOMBRE
+            // ENCABEZADO DE PERFIL
             item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .shadow(8.dp, RoundedCornerShape(16.dp)),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                brush = Brush.horizontalGradient(
-                                    colors = listOf(
-                                        Color(0xFF0061A7),
-                                        Color(0xFF0077CC)
-                                    )
-                                )
-                            )
-                            .padding(24.dp)
+                Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            // FOTO DE PERFIL
-                            if (fotoUrl.isNotBlank()) {
-                                Image(
-                                    painter = rememberAsyncImagePainter(fotoUrl),
-                                    contentDescription = "Foto de perfil",
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .size(80.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.White)
-                                )
-                            } else {
-                                Box(
-                                    modifier = Modifier
-                                        .size(80.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.White),
-                                    contentAlignment = Alignment.Center
-                                ) {
+                        Box {
+                            Box(
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(CEColors.Primary),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (fotoUrl.isNotBlank()) {
+                                    Image(
+                                        painter = rememberAsyncImagePainter(fotoUrl),
+                                        contentDescription = "Foto de perfil",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(RoundedCornerShape(18.dp))
+                                    )
+                                } else {
                                     Icon(
-                                        Icons.Default.AdminPanelSettings,
+                                        Icons.Default.AccountCircle,
                                         contentDescription = "Perfil Admin",
-                                        tint = Color(0xFF0061A7),
-                                        modifier = Modifier.size(40.dp)
+                                        tint = Color.White,
+                                        modifier = Modifier.size(32.dp)
                                     )
                                 }
                             }
-
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            Text(
-                                text = "¡Bienvenido Administrador!",
-                                fontSize = 16.sp,
-                                color = Color.White.copy(alpha = 0.9f),
-                                fontWeight = FontWeight.Normal
-                            )
-
-                            Text(
-                                text = nombreAdmin.ifBlank { "Admin" },
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                textAlign = TextAlign.Center
+                            Box(
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .align(Alignment.BottomEnd)
+                                    .clip(CircleShape)
+                                    .background(CEColors.Surface)
+                                    .padding(2.dp)
+                                    .clip(CircleShape)
+                                    .background(CEColors.Secondary)
                             )
                         }
+
+                        Spacer(modifier = Modifier.width(16.dp))
+
+                        Column {
+                            Text(
+                                text = "Hola, ${nombreAdmin.ifBlank { "Administrador" }}",
+                                fontSize = 19.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = CEColors.Primary
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .clip(CircleShape)
+                                        .background(CEColors.Secondary)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Sesión activa • Admin Central",
+                                    fontSize = 12.sp,
+                                    color = CEColors.OnSurfaceVariant
+                                )
+                            }
+                        }
                     }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    HorizontalDivider(color = CEColors.OutlineVariant)
+                }
+            }
+
+            // VER NOTIFICACIONES (acceso rápido)
+            item {
+                FilaOpcion(
+                    icon = Icons.Default.Notifications,
+                    label = "Ver Notificaciones",
+                    subtitle = "Centro de alertas",
+                    iconoFondo = CEColors.Primary.copy(alpha = 0.06f),
+                    iconoColor = CEColors.Primary
+                ) {
+                    navController.navigate("NotificacionesScreen/$uid/$rol")
                 }
             }
 
             // SECCIÓN DE CREACIÓN
-            item {
-                Text(
-                    text = "Crear",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2C3E50),
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            }
+            item { SeccionTitulo("Crear") }
 
-            // FILA 1: CREAR PRÉSTAMO Y CREAR CLIENTE
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    AdminOpcionCardCompacta(
+                    TarjetaGrid(
                         icon = Icons.Default.Add,
                         label = "Crear Préstamo",
-                        color = Color(0xFF27AE60),
+                        subtitle = "Nueva solicitud",
                         modifier = Modifier.weight(1f)
                     ) {
                         navController.navigate("crearprestamo")
                     }
-
-                    AdminOpcionCardCompacta(
+                    TarjetaGrid(
                         icon = Icons.Default.PersonAdd,
                         label = "Crear Cliente",
-                        color = Color(0xFF3498DB),
+                        subtitle = "Alta de usuario",
                         modifier = Modifier.weight(1f)
                     ) {
                         navController.navigate("crearCliente")
@@ -220,179 +241,166 @@ fun AdminScreen(navController: NavController, uid: String, rol: String) {
                 }
             }
 
-            // CREAR USUARIO
             item {
-                AdminOpcionCard(
-                    icon = Icons.Default.AccountBox,
+                FilaOpcion(
+                    icon = Icons.Default.Badge,
                     label = "Crear Usuario",
-                    subtitle = "Agregar nuevo usuario al sistema",
-                    color = Color(0xFF9B59B6)
+                    subtitle = "Gestión interna",
+                    iconoFondo = CEColors.SurfaceContainer,
+                    iconoColor = CEColors.Primary
                 ) {
                     navController.navigate("crearUsuario")
                 }
             }
 
             // SECCIÓN DE VISUALIZACIÓN
-            item {
-                Text(
-                    text = "Visualizar",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2C3E50),
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            }
+            item { SeccionTitulo("Visualizar") }
 
-            // FILA 2: CLIENTES Y PRÉSTAMOS
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    AdminOpcionCardCompacta(
-                        icon = Icons.Default.People,
+                    TarjetaGridOscura(
+                        icon = Icons.Default.MarkUnreadChatAlt,
+                        label = "Solicitudes",
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        navController.navigate("solicitudesAdmin")
+                    }
+                    TarjetaGridClara(
+                        icon = Icons.Default.Group,
                         label = "Ver Clientes",
-                        color = Color(0xFF3498DB),
                         modifier = Modifier.weight(1f)
                     ) {
                         navController.navigate("ClientesVista/$uid/$rol")
                     }
-
-                    AdminOpcionCardCompacta(
-                        icon = Icons.Default.FolderOpen,
-                        label = "Ver Préstamos",
-                        color = Color(0xFF9B59B6),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        navController.navigate("PrestamoAdminScreen/$uid/$rol")
-                    }
                 }
             }
-
-            // FILA 3: USUARIOS Y SOLICITUDES
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    AdminOpcionCardCompacta(
-                        icon = Icons.Default.AccountCircle,
+                    TarjetaGridClara(
+                        icon = Icons.Default.AccountBalance,
+                        label = "Ver Préstamos",
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        navController.navigate("PrestamoAdminScreen/$uid/$rol")
+                    }
+                    TarjetaGridClara(
+                        icon = Icons.Default.ManageAccounts,
                         label = "Ver Usuarios",
-                        color = Color(0xFFE67E22),
                         modifier = Modifier.weight(1f)
                     ) {
                         navController.navigate("UsuariosVista")
-                    }
-
-                    AdminOpcionCardCompacta(
-                        icon = Icons.Default.MarkUnreadChatAlt,
-                        label = "Solicitudes",
-                        color = Color(0xFFE74C3C),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        navController.navigate("solicitudesAdmin")
                     }
                 }
             }
 
             // SECCIÓN DE HISTORIAL
-            item {
-                Text(
-                    text = "Historial",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2C3E50),
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            }
+            item { SeccionTitulo("Historial") }
 
-            // HISTORIAL PAGOS
             item {
-                AdminOpcionCard(
-                    icon = Icons.Default.DateRange,
+                FilaOpcion(
+                    icon = Icons.Default.Payments,
                     label = "Historial de Pagos",
-                    subtitle = "Consultar pagos realizados",
-                    color = Color(0xFF27AE60)
+                    subtitle = "Arqueo de caja y transacciones",
+                    iconoFondo = CEColors.SurfaceContainer,
+                    iconoColor = CEColors.Primary
                 ) {
                     navController.navigate("HistorialPagosScreen/$rol")
                 }
             }
-
-            // HISTORIAL PRÉSTAMOS
             item {
-                AdminOpcionCard(
+                FilaOpcion(
                     icon = Icons.Default.Folder,
                     label = "Historial de Préstamos",
                     subtitle = "Revisar préstamos otorgados",
-                    color = Color(0xFF3498DB)
+                    iconoFondo = CEColors.SurfaceContainer,
+                    iconoColor = CEColors.Primary
                 ) {
                     navController.navigate("HistorialPrestamosScreen/$uid/$rol")
                 }
             }
-
-            // HISTORIAL GLOBAL
             item {
-                AdminOpcionCard(
-                    icon = Icons.Default.Assessment,
+                FilaOpcion(
+                    icon = Icons.Default.Analytics,
                     label = "Historial Global",
-                    subtitle = "Vista completa del sistema",
-                    color = Color(0xFF9B59B6)
+                    subtitle = "Auditoría completa del sistema",
+                    iconoFondo = CEColors.SurfaceContainer,
+                    iconoColor = CEColors.Primary
                 ) {
                     navController.navigate("HistorialGlobalScreen")
                 }
             }
 
             // SECCIÓN DE ESTADÍSTICAS Y HERRAMIENTAS
-            item {
-                Text(
-                    text = "Estadísticas y Herramientas",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2C3E50),
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            }
+            item { SeccionTitulo("Estadísticas y Herramientas") }
 
-            // DASHBOARD
             item {
-                AdminOpcionCard(
-                    icon = Icons.Default.Insights,
-                    label = "Dashboard",
-                    subtitle = "Estadísticas y métricas del sistema",
-                    color = Color(0xFF8E44AD)
+                PremiumCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { navController.navigate("DashboardScreen") }
                 ) {
-                    navController.navigate("DashboardScreen")
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconoCaja(contenedorColor = CEColors.Primary.copy(alpha = 0.06f)) {
+                            Icon(Icons.Default.Dashboard, contentDescription = null, tint = CEColors.Primary)
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Dashboard", fontWeight = FontWeight.Bold, color = CEColors.Primary, fontSize = 16.sp)
+                            Text("Métricas en tiempo real", fontSize = 13.sp, color = CEColors.OnSurfaceVariant)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = CEColors.Secondary)
+                    }
                 }
             }
 
-            // NOTIFICACIONES
             item {
-                AdminOpcionCard(
-                    icon = Icons.Default.Notifications,
-                    label = "Ver Notificaciones",
-                    subtitle = "Revisar mensajes y alertas",
-                    color = Color(0xFFE74C3C)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .dashedBorder(CEColors.OutlineVariant)
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable { chequeoManualActualizacion++ }
+                        .padding(20.dp)
                 ) {
-                    navController.navigate("NotificacionesScreen/$uid/$rol")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconoCaja(contenedorColor = CEColors.SurfaceContainerLow) {
+                            Icon(Icons.Default.Update, contentDescription = null, tint = CEColors.Primary)
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Buscar Actualizaciones", fontWeight = FontWeight.Bold, color = CEColors.Primary, fontSize = 16.sp)
+                            Text(
+                                "Revisar si hay una nueva versión de la app",
+                                fontSize = 13.sp,
+                                color = CEColors.OnSurfaceVariant
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(CEColors.Primary)
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text("v$VERSION_APP", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
 
-            // BUSCAR ACTUALIZACIONES
-            item {
-                AdminOpcionCard(
-                    icon = Icons.Default.SystemUpdate,
-                    label = "Buscar Actualizaciones",
-                    subtitle = "Revisar si hay una nueva versión de la app",
-                    color = Color(0xFF16A085)
-                ) {
-                    chequeoManualActualizacion++
-                }
-            }
-
-            // ESPACIO ADICIONAL AL FINAL
-            item {
-                Spacer(modifier = Modifier.height(16.dp))
-            }
+            item { Spacer(modifier = Modifier.height(16.dp)) }
         }
     }
 
@@ -403,13 +411,13 @@ fun AdminScreen(navController: NavController, uid: String, rol: String) {
                 Text(
                     "¿Cerrar sesión?",
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2C3E50)
+                    color = CEColors.Primary
                 )
             },
             text = {
                 Text(
                     "¿Estás seguro que deseas cerrar sesión?",
-                    color = Color(0xFF7F8C8D)
+                    color = CEColors.OnSurfaceVariant
                 )
             },
             confirmButton = {
@@ -419,12 +427,12 @@ fun AdminScreen(navController: NavController, uid: String, rol: String) {
                         popUpTo(0) { inclusive = true }
                     }
                 }) {
-                    Text("Cerrar sesión", color = Color.Red, fontWeight = FontWeight.Bold)
+                    Text("Cerrar sesión", color = CEColors.Error, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { mostrarDialogoCerrarSesion = false }) {
-                    Text("Cancelar", color = Color(0xFF0061A7))
+                    Text("Cancelar", color = CEColors.ActionBlue)
                 }
             },
             shape = RoundedCornerShape(16.dp)
@@ -432,116 +440,113 @@ fun AdminScreen(navController: NavController, uid: String, rol: String) {
     }
 }
 
+/** Fila de opción de ancho completo: icono + título + subtítulo + flecha. */
 @Composable
-fun AdminOpcionCard(
+fun FilaOpcion(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     subtitle: String,
-    color: Color,
+    iconoFondo: Color,
+    iconoColor: Color,
     onClick: () -> Unit
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .shadow(6.dp, RoundedCornerShape(12.dp)),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        shape = RoundedCornerShape(12.dp)
-    ) {
+    PremiumCard(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Start
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(50.dp)
-                    .background(color.copy(alpha = 0.1f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = color,
-                    modifier = Modifier.size(24.dp)
-                )
+            IconoCaja(contenedorColor = iconoFondo) {
+                Icon(icon, contentDescription = null, tint = iconoColor)
             }
-
             Spacer(modifier = Modifier.width(16.dp))
-
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    text = label,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2C3E50)
-                )
-                Text(
-                    text = subtitle,
-                    fontSize = 14.sp,
-                    color = Color(0xFF7F8C8D)
-                )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(label, fontWeight = FontWeight.Bold, color = CEColors.Primary, fontSize = 16.sp)
+                Text(subtitle, fontSize = 13.sp, color = CEColors.OnSurfaceVariant)
             }
-
             Icon(
-                Icons.Default.ArrowForward,
+                Icons.AutoMirrored.Filled.ArrowForwardIos,
                 contentDescription = "Ir",
-                tint = Color(0xFFBDC3C7),
-                modifier = Modifier.size(20.dp)
+                tint = CEColors.Outline,
+                modifier = Modifier.size(16.dp)
             )
         }
     }
 }
 
+/** Tarjeta de grilla clara (2 columnas): icono navy sólido, texto + subtítulo. */
 @Composable
-fun AdminOpcionCardCompacta(
+fun TarjetaGrid(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
-    color: Color,
+    subtitle: String,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-    Card(
+    PremiumCard(modifier = modifier, onClick = onClick) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+        ) {
+            IconoCaja(contenedorColor = CEColors.Primary) {
+                Icon(icon, contentDescription = null, tint = Color.White)
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+            Text(label, fontWeight = FontWeight.Bold, color = CEColors.Primary, fontSize = 15.sp)
+            Text(subtitle, fontSize = 12.sp, color = CEColors.OnSurfaceVariant)
+        }
+    }
+}
+
+/** Tarjeta de grilla clara simple (icono gris claro + label centrado), usada en "Visualizar". */
+@Composable
+fun TarjetaGridClara(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    PremiumCard(modifier = modifier, onClick = onClick) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+        ) {
+            IconoCaja(contenedorColor = CEColors.SurfaceContainerLow) {
+                Icon(icon, contentDescription = null, tint = CEColors.Primary)
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+            Text(label, fontWeight = FontWeight.Bold, color = CEColors.Primary, fontSize = 15.sp)
+        }
+    }
+}
+
+/** Tarjeta de grilla oscura destacada, usada para "Solicitudes". */
+@Composable
+fun TarjetaGridOscura(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Box(
         modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(CEColors.Primary)
             .clickable { onClick() }
-            .shadow(4.dp, RoundedCornerShape(12.dp)),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        shape = RoundedCornerShape(12.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .padding(20.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(color.copy(alpha = 0.1f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = color,
-                    modifier = Modifier.size(20.dp)
-                )
+            IconoCaja(contenedorColor = Color.White.copy(alpha = 0.1f)) {
+                Icon(icon, contentDescription = null, tint = CEColors.Secondary)
             }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = label,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                color = Color(0xFF2C3E50),
-                textAlign = TextAlign.Center
-            )
+            Spacer(modifier = Modifier.height(14.dp))
+            Text(label, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 15.sp)
         }
     }
 }
