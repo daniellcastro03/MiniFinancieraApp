@@ -26,6 +26,7 @@ import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.example.capitalexpressapp.core.coincideAproximado
 import com.example.capitalexpressapp.core.formatearLempiras
+import com.example.capitalexpressapp.ui.theme.CEColors
 import com.example.capitalexpressapp.util.ReciboHelper.generarReciboPrestamoPDF
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
@@ -469,7 +470,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF2196F3)
+                    containerColor = CEColors.Primary
                 ),
                 actions = {
                     IconButton(onClick = { configurarListenerFirebase() }) {
@@ -569,7 +570,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Brush.verticalGradient(colors = listOf(Color(0xFFF8F9FA), Color(0xFFE3F2FD))))
+                .background(CEColors.Surface)
         ) {
             // Un solo LazyColumn (resumen, filtros y lista) para que el scroll mueva
             // toda la pantalla, sin controles fijos arriba.
@@ -588,9 +589,9 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                     )
 
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF2196F3)),
+                        colors = CardDefaults.cardColors(containerColor = CEColors.Primary),
                         elevation = CardDefaults.cardElevation(4.dp),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(24.dp),
                         modifier = Modifier.fillMaxWidth().clickable { resumenExpandido = !resumenExpandido }
                     ) {
                         Row(
@@ -625,7 +626,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(Brush.linearGradient(colors = listOf(Color(0xFF2196F3), Color(0xFF1E88E5))), shape = RoundedCornerShape(16.dp))
+                                    .background(Brush.linearGradient(colors = listOf(CEColors.Primary, Color(0xFF1E88E5))), shape = RoundedCornerShape(16.dp))
                             ) {
                                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
@@ -658,16 +659,16 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                 ) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                            Icon(Icons.Default.Search, null, tint = Color(0xFF2196F3), modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Search, null, tint = CEColors.Primary, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Buscar y Filtrar", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF2196F3))
+                            Text("Buscar y Filtrar", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = CEColors.Primary)
                         }
 
                         OutlinedTextField(
                             value = busqueda,
                             onValueChange = { busqueda = it },
                             placeholder = { Text("Buscar por cliente o número...", fontSize = 12.sp) },
-                            leadingIcon = { Icon(Icons.Default.Search, null, tint = Color(0xFF2196F3), modifier = Modifier.size(16.dp)) },
+                            leadingIcon = { Icon(Icons.Default.Search, null, tint = CEColors.Primary, modifier = Modifier.size(16.dp)) },
                             trailingIcon = if (busqueda.isNotBlank()) {
                                 { IconButton(onClick = { busqueda = "" }) { Icon(Icons.Default.Clear, null, modifier = Modifier.size(14.dp)) } }
                             } else null,
@@ -675,7 +676,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                             shape = RoundedCornerShape(22.dp),
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF2196F3),
+                                focusedBorderColor = CEColors.Primary,
                                 unfocusedBorderColor = Color(0xFFE0E0E0)
                             )
                         )
@@ -685,7 +686,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Icon(Icons.Default.FilterList, null, tint = Color(0xFF2196F3), modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.FilterList, null, tint = CEColors.Primary, modifier = Modifier.size(14.dp))
 
                             var expandedFecha by remember { mutableStateOf(false) }
                             Box {
@@ -700,7 +701,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                     },
                                     selected = filtroFecha != "Todos",
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = Color(0xFF2196F3),
+                                        selectedContainerColor = CEColors.Primary,
                                         selectedLabelColor = Color.White,
                                         containerColor = Color(0xFFF5F5F5)
                                     ),
@@ -719,7 +720,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                                         "Rango" -> Icons.Default.DateRange
                                                         else -> Icons.Default.Public
                                                     }
-                                                    Icon(icon, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFF2196F3))
+                                                    Icon(icon, contentDescription = null, modifier = Modifier.size(14.dp), tint = CEColors.Primary)
                                                     Spacer(modifier = Modifier.width(6.dp))
                                                     Text(periodo, fontSize = 12.sp)
                                                 }
@@ -747,7 +748,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                     },
                                     selected = filtroEstado != "Todos",
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = Color(0xFF2196F3),
+                                        selectedContainerColor = CEColors.Primary,
                                         selectedLabelColor = Color.White,
                                         containerColor = Color(0xFFF5F5F5)
                                     ),
@@ -761,9 +762,9 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                                     val colorEstado = when (estado.lowercase()) {
                                                         "activo" -> Color(0xFF4CAF50)
-                                                        "completado" -> Color(0xFF2196F3)
+                                                        "completado" -> CEColors.Primary
                                                         "vencido" -> Color(0xFFFF5722)
-                                                        "saldado" -> Color(0xFF2196F3)
+                                                        "saldado" -> CEColors.Primary
                                                         else -> Color(0xFF9E9E9E)
                                                     }
                                                     Icon(Icons.Default.Circle, contentDescription = null, modifier = Modifier.size(10.dp), tint = colorEstado)
@@ -783,9 +784,9 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                             if (hayFiltrosActivos) {
                                 IconButton(
                                     onClick = { resetearFiltros() },
-                                    modifier = Modifier.size(28.dp).background(Color(0xFF2196F3).copy(alpha = 0.1f), RoundedCornerShape(14.dp))
+                                    modifier = Modifier.size(28.dp).background(CEColors.Primary.copy(alpha = 0.1f), RoundedCornerShape(14.dp))
                                 ) {
-                                    Icon(Icons.Default.Clear, "Limpiar filtros", tint = Color(0xFF2196F3), modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Clear, "Limpiar filtros", tint = CEColors.Primary, modifier = Modifier.size(16.dp))
                                 }
                             }
                         }
@@ -795,7 +796,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                 OutlinedButton(
                                     onClick = { showInicioPicker.value = true },
                                     modifier = Modifier.weight(1f).height(36.dp),
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF2196F3)),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = CEColors.Primary),
                                     shape = RoundedCornerShape(18.dp)
                                 ) {
                                     Icon(Icons.Default.DateRange, null, modifier = Modifier.size(14.dp))
@@ -806,7 +807,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                 OutlinedButton(
                                     onClick = { showFinPicker.value = true },
                                     modifier = Modifier.weight(1f).height(36.dp),
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF2196F3)),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = CEColors.Primary),
                                     shape = RoundedCornerShape(18.dp)
                                 ) {
                                     Icon(Icons.Default.DateRange, null, modifier = Modifier.size(14.dp))
@@ -820,13 +821,13 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(Color(0xFF2196F3).copy(alpha = 0.1f), RoundedCornerShape(6.dp))
+                                    .background(CEColors.Primary.copy(alpha = 0.1f), RoundedCornerShape(6.dp))
                                     .padding(6.dp)
                             ) {
                                 Text(
                                     text = "${prestamosFiltrados.size} de ${prestamosOriginales.size} préstamos",
                                     fontSize = 11.sp,
-                                    color = Color(0xFF2196F3),
+                                    color = CEColors.Primary,
                                     fontWeight = FontWeight.Medium,
                                     modifier = Modifier.align(Alignment.Center)
                                 )
@@ -857,7 +858,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                             Button(
                                 onClick = { configurarListenerFirebase() },
                                 modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3)),
+                                colors = ButtonDefaults.buttonColors(containerColor = CEColors.Primary),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
                                 Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp))
@@ -880,7 +881,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                 Button(
                                     onClick = { configurarListenerFirebase() },
                                     modifier = Modifier.weight(1f),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3))
+                                    colors = ButtonDefaults.buttonColors(containerColor = CEColors.Primary)
                                 ) {
                                     Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
@@ -923,7 +924,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                     modifier = Modifier.padding(24.dp),
                                     verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
-                                    CircularProgressIndicator(color = Color(0xFF2196F3), strokeWidth = 3.dp, modifier = Modifier.size(40.dp))
+                                    CircularProgressIndicator(color = CEColors.Primary, strokeWidth = 3.dp, modifier = Modifier.size(40.dp))
                                     Text("Cargando préstamos...", color = Color(0xFF666666), fontSize = 14.sp, fontWeight = FontWeight.Medium)
                                     Text("Por favor espera", color = Color(0xFF999999), fontSize = 11.sp)
                                 }
@@ -963,7 +964,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                                         Spacer(modifier = Modifier.height(6.dp))
                                         Button(
                                             onClick = { navController.navigate("crearPrestamo") },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3)),
+                                            colors = ButtonDefaults.buttonColors(containerColor = CEColors.Primary),
                                             shape = RoundedCornerShape(20.dp)
                                         ) {
                                             Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
@@ -1007,7 +1008,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                             showInicioPicker.value = false
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3))
+                    colors = ButtonDefaults.buttonColors(containerColor = CEColors.Primary)
                 ) {
                     Text("Aceptar")
                 }
@@ -1033,7 +1034,7 @@ fun HistorialPrestamosScreen(navController: NavController, uid: String, rol: Str
                             showFinPicker.value = false
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3))
+                    colors = ButtonDefaults.buttonColors(containerColor = CEColors.Primary)
                 ) {
                     Text("Aceptar")
                 }
@@ -1111,8 +1112,8 @@ fun PrestamoCardHistorial(
 
     val (estadoColor, estadoText) = when (estadoUI.lowercase()) {
         "activo" -> Color(0xFF4CAF50) to "ACTIVO"
-        "completado" -> Color(0xFF2196F3) to "COMPLETADO"
-        "saldado" -> Color(0xFF2196F3) to "SALDADO"
+        "completado" -> CEColors.Primary to "COMPLETADO"
+        "saldado" -> CEColors.Primary to "SALDADO"
         "vencido" -> Color(0xFFFF5722) to "VENCIDO"
         "atrasado" -> Color(0xFFFF5722) to "ATRASADO"
         "inactivo" -> Color(0xFF757575) to "INACTIVO"
@@ -1153,7 +1154,7 @@ fun PrestamoCardHistorial(
 
             Column(modifier = Modifier.padding(12.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    InfoColumn("Capital", formatearLempiras(prestamo.monto), Color(0xFF2196F3))
+                    InfoColumn("Capital", formatearLempiras(prestamo.monto), CEColors.Primary)
                     InfoColumn("Total", formatearLempiras(prestamo.totalPagar), Color(0xFF4CAF50))
                     InfoColumn("Pagado", formatearLempiras(prestamo.montoPagado), Color(0xFF009688))
                     InfoColumn("Saldo", formatearLempiras(prestamo.saldo), Color(0xFFFF5722))
@@ -1181,14 +1182,14 @@ fun PrestamoCardHistorial(
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(text = prestamo.fechaCreacion.take(10), fontSize = 11.sp, color = Color(0xFF666666))
                         if (prestamo.proximoPago.isNotBlank() && prestamo.proximoPago != "-") {
-                            Text(text = prestamo.proximoPago, fontSize = 11.sp, color = Color(0xFF2196F3), fontWeight = FontWeight.Medium)
+                            Text(text = prestamo.proximoPago, fontSize = 11.sp, color = CEColors.Primary, fontWeight = FontWeight.Medium)
                         }
                     }
 
                     TextButton(
                         onClick = { onExpandToggle(prestamo.id) },
                         modifier = Modifier.align(Alignment.CenterHorizontally),
-                        colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF2196F3))
+                        colors = ButtonDefaults.textButtonColors(contentColor = CEColors.Primary)
                     ) {
                         Icon(
                             if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
@@ -1206,7 +1207,7 @@ fun PrestamoCardHistorial(
                             shape = RoundedCornerShape(10.dp)
                         ) {
                             Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text("Detalles del Préstamo", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF2196F3), modifier = Modifier.padding(bottom = 6.dp))
+                                Text("Detalles del Préstamo", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = CEColors.Primary, modifier = Modifier.padding(bottom = 6.dp))
 
                                 DetailRow("Interés Total", formatearLempiras(prestamo.interesTotal))
                                 DetailRow("Cuota", formatearLempiras(prestamo.cuota))

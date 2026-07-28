@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.example.capitalexpressapp.core.coincideAproximado
 import com.example.capitalexpressapp.core.formatearLempiras
+import com.example.capitalexpressapp.ui.theme.CEColors
 import com.example.capitalexpressapp.util.ReciboHelper
 import com.example.capitalexpressapp.util.NetworkUtils.isInternetAvailable
 import com.example.minifinancieraapp.ui.models.PagoItem
@@ -1025,7 +1026,7 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
             TopAppBar(
                 title = { Text("Historial de Pagos", fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF0061A7),
+                    containerColor = CEColors.Primary,
                     titleContentColor = Color.White
                 ),
                 actions = {
@@ -1058,7 +1059,7 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    CircularProgressIndicator(color = Color(0xFF0061A7), strokeWidth = 3.dp)
+                    CircularProgressIndicator(color = CEColors.Primary, strokeWidth = 3.dp)
                     Text("Cargando historial...", color = Color.Gray, fontSize = 14.sp)
                 }
             }
@@ -1095,9 +1096,9 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF0061A7),
-                            focusedLabelColor = Color(0xFF0061A7),
-                            focusedLeadingIconColor = Color(0xFF0061A7)
+                            focusedBorderColor = CEColors.Primary,
+                            focusedLabelColor = CEColors.Primary,
+                            focusedLeadingIconColor = CEColors.Primary
                         )
                     )
                 }
@@ -1257,7 +1258,7 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                                         .padding(40.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
-                                    CircularProgressIndicator(color = Color(0xFF0061A7))
+                                    CircularProgressIndicator(color = CEColors.Primary)
                                     Spacer(modifier = Modifier.height(16.dp))
                                     Text("Cargando cuotas pendientes...", color = Color.Gray)
                                 }
@@ -1302,7 +1303,7 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                                     cliente,
                                     fontSize = 18.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF0061A7),
+                                    color = CEColors.Primary,
                                     modifier = Modifier.padding(vertical = 8.dp)
                                 )
                             }
@@ -1482,7 +1483,7 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         CircularProgressIndicator(
-                            color = Color(0xFF0061A7),
+                            color = CEColors.Primary,
                             strokeWidth = 3.dp,
                             modifier = Modifier.size(48.dp)
                         )
@@ -1490,7 +1491,7 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                             "Generando PDF...",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Medium,
-                            color = Color(0xFF0061A7)
+                            color = CEColors.Primary
                         )
                         Text(
                             "Por favor espera",
@@ -1520,7 +1521,8 @@ fun StatsCard(pagos: List<PagoItem>) {
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF0061A7)),
+        colors = CardDefaults.cardColors(containerColor = CEColors.Primary),
+        shape = RoundedCornerShape(24.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(
@@ -1731,6 +1733,7 @@ fun EmptyStateCard() {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5)),
+        shape = RoundedCornerShape(20.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(
@@ -1779,14 +1782,14 @@ fun EmptyStateCard() {
                             Icons.Default.Info,
                             contentDescription = null,
                             modifier = Modifier.size(20.dp),
-                            tint = Color(0xFF0061A7)
+                            tint = CEColors.Primary
                         )
                         Column {
                             Text(
                                 "Sugerencias:",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0061A7)
+                                color = CEColors.Primary
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
@@ -1820,7 +1823,9 @@ fun PagoCard(
         colors = CardDefaults.cardColors(
             containerColor = if (esSaldado) Color(0xFFE8F5E9) else Color.White
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        shape = RoundedCornerShape(20.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, CEColors.OutlineVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -1833,7 +1838,7 @@ fun PagoCard(
                         pago.cliente,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0061A7)
+                        color = CEColors.Primary
                     )
 
                     if (pago.numeroPrestamo.isNotEmpty()) {
@@ -1993,7 +1998,7 @@ fun PagoCard(
                         onClick = onReimprimir,
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = Color(0xFF0061A7)
+                            contentColor = CEColors.Primary
                         )
                     ) {
                         Icon(
@@ -2074,7 +2079,7 @@ fun CuotaPendienteCard(cuota: CuotaPendiente) {
                             "Cuota #${cuota.numeroCuota}",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0061A7)
+                            color = CEColors.Primary
                         )
                         Surface(
                             color = badgeColor,
@@ -2256,7 +2261,7 @@ fun InfoRow(label: String, value: String) {
         Text(
             value,
             fontSize = 12.sp,
-            color = Color(0xFF0061A7),
+            color = CEColors.Primary,
             fontWeight = FontWeight.Bold
         )
     }
@@ -2307,7 +2312,7 @@ fun FiltrosCard(
                     "Filtros de Búsqueda",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0061A7)
+                    color = CEColors.Primary
                 )
                 IconButton(
                     onClick = onLimpiar,
@@ -2340,8 +2345,8 @@ fun FiltrosCard(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Color(0xFF0061A7),
-                    focusedLabelColor = Color(0xFF0061A7)
+                    focusedBorderColor = CEColors.Primary,
+                    focusedLabelColor = CEColors.Primary
                 )
             )
 
@@ -2371,8 +2376,8 @@ fun FiltrosCard(
                         .fillMaxWidth()
                         .menuAnchor(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFF0061A7),
-                        focusedLabelColor = Color(0xFF0061A7)
+                        focusedBorderColor = CEColors.Primary,
+                        focusedLabelColor = CEColors.Primary
                     )
                 )
 
@@ -2411,7 +2416,7 @@ fun FiltrosCard(
                     "Rango de fechas",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
-                    color = Color(0xFF0061A7)
+                    color = CEColors.Primary
                 )
 
                 Row(
@@ -2425,7 +2430,7 @@ fun FiltrosCard(
                         },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = if (fechaInicio != null) Color(0xFF0061A7) else Color.Gray
+                            contentColor = if (fechaInicio != null) CEColors.Primary else Color.Gray
                         )
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -2448,7 +2453,7 @@ fun FiltrosCard(
                         },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = if (fechaFin != null) Color(0xFF0061A7) else Color.Gray
+                            contentColor = if (fechaFin != null) CEColors.Primary else Color.Gray
                         )
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -2515,7 +2520,7 @@ fun FiltrosCard(
                     "Estado del préstamo",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
-                    color = Color(0xFF0061A7)
+                    color = CEColors.Primary
                 )
 
                 Row(
@@ -2570,7 +2575,7 @@ fun FiltrosCard(
             Button(
                 onClick = onBuscar,
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A7))
+                colors = ButtonDefaults.buttonColors(containerColor = CEColors.Primary)
             ) {
                 Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
@@ -2603,7 +2608,7 @@ fun FiltrosCard(
                     containerColor = if (estadoFiltro == EstadoFiltro.SALDADOS) {
                         Color(0xFF059669)
                     } else {
-                        Color(0xFF0061A7)
+                        CEColors.Primary
                     }
                 )
             ) {
@@ -2635,7 +2640,7 @@ fun FiltrosCard(
                     Icon(
                         Icons.Default.FilterList,
                         contentDescription = null,
-                        tint = Color(0xFF0061A7),
+                        tint = CEColors.Primary,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
@@ -2643,7 +2648,7 @@ fun FiltrosCard(
                         "${pagosFiltrados.size} registro(s) encontrado(s)",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
-                        color = Color(0xFF0061A7)
+                        color = CEColors.Primary
                     )
                 }
             }
@@ -2703,7 +2708,7 @@ fun ReportePagosPreview(
             Icon(
                 Icons.Default.Assessment,
                 contentDescription = null,
-                tint = if (esSaldados) Color(0xFF059669) else Color(0xFF0061A7),
+                tint = if (esSaldados) Color(0xFF059669) else CEColors.Primary,
                 modifier = Modifier.size(48.dp)
             )
         },
@@ -2733,14 +2738,14 @@ fun ReportePagosPreview(
                             periodo,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Medium,
-                            color = if (esSaldados) Color(0xFF059669) else Color(0xFF0061A7)
+                            color = if (esSaldados) Color(0xFF059669) else CEColors.Primary
                         )
                     }
                 }
 
                 Card(
                     colors = CardDefaults.cardColors(
-                        containerColor = if (esSaldados) Color(0xFF059669) else Color(0xFF0061A7)
+                        containerColor = if (esSaldados) Color(0xFF059669) else CEColors.Primary
                     )
                 ) {
                     Column(
@@ -2907,7 +2912,7 @@ fun ReportePagosPreview(
                                             pago.cliente,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Medium,
-                                            color = Color(0xFF0061A7)
+                                            color = CEColors.Primary
                                         )
                                         Text(
                                             pago.fecha.split(" ")[0],
@@ -2958,7 +2963,7 @@ fun ReportePagosPreview(
                 },
                 enabled = !exportando,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (esSaldados) Color(0xFF059669) else Color(0xFF0061A7)
+                    containerColor = if (esSaldados) Color(0xFF059669) else CEColors.Primary
                 )
             ) {
                 if (exportando) {
