@@ -80,9 +80,9 @@ data class NotificacionCobroCascada(
 //  PALETA DE COLORES
 // ─────────────────────────────────────────────
 object NC {
-    val Navy        = Color(0xFF0A1628)
-    val NavyMid     = Color(0xFF0F2044)
-    val Blue        = Color(0xFF1A56DB)
+    val Navy        = Color(0xFF0A192F)
+    val NavyMid     = Color(0xFF112240)
+    val Blue        = Color(0xFF007AFF)
     val BlueSoft    = Color(0xFF3B82F6)
     val BlueLight   = Color(0xFFEFF6FF)
 
@@ -102,7 +102,7 @@ object NC {
     val TextSec     = Color(0xFF64748B)
     val TextMuted   = Color(0xFF94A3B8)
 
-    val GradStart   = Color(0xFF0A1628)
+    val GradStart   = Color(0xFF0A192F)
     val GradEnd     = Color(0xFF1A3A6B)
 }
 

@@ -3,6 +3,7 @@ package com.example.minifinancieraapp.ui.screens
 import android.app.DatePickerDialog
 import android.widget.Toast
 import com.example.capitalexpressapp.core.formatearLempiras
+import com.example.capitalexpressapp.ui.theme.CEColors
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -17,7 +18,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -258,7 +258,7 @@ fun PagosAsignadosCobradorScreen(navController: NavController) {
                 title = {
                     Text("Mis Pagos Registrados", color = Color.White, fontWeight = FontWeight.Bold)
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0061A7)),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = CEColors.Primary),
                 actions = {
                     IconButton(onClick = { mostrarFiltros = !mostrarFiltros }) {
                         Icon(Icons.Default.FilterList, contentDescription = "Filtros", tint = Color.White)
@@ -273,9 +273,7 @@ fun PagosAsignadosCobradorScreen(navController: NavController) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Brush.verticalGradient(
-                    colors = listOf(Color(0xFFF5F7FA), Color(0xFFE8EEF5))
-                ))
+                .background(CEColors.Surface)
         ) {
             if (isLoading) {
                 LoadingScreenCobrador(padding)
@@ -374,7 +372,7 @@ private fun FiltrosCobradorCard(
                 "Filtros y reportes",
                 fontWeight = FontWeight.Bold,
                 fontSize   = 16.sp,
-                color      = Color(0xFF0061A7)
+                color      = CEColors.Primary
             )
 
             OutlinedTextField(
@@ -456,13 +454,13 @@ private fun FiltrosCobradorCard(
                             fontWeight = FontWeight.Bold,
                             color      = Color(0xFF1565C0)
                         )
-                        Text("• Cobrador: $nombreCobrador", fontSize = 11.sp, color = Color(0xFF1976D2))
+                        Text("• Cobrador: $nombreCobrador", fontSize = 11.sp, color = CEColors.ActionBlue)
                         if (searchText.isNotBlank())
-                            Text("• Cliente: $searchText", fontSize = 11.sp, color = Color(0xFF1976D2))
+                            Text("• Cliente: $searchText", fontSize = 11.sp, color = CEColors.ActionBlue)
                         if (fechaInicio != null && fechaFin != null)
                             Text(
                                 "• Fechas: ${formatter.format(fechaInicio)} – ${formatter.format(fechaFin)}",
-                                fontSize = 11.sp, color = Color(0xFF1976D2)
+                                fontSize = 11.sp, color = CEColors.ActionBlue
                             )
                         Text(
                             "Mostrando ${pagosFiltrados.size} registro(s)",
@@ -602,7 +600,7 @@ private fun FechaSelectorCobrador(
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Filtrar por fechas", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color(0xFF1976D2))
+        Text("Filtrar por fechas", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = CEColors.ActionBlue)
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -629,14 +627,14 @@ private fun FechaSelectorCobrador(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.CalendarToday, contentDescription = null, tint = Color(0xFF1976D2), modifier = Modifier.size(20.dp))
+                    Icon(Icons.Default.CalendarToday, contentDescription = null, tint = CEColors.ActionBlue, modifier = Modifier.size(20.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Desde", fontSize = 11.sp, color = Color.Gray)
                         Text(
                             fechaInicio?.let { formatter.format(it) } ?: "Seleccionar",
                             fontSize   = 13.sp,
                             fontWeight = if (fechaInicio != null) FontWeight.Bold else FontWeight.Normal,
-                            color      = if (fechaInicio != null) Color(0xFF1976D2) else Color.Gray
+                            color      = if (fechaInicio != null) CEColors.ActionBlue else Color.Gray
                         )
                     }
                 }
@@ -663,14 +661,14 @@ private fun FechaSelectorCobrador(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.CalendarToday, contentDescription = null, tint = Color(0xFF1976D2), modifier = Modifier.size(20.dp))
+                    Icon(Icons.Default.CalendarToday, contentDescription = null, tint = CEColors.ActionBlue, modifier = Modifier.size(20.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Hasta", fontSize = 11.sp, color = Color.Gray)
                         Text(
                             fechaFin?.let { formatter.format(it) } ?: "Seleccionar",
                             fontSize   = 13.sp,
                             fontWeight = if (fechaFin != null) FontWeight.Bold else FontWeight.Normal,
-                            color      = if (fechaFin != null) Color(0xFF1976D2) else Color.Gray
+                            color      = if (fechaFin != null) CEColors.ActionBlue else Color.Gray
                         )
                     }
                 }
@@ -681,7 +679,7 @@ private fun FechaSelectorCobrador(
         if (fechaInicio == null && fechaFin == null) {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
-                    FilterChipCobrador("Hoy", Icons.Default.Today, Color(0xFF1976D2)) {
+                    FilterChipCobrador("Hoy", Icons.Default.Today, CEColors.ActionBlue) {
                         val hoy = Date(); onFechasChange(hoy, hoy)
                     }
                 }
@@ -735,7 +733,7 @@ private fun StatisticsCardCobrador(pagos: List<PagoItem>, nombreCobrador: String
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors   = CardDefaults.cardColors(containerColor = Color(0xFF0061A7)),
+        colors   = CardDefaults.cardColors(containerColor = CEColors.Primary),
         shape    = RoundedCornerShape(16.dp)
     ) {
         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -827,7 +825,7 @@ private fun EmptySearchCardCobrador(searchText: String) {
 private fun LoadingScreenCobrador(padding: PaddingValues) {
     Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            CircularProgressIndicator(color = Color(0xFF0061A7), strokeWidth = 3.dp)
+            CircularProgressIndicator(color = CEColors.Primary, strokeWidth = 3.dp)
             Text("Cargando mis pagos...", color = Color.Gray, fontSize = 14.sp)
         }
     }
@@ -881,7 +879,7 @@ private fun PagoCardCobrador(
                     }
                 }
                 if (pago.numeroPrestamo.isNotEmpty()) {
-                    Surface(color = Color(0xFF0061A7), shape = RoundedCornerShape(8.dp)) {
+                    Surface(color = CEColors.Primary, shape = RoundedCornerShape(8.dp)) {
                         Text("#${pago.numeroPrestamo}", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
                     }
                 }
@@ -952,7 +950,7 @@ private fun PagoCardCobrador(
             Button(
                 onClick  = onReimprimir,
                 modifier = Modifier.fillMaxWidth(),
-                colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2)),
+                colors   = ButtonDefaults.buttonColors(containerColor = CEColors.ActionBlue),
                 shape    = RoundedCornerShape(12.dp)
             ) {
                 Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
