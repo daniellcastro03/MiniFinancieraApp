@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -34,6 +35,7 @@ object CEColors {
     val Surface = Color(0xFFF8FAFC)
     val SurfaceContainerLow = Color(0xFFF2F4F6)
     val SurfaceContainer = Color(0xFFECEEF0)
+    val SurfaceContainerHighest = Color(0xFFE0E3E5)
     val OnSurface = Color(0xFF191C1E)
     val OnSurfaceVariant = Color(0xFF44474D)
     val Outline = Color(0xFF75777E)
@@ -90,6 +92,17 @@ fun IconoCaja(
         content()
     }
 }
+
+/** Colores estándar de OutlinedTextField para formularios (foco en azul de acción). */
+@Composable
+fun ceTextFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = CEColors.ActionBlue,
+    focusedLabelColor = CEColors.ActionBlue,
+    cursorColor = CEColors.ActionBlue,
+    unfocusedBorderColor = CEColors.OutlineVariant,
+    focusedContainerColor = Color.White,
+    unfocusedContainerColor = Color.White
+)
 
 /** Borde punteado (el "Buscar Actualizaciones" del mockup usa border-dashed). */
 fun Modifier.dashedBorder(
