@@ -38,6 +38,7 @@ import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
 import com.example.capitalexpressapp.core.coincideAproximado
 import com.example.capitalexpressapp.core.formatearLempiras
+import com.example.capitalexpressapp.ui.theme.CEColors
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
@@ -250,7 +251,7 @@ fun FiltrosCompactos(
                 onValueChange = onSearchChange,
                 placeholder = { Text("Buscar cliente o número...", fontSize = 14.sp) },
                 leadingIcon = {
-                    Icon(Icons.Default.Search, null, tint = Color(0xFF0061A7))
+                    Icon(Icons.Default.Search, null, tint = CEColors.Primary)
                 },
                 trailingIcon = if (search.isNotBlank()) {
                     {
@@ -264,9 +265,9 @@ fun FiltrosCompactos(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(24.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Color(0xFF0061A7),
+                    focusedBorderColor = CEColors.Primary,
                     unfocusedBorderColor = Color(0xFFE0E0E0),
-                    focusedLeadingIconColor = Color(0xFF0061A7)
+                    focusedLeadingIconColor = CEColors.Primary
                 ),
                 singleLine = true
             )
@@ -312,7 +313,7 @@ fun FiltrosCompactos(
                     Icon(
                         Icons.Default.FilterList,
                         contentDescription = null,
-                        tint = Color(0xFF0061A7),
+                        tint = CEColors.Primary,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
@@ -320,7 +321,7 @@ fun FiltrosCompactos(
                         "Estado:",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
-                        color = Color(0xFF0061A7)
+                        color = CEColors.Primary
                     )
                 }
 
@@ -339,7 +340,7 @@ fun FiltrosCompactos(
                             },
                             selected = estadoSeleccionado == estado,
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color(0xFF0061A7),
+                                selectedContainerColor = CEColors.Primary,
                                 selectedLabelColor = Color.White,
                                 containerColor = Color.White,
                                 labelColor = Color(0xFF666666)
@@ -347,7 +348,7 @@ fun FiltrosCompactos(
                             border = FilterChipDefaults.filterChipBorder(
                                 enabled = true,
                                 selected = estadoSeleccionado == estado,
-                                borderColor = if (estadoSeleccionado == estado) Color(0xFF0061A7) else Color(0xFFE0E0E0)
+                                borderColor = if (estadoSeleccionado == estado) CEColors.Primary else Color(0xFFE0E0E0)
                             )
                         )
                     }
@@ -359,7 +360,7 @@ fun FiltrosCompactos(
                     onClick = onResetFiltros,
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = Color(0xFF0061A7)
+                        contentColor = CEColors.Primary
                     ),
                     shape = RoundedCornerShape(8.dp)
                 ) {
@@ -426,7 +427,7 @@ fun TarjetaPrestamo(
                     )
                     Text(
                         formatearLempiras(prestamo.monto),
-                        color = Color(0xFF0061A7),
+                        color = CEColors.Primary,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 14.sp
                     )
@@ -500,7 +501,7 @@ fun TarjetaPrestamo(
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = Color(0xFF0061A7)
+                        contentColor = CEColors.Primary
                     )
                 ) {
                     Text("Ver", fontSize = 12.sp)
@@ -594,7 +595,7 @@ fun EstadisticasRapidas(prestamos: List<PrestamoAdmin>) {
                     .padding(12.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                EstadisticaItem("Total", total.toString(), Color(0xFF0061A7))
+                EstadisticaItem("Total", total.toString(), CEColors.Primary)
                 EstadisticaItem("Activos", activos.toString(), Color(0xFF4CAF50))
                 EstadisticaItem("Saldados", saldados.toString(), Color(0xFF9E9E9E))
                 if (atrasados > 0) {
@@ -963,7 +964,7 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = if (mostrarEliminados) Color(0xFFD32F2F) else Color(0xFF0061A7)
+                    containerColor = if (mostrarEliminados) Color(0xFFD32F2F) else CEColors.Primary
                 )
             )
         },
@@ -971,7 +972,7 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
             if (esAdmin && !mostrarEliminados) {
                 FloatingActionButton(
                     onClick = { navController.navigate("crearPrestamo") },
-                    containerColor = Color(0xFF0061A7),
+                    containerColor = CEColors.Primary,
                     contentColor = Color.White,
                     shape = RoundedCornerShape(16.dp)
                 ) {
@@ -1012,7 +1013,7 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                             Button(
                                 onClick = { cargarSiHaceFalta() },
                                 modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0061A7))
+                                colors = ButtonDefaults.buttonColors(containerColor = CEColors.Primary)
                             ) {
                                 Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
@@ -1088,7 +1089,7 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(12.dp),
                                     colors = ButtonDefaults.outlinedButtonColors(
-                                        contentColor = Color(0xFF0061A7)
+                                        contentColor = CEColors.Primary
                                     )
                                 ) {
                                     Text("Reintentar conexión")
@@ -1109,7 +1110,7 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     CircularProgressIndicator(
-                                        color = if (mostrarEliminados) Color(0xFFD32F2F) else Color(0xFF0061A7),
+                                        color = if (mostrarEliminados) Color(0xFFD32F2F) else CEColors.Primary,
                                         strokeWidth = 3.dp
                                     )
                                     Spacer(modifier = Modifier.height(16.dp))
@@ -1163,7 +1164,7 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                                             OutlinedButton(
                                                 onClick = { configurarListenerFirebase() },
                                                 colors = ButtonDefaults.outlinedButtonColors(
-                                                    contentColor = Color(0xFF0061A7)
+                                                    contentColor = CEColors.Primary
                                                 )
                                             ) {
                                                 Text("Recargar")

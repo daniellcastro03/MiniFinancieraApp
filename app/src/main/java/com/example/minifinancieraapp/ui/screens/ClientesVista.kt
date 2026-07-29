@@ -30,6 +30,7 @@ import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
 import com.example.capitalexpressapp.core.coincideAproximado
 import com.example.capitalexpressapp.core.formatearLempiras
+import com.example.capitalexpressapp.ui.theme.CEColors
 import com.example.capitalexpressapp.util.hayInternet
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
@@ -194,7 +195,7 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
                     )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF0061A7)
+                    containerColor = CEColors.Primary
                 ),
                 actions = {
                     IconButton(
@@ -247,7 +248,7 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
         floatingActionButton = {
             FloatingActionButton(
                 onClick = { navController.navigate("crearCliente") },
-                containerColor = Color(0xFF0061A7)
+                containerColor = CEColors.Primary
             ) {
                 Icon(
                     Icons.Default.Add,
@@ -293,7 +294,7 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 4.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFF0061A7)
+                        containerColor = CEColors.Primary
                     ),
                     elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                 ) {
@@ -536,7 +537,7 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(64.dp),
-                                color = Color(0xFF0061A7)
+                                color = CEColors.Primary
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Text("Cargando clientes...", color = Color.Gray)
@@ -549,7 +550,7 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
                     Text(
                         text = "Mostrando ${clientesFiltrados.size} de ${clientes.size} clientes",
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0061A7),
+                        color = CEColors.Primary,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                     )
@@ -872,7 +873,7 @@ fun ClienteCardMejorado(
             if (cliente.tienePrestamo) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0061A7))
+                    colors = CardDefaults.cardColors(containerColor = CEColors.Primary)
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1020,7 +1021,7 @@ fun ClienteCardMejorado(
                     IconButton(onClick = {
                         navController.navigate("EditarClienteScreen/${cliente.id}")
                     }) {
-                        Icon(Icons.Default.Edit, contentDescription = "Editar", tint = Color(0xFF0061A7))
+                        Icon(Icons.Default.Edit, contentDescription = "Editar", tint = CEColors.Primary)
                     }
 
                     IconButton(onClick = { onEliminar(cliente) }) {
