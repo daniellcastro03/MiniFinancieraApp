@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.example.capitalexpressapp.core.formatearLempiras
+import com.example.capitalexpressapp.ui.theme.CEColors
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
@@ -549,7 +550,7 @@ fun VerPrestamoScreen(
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0061A7)),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = CEColors.Primary),
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Volver", tint = Color.White)
@@ -600,7 +601,7 @@ fun VerPrestamoScreen(
                     verticalArrangement = Arrangement.Center
                 ) {
                     CircularProgressIndicator(
-                        color = Color(0xFF0061A7),
+                        color = CEColors.Primary,
                         strokeWidth = 4.dp,
                         modifier = Modifier.size(48.dp)
                     )
@@ -626,7 +627,7 @@ fun VerPrestamoScreen(
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(
-                                containerColor = Color(0xFF1565C0)
+                                containerColor = CEColors.ActionBlue
                             ),
                             elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
                             shape = RoundedCornerShape(16.dp)
@@ -942,7 +943,7 @@ fun VerPrestamoScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3)),
+                        colors = ButtonDefaults.buttonColors(containerColor = CEColors.ActionBlue),
                         shape = RoundedCornerShape(12.dp),
                         enabled = !isProcessing
                     ) {
@@ -980,7 +981,7 @@ fun SectionCard(
                 Icon(
                     icon,
                     contentDescription = null,
-                    tint = Color(0xFF0061A7),
+                    tint = CEColors.Primary,
                     modifier = Modifier.size(28.dp)
                 )
                 Spacer(modifier = Modifier.width(12.dp))
@@ -988,7 +989,7 @@ fun SectionCard(
                     title,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0061A7)
+                    color = CEColors.Primary
                 )
             }
             content()

@@ -205,8 +205,8 @@ private suspend fun generarPlanCuotasConEstado(
 // ─────────────────────────────────────────────
 //  PALETA
 // ─────────────────────────────────────────────
-private val CNavy      = Color(0xFF0A1628)
-private val CBlue      = Color(0xFF1A56DB)
+private val CNavy      = Color(0xFF0A192F)
+private val CBlue      = Color(0xFF007AFF)
 private val CRed       = Color(0xFFEF4444)
 private val CRedSoft   = Color(0xFFFEF2F2)
 private val CGreen     = Color(0xFF10B981)
