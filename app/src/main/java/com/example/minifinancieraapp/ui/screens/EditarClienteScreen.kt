@@ -205,7 +205,12 @@ fun EditarClienteScreen(navController: NavController, clienteId: String) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(label)
                     Image(
-                        painter = rememberAsyncImagePainter(fotosUris[key] ?: fotosUrls[key]),
+                        painter = rememberAsyncImagePainter(
+                            model = coil.request.ImageRequest.Builder(context)
+                                .data(fotosUris[key] ?: fotosUrls[key])
+                                .size(1080, 600)
+                                .build()
+                        ),
                         contentDescription = label,
                         modifier = Modifier
                             .fillMaxWidth()

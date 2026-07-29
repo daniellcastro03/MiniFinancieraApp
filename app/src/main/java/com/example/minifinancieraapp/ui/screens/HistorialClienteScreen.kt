@@ -59,7 +59,7 @@ fun HistorialClienteScreen(navController: NavController, clienteNombre: String) 
                 Text("Este cliente no tiene préstamos registrados.")
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(prestamos) { prestamo ->
+                    items(prestamos, key = { it.id.ifBlank { it.fecha } }) { prestamo ->
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text("Monto: L. ${prestamo.monto}")

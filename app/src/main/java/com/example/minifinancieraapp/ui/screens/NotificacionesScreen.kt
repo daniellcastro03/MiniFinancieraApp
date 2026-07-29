@@ -3,10 +3,6 @@ import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -773,25 +769,14 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                     if (notificaciones.isEmpty()) {
                         item { EstadoVacio() }
                     } else {
+                        // ✅ Antes cada fila tenía un AnimatedVisibility con delay
+                        // según su índice: al hacer scroll, LazyColumn recompone
+                        // las filas que entran a la vista y esa animación se
+                        // repetía cada vez, sumando lag justo mientras se scrollea.
                         itemsIndexed(
                             items = notificaciones,
                             key   = { _, n -> n.prestamoId }
                         ) { index, notif ->
-                            AnimatedVisibility(
-                                visible = true,
-                                enter   = fadeIn(
-                                    animationSpec = tween(
-                                        durationMillis = 300,
-                                        delayMillis    = (index * 30).coerceAtMost(300)
-                                    )
-                                ) + slideInVertically(
-                                    initialOffsetY = { it / 4 },
-                                    animationSpec  = tween(
-                                        durationMillis = 300,
-                                        delayMillis    = (index * 30).coerceAtMost(300)
-                                    )
-                                )
-                            ) {
                                 NotifCard(
                                     notif         = notif,
                                     rol           = rol,
@@ -809,7 +794,6 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                                         mostrarDialogoMora = true
                                     }
                                 )
-                            }
                         }
                     }
                 }

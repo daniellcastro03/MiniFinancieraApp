@@ -35,16 +35,31 @@ import com.github.mikephil.charting.formatter.IndexAxisValueFormatter
 import com.github.mikephil.charting.utils.ColorTemplate
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
+
+private data class DashboardResultado(
+    val totalClientes: Int,
+    val totalPrestado: Double,
+    val totalInteres: Double,
+    val pagosFiltrados: List<Pair<String, Double>>,
+    val totalPagado: Double,
+    val totalMoras: Double,
+    val cantidadMoras: Int,
+    val totalCobros: Int
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(navController: NavController) {
     val context = LocalContext.current
     val db = FirebaseFirestore.getInstance()
-    val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+    val dateFormat = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
 
     var startDate by remember { mutableStateOf<Calendar?>(null) }
     var endDate by remember { mutableStateOf<Calendar?>(null) }
@@ -68,43 +83,68 @@ fun DashboardScreen(navController: NavController) {
 
     LaunchedEffect(startDate, endDate) {
         try {
-            val clientes = db.collection("clientes").get().await()
-            totalClientes = clientes.size()
-
-            val prestamos = db.collection("prestamos").get().await()
-            totalPrestado = prestamos.sumOf { it.getDouble("monto") ?: 0.0 }
-
-            totalInteres = prestamos.sumOf {
-                it.getDouble("interesTotal") ?: 0.0
+            // Las 3 colecciones se traen en paralelo en vez de una tras otra.
+            val (clientesSnap, prestamosSnap, pagosSnap) = coroutineScope {
+                val clientesDeferred = async { db.collection("clientes").get().await() }
+                val prestamosDeferred = async { db.collection("prestamos").get().await() }
+                val pagosDeferred = async { db.collection("pagos").get().await() }
+                Triple(clientesDeferred.await(), prestamosDeferred.await(), pagosDeferred.await())
             }
 
-            val pagos = db.collection("pagos").get().await()
+            // Capturados en vals locales antes de pasar a otro dispatcher: un
+            // `by remember` no permite smart-cast dentro de la lambda de abajo.
+            val startDateLocal = startDate
+            val endDateLocal = endDate
 
-            val pagosValidados = pagos.mapNotNull {
-                val monto = it.getDouble("monto") ?: return@mapNotNull null
-                val mora = it.getDouble("mora") ?: 0.0
-                val cobrador = it.getString("registradoPor") ?: "Desconocido"
-                val fecha = when (val f = it.get("fechaPago")) {
-                    is Timestamp -> Calendar.getInstance().apply { time = f.toDate() }
-                    is String -> dateFormat.parse(f)?.let {
-                        Calendar.getInstance().apply { time = it }
+            // El procesamiento (parseo de fechas, sumas, filtrado) es trabajo de
+            // CPU sobre potencialmente miles de documentos: se hace en
+            // Dispatchers.Default para no congelar la UI mientras el spinner gira.
+            val resultado = withContext(Dispatchers.Default) {
+                val totalPrestadoCalc = prestamosSnap.sumOf { it.getDouble("monto") ?: 0.0 }
+                val totalInteresCalc = prestamosSnap.sumOf { it.getDouble("interesTotal") ?: 0.0 }
+
+                val pagosValidados = pagosSnap.mapNotNull {
+                    val monto = it.getDouble("monto") ?: return@mapNotNull null
+                    val mora = it.getDouble("mora") ?: 0.0
+                    val cobrador = it.getString("registradoPor") ?: "Desconocido"
+                    val fecha = when (val f = it.get("fechaPago")) {
+                        is Timestamp -> Calendar.getInstance().apply { time = f.toDate() }
+                        is String -> dateFormat.parse(f)?.let {
+                            Calendar.getInstance().apply { time = it }
+                        }
+                        else -> null
+                    } ?: return@mapNotNull null
+
+                    if (startDateLocal != null && endDateLocal != null) {
+                        if (fecha.time.before(startDateLocal.time) || fecha.time.after(endDateLocal.time)) return@mapNotNull null
                     }
-                    else -> null
-                } ?: return@mapNotNull null
 
-                if (startDate != null && endDate != null) {
-                    if (fecha.time.before(startDate!!.time) || fecha.time.after(endDate!!.time)) return@mapNotNull null
+                    Triple(cobrador, monto, mora)
                 }
 
-                Triple(cobrador, monto, mora)
+                val totalPagadoCalc = pagosValidados.sumOf { it.second }
+
+                DashboardResultado(
+                    totalClientes = clientesSnap.size(),
+                    totalPrestado = totalPrestadoCalc,
+                    totalInteres = totalInteresCalc,
+                    pagosFiltrados = pagosValidados.map { it.first to it.second },
+                    totalPagado = totalPagadoCalc,
+                    totalMoras = pagosValidados.sumOf { it.third },
+                    cantidadMoras = pagosValidados.count { it.third > 0 },
+                    totalCobros = pagosValidados.size
+                )
             }
 
-            pagosFiltrados = pagosValidados.map { it.first to it.second }
-            totalPagado = pagosValidados.sumOf { it.second }
-            totalMoras = pagosValidados.sumOf { it.third }
-            cantidadMoras = pagosValidados.count { it.third > 0 }
-            totalCobros = pagosValidados.size
-            totalPendiente = totalPrestado + totalInteres - totalPagado
+            totalClientes = resultado.totalClientes
+            totalPrestado = resultado.totalPrestado
+            totalInteres = resultado.totalInteres
+            pagosFiltrados = resultado.pagosFiltrados
+            totalPagado = resultado.totalPagado
+            totalMoras = resultado.totalMoras
+            cantidadMoras = resultado.cantidadMoras
+            totalCobros = resultado.totalCobros
+            totalPendiente = resultado.totalPrestado + resultado.totalInteres - resultado.totalPagado
 
         } catch (e: Exception) {
             Toast.makeText(context, "Error cargando datos: ${e.message}", Toast.LENGTH_LONG).show()

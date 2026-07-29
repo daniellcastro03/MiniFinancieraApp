@@ -23,6 +23,7 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 data class PagoCuota(
+    val id: String = "",
     val fechaPago: String = "",
     val monto: Double = 0.0,
     val registradoPor: String = "",
@@ -64,6 +65,7 @@ fun HistorialCuotasPrestamoScreen(navController: NavController, prestamoId: Stri
                 } ?: "Sin fecha"
 
                 PagoCuota(
+                    id = doc.id,
                     fechaPago = fecha,
                     monto = doc.getDouble("monto") ?: 0.0,
                     mora = doc.getDouble("mora") ?: 0.0,
@@ -111,7 +113,7 @@ fun HistorialCuotasPrestamoScreen(navController: NavController, prestamoId: Stri
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
-                items(pagos) { pago ->
+                items(pagos, key = { it.id.ifEmpty { it.fechaPago } }) { pago ->
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(

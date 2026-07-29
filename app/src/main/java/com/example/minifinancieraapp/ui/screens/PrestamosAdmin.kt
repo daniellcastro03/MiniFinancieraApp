@@ -196,6 +196,17 @@ private suspend fun verificarEstadoRealPrestamoAdmin(
     }
 }
 
+/**
+ * Lookup síncrono (sin corrutina) para cuando los cobradores de un préstamo
+ * ya están en caché — evita el parpadeo "Cargando..." al hacer scroll sobre
+ * filas ya vistas antes.
+ */
+fun nombresCobradoresCacheados(cobradores: List<String>): String? {
+    if (cobradores.isEmpty()) return "Sin asignar"
+    val nombres = cobradores.map { cobradorNombreCache[it] ?: return null }
+    return nombres.joinToString(", ")
+}
+
 suspend fun obtenerNombresCobradores(cobradores: List<String>): String {
     if (cobradores.isEmpty()) return "Sin asignar"
 
@@ -917,28 +928,32 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
     // ✅ Se calcula directo en la composición (no en un LaunchedEffect aparte) para que
     // no quede desfasado un frame de "prestamosOriginales" -eso causaba el parpadeo de
     // "no se encontraron préstamos" apenas antes de que aparecieran los resultados reales-.
-    val prestamosFiltrados = prestamosOriginales
-        .filter { prestamo ->
-            val coincideEliminado = if (mostrarEliminados) {
-                prestamo.eliminado
-            } else {
-                !prestamo.eliminado
+    // remember(keys) evita repetir el filtro difuso (costoso) en cada recomposición que
+    // no tenga que ver con la búsqueda/lista (por ejemplo, al hacer scroll).
+    val prestamosFiltrados = remember(prestamosOriginales, mostrarEliminados, estadoSeleccionado, search) {
+        prestamosOriginales
+            .filter { prestamo ->
+                val coincideEliminado = if (mostrarEliminados) {
+                    prestamo.eliminado
+                } else {
+                    !prestamo.eliminado
+                }
+
+                val coincideEstado = estadoSeleccionado == "Todos" ||
+                        prestamo.estado.equals(estadoSeleccionado, ignoreCase = true)
+
+                // ⭐ BÚSQUEDA POR CLIENTE (tolera errores de tipeo/orden) Y NÚMERO DE PRÉSTAMO
+                val coincideBusqueda = search.isBlank() ||
+                        coincideAproximado(search, prestamo.cliente) ||
+                        prestamo.numeroPrestamo.contains(search, ignoreCase = true)
+
+                coincideEliminado && coincideEstado && coincideBusqueda
             }
-
-            val coincideEstado = estadoSeleccionado == "Todos" ||
-                    prestamo.estado.equals(estadoSeleccionado, ignoreCase = true)
-
-            // ⭐ BÚSQUEDA POR CLIENTE (tolera errores de tipeo/orden) Y NÚMERO DE PRÉSTAMO
-            val coincideBusqueda = search.isBlank() ||
-                    coincideAproximado(search, prestamo.cliente) ||
-                    prestamo.numeroPrestamo.contains(search, ignoreCase = true)
-
-            coincideEliminado && coincideEstado && coincideBusqueda
-        }
-        .sortedWith(
-            compareBy<PrestamoAdmin> { it.cobradores.isEmpty() }
-                .thenByDescending { it.fechaCreacionTimestamp?.toDate() }
-        )
+            .sortedWith(
+                compareBy<PrestamoAdmin> { it.cobradores.isEmpty() }
+                    .thenByDescending { it.fechaCreacionTimestamp?.toDate() }
+            )
+    }
 
     Scaffold(
         topBar = {
@@ -1190,10 +1205,14 @@ fun PrestamoAdminScreen(navController: NavController, uid: String, rol: String) 
                     else -> {
                         items(prestamosFiltrados, key = { it.id }) { prestamo ->
                             val nombresCobradores by produceState(
-                                initialValue = "Cargando...",
+                                initialValue = nombresCobradoresCacheados(prestamo.cobradores) ?: "Cargando...",
                                 key1 = prestamo.id
                             ) {
-                                value = obtenerNombresCobradores(prestamo.cobradores)
+                                // Si el valor inicial ya vino resuelto de la caché, no hace
+                                // falta lanzar la corrutina/consulta a Firestore de nuevo.
+                                if (value == "Cargando...") {
+                                    value = obtenerNombresCobradores(prestamo.cobradores)
+                                }
                             }
 
                             TarjetaPrestamo(

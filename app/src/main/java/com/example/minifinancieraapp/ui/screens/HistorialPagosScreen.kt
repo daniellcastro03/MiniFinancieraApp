@@ -35,9 +35,11 @@ import com.example.minifinancieraapp.ui.models.PagoItem
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.gson.Gson
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -258,30 +260,34 @@ private suspend fun obtenerTodasLasCuotasPendientes(
         val prestamosSnap = prestamosDeferred.await()
         val todosPagosSnap = todosPagosDeferred.await()
 
-        // Agrupar pagos por prestamoId en memoria (O(n), no N queries)
-        val pagosPorPrestamo = todosPagosSnap.documents.groupBy {
-            it.getString("prestamoId") ?: ""
+        // Agrupar + calcular cuotas de todos los préstamos activos es trabajo
+        // de CPU: se hace en Dispatchers.Default, no en el hilo de UI.
+        withContext(Dispatchers.Default) {
+            // Agrupar pagos por prestamoId en memoria (O(n), no N queries)
+            val pagosPorPrestamo = todosPagosSnap.documents.groupBy {
+                it.getString("prestamoId") ?: ""
+            }
+
+            val resultado = mutableListOf<Pair<String, List<CuotaPendiente>>>()
+
+            for (prestamoDoc in prestamosSnap.documents) {
+                val prestamoId     = prestamoDoc.id
+                val clienteNombre  = prestamoDoc.getString("cliente") ?: continue
+                val cobradorAsignado = prestamoDoc.getString("cobrador") ?: ""
+
+                if (filtroCliente.isNotBlank() &&
+                    !clienteNombre.contains(filtroCliente, ignoreCase = true)) continue
+                if (filtroCobradorId.isNotBlank() &&
+                    cobradorAsignado != filtroCobradorId) continue
+
+                // ✅ Pasar el subconjunto ya filtrado — sin query adicional
+                val pagosDelPrestamo = pagosPorPrestamo[prestamoId] ?: emptyList()
+                val cuotas = calcularCuotasPendientesDesdeDocumentos(prestamoDoc, pagosDelPrestamo)
+                if (cuotas.isNotEmpty()) resultado.add(Pair(clienteNombre, cuotas))
+            }
+
+            resultado
         }
-
-        val resultado = mutableListOf<Pair<String, List<CuotaPendiente>>>()
-
-        for (prestamoDoc in prestamosSnap.documents) {
-            val prestamoId     = prestamoDoc.id
-            val clienteNombre  = prestamoDoc.getString("cliente") ?: continue
-            val cobradorAsignado = prestamoDoc.getString("cobrador") ?: ""
-
-            if (filtroCliente.isNotBlank() &&
-                !clienteNombre.contains(filtroCliente, ignoreCase = true)) continue
-            if (filtroCobradorId.isNotBlank() &&
-                cobradorAsignado != filtroCobradorId) continue
-
-            // ✅ Pasar el subconjunto ya filtrado — sin query adicional
-            val pagosDelPrestamo = pagosPorPrestamo[prestamoId] ?: emptyList()
-            val cuotas = calcularCuotasPendientesDesdeDocumentos(prestamoDoc, pagosDelPrestamo)
-            if (cuotas.isNotEmpty()) resultado.add(Pair(clienteNombre, cuotas))
-        }
-
-        resultado
     } catch (e: Exception) {
         Log.e("TodasCuotasPendientes", "Error: ${e.message}", e)
         emptyList()
@@ -947,38 +953,45 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                     return@launch
                 }
 
-                // ✅ 3 queries en PARALELO
-                val usuariosDeferred = async {
-                    db.collection("usuarios").get().await()
-                        .associateBy({ it.id }, { it.getString("nombre") ?: it.id })
-                }
+                // ✅ 3 queries en PARALELO (usuarios se pide una sola vez: antes
+                // había una segunda consulta idéntica solo para leer el rol).
+                val usuariosDeferred = async { db.collection("usuarios").get().await() }
                 val prestamosDeferred = async {
-                    db.collection("prestamos").get().await()
-                        .associateBy({ it.id }, { it.data })
+                    db.collection("prestamos").get().await().associateBy({ it.id }, { it.data })
                 }
                 // ✅ SIN orderBy ni limit — trae todos los docs independiente del nombre del campo fecha
                 val pagosDeferred = async {
                     db.collection("pagos").get().await().documents
                 }
 
-                val usuariosMap  = usuariosDeferred.await()
-                val prestamos    = prestamosDeferred.await()
-                val todosLosDocs = pagosDeferred.await()
+                val usuariosSnap  = usuariosDeferred.await()
+                val prestamos     = prestamosDeferred.await()
+                val todosLosDocs  = pagosDeferred.await()
 
-// ✅ Cargar usuarios con rol para el filtro de cobrador
-                val usuariosConRol = db.collection("usuarios").get().await()
-                usuarios = usuariosConRol.documents.mapNotNull { doc ->
-                    val nombre = doc.getString("nombre") ?: return@mapNotNull null
-                    val rolU   = doc.getString("rol")    ?: return@mapNotNull null
-                    if (rolU in listOf("cobrador", "admin"))
-                        UsuarioItem(id = doc.id, nombre = nombre, rol = rolU)
-                    else null
-                }.sortedBy { it.nombre }
+                // El mapeo/orden de cientos-miles de documentos es trabajo de
+                // CPU: se hace en Dispatchers.Default para que la ruedita de
+                // carga no se congele mientras tanto.
+                val (usuariosConRol, pagosProcesados) = withContext(Dispatchers.Default) {
+                    val usuariosMap = usuariosSnap.documents.associateBy({ it.id }, { it.getString("nombre") ?: it.id })
 
-// ✅ Ordenar por timestamp resuelto, no por string
-                pagos = todosLosDocs.mapNotNull { doc ->
-                    procesarDocumentoPagoMejorado(doc, usuariosMap, prestamos, formatter)
-                }.sortedByDescending { it.timestamp?.toDate()?.time ?: 0L }
+                    val usuariosLista = usuariosSnap.documents.mapNotNull { doc ->
+                        val nombre = doc.getString("nombre") ?: return@mapNotNull null
+                        val rolU   = doc.getString("rol")    ?: return@mapNotNull null
+                        if (rolU in listOf("cobrador", "admin"))
+                            UsuarioItem(id = doc.id, nombre = nombre, rol = rolU)
+                        else null
+                    }.sortedBy { it.nombre }
+
+                    // ✅ Ordenar por timestamp resuelto, no por string
+                    val pagosLista = todosLosDocs.mapNotNull { doc ->
+                        procesarDocumentoPagoMejorado(doc, usuariosMap, prestamos, formatter)
+                    }.sortedByDescending { it.timestamp?.toDate()?.time ?: 0L }
+
+                    usuariosLista to pagosLista
+                }
+
+                usuarios = usuariosConRol
+                pagos = pagosProcesados
 
                 Log.d("CargarPagos", "✅ Total pagos cargados: ${pagos.size}")
 
@@ -1308,7 +1321,7 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                                 )
                             }
 
-                            items(cuotas) { cuota ->
+                            items(cuotas, key = { it.numeroCuota }) { cuota ->
                                 CuotaPendienteCard(cuota)
                             }
                         }

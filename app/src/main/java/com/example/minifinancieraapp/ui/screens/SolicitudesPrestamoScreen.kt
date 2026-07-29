@@ -256,7 +256,7 @@ fun SolicitudesPrestamoScreen(navController: NavController) {
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(solicitudes) { solicitud ->
+                    items(solicitudes, key = { it.id }) { solicitud ->
                         SolicitudCard(
                             solicitud = solicitud,
                             onVerDetalle = {
@@ -376,12 +376,18 @@ fun SolicitudCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.padding(vertical = 4.dp)
                 ) {
-                    items(solicitud.fotos) { fotoUri ->
+                    items(solicitud.fotos, key = { it }) { fotoUri ->
+                        val fotoContext = LocalContext.current
                         Card(
                             modifier = Modifier.size(60.dp)
                         ) {
                             Image(
-                                painter = rememberAsyncImagePainter(Uri.parse(fotoUri)),
+                                painter = rememberAsyncImagePainter(
+                                    model = coil.request.ImageRequest.Builder(fotoContext)
+                                        .data(Uri.parse(fotoUri))
+                                        .size(150, 150)
+                                        .build()
+                                ),
                                 contentDescription = "Foto adjunta",
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop

@@ -60,7 +60,7 @@ fun PrestamosCobradorScreen(navController: NavController, cobradorNombre: String
                 Text("No hay préstamos asignados a este cobrador.")
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(prestamos) { prestamo ->
+                    items(prestamos, key = { it.id }) { prestamo ->
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()

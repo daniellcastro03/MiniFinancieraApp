@@ -105,7 +105,7 @@ fun AsignarCobradorScreen(navController: NavController, clienteId: String) {
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(listaUsuarios) { (uid, nombre) ->
+                    items(listaUsuarios, key = { it.first }) { (uid, nombre) ->
                         CobradorItemMultiple(
                             nombre = nombre,
                             isSelected = seleccionados.contains(uid),

@@ -31,8 +31,12 @@ import com.example.minifinancieraapp.ui.models.PagoItem
 import com.example.minifinancieraapp.util.SessionManager
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 import android.util.Log
@@ -134,21 +138,30 @@ fun PagosAsignadosCobradorScreen(navController: NavController) {
                 }
                 isLoading = true
 
-                val usuariosMap = db.collection("usuarios").get().await()
-                    .documents.associateBy({ it.id }, { it.getString("nombre") ?: it.id })
-
-                val prestamosMap = db.collection("prestamos").get().await()
-                    .documents.associateBy({ it.id }, { it.data ?: emptyMap() })
-
-                val listaCargada = db.collection("pagos")
-                    .whereEqualTo("registradoPor", uidCobrador)
-                    .get().await()
-                    .documents
-                    .mapNotNull { doc ->
-                        try { procesarDocumentoPagoCobrador(doc, usuariosMap, prestamosMap, formatter) }
-                        catch (e: Exception) { Log.e("CargarPagos", "Error ${doc.id}: ${e.message}"); null }
+                // Las 3 consultas van en paralelo en vez de una tras otra.
+                val (usuariosSnap, prestamosSnap, pagosSnap) = coroutineScope {
+                    val usuariosDeferred = async { db.collection("usuarios").get().await() }
+                    val prestamosDeferred = async { db.collection("prestamos").get().await() }
+                    val pagosDeferred = async {
+                        db.collection("pagos").whereEqualTo("registradoPor", uidCobrador).get().await()
                     }
-                    .sortedByDescending { parsearFechaPago(it.fecha)?.time ?: 0L }
+                    Triple(usuariosDeferred.await(), prestamosDeferred.await(), pagosDeferred.await())
+                }
+
+                // mapNotNull + sortedByDescending (con parseo de fecha por cada
+                // comparación) es trabajo de CPU: se hace en Dispatchers.Default
+                // para que la ruedita de carga no se vea trabada.
+                val listaCargada = withContext(Dispatchers.Default) {
+                    val usuariosMap = usuariosSnap.documents.associateBy({ it.id }, { it.getString("nombre") ?: it.id })
+                    val prestamosMap = prestamosSnap.documents.associateBy({ it.id }, { it.data ?: emptyMap() })
+
+                    pagosSnap.documents
+                        .mapNotNull { doc ->
+                            try { procesarDocumentoPagoCobrador(doc, usuariosMap, prestamosMap, formatter) }
+                            catch (e: Exception) { Log.e("CargarPagos", "Error ${doc.id}: ${e.message}"); null }
+                        }
+                        .sortedByDescending { parsearFechaPago(it.fecha)?.time ?: 0L }
+                }
 
                 pagos          = listaCargada
                 pagosFiltrados = aplicarFiltros(listaCargada, searchText, fechaInicio, fechaFin)

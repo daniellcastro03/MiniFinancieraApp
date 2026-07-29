@@ -28,13 +28,16 @@ import com.example.capitalexpressapp.core.formatearLempiras
 import com.example.capitalexpressapp.ui.theme.CEColors
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import java.text.NumberFormat
 import com.example.minifinancieraapp.ui.models.PagoItem
 import java.text.SimpleDateFormat
 import java.util.*
 
 data class PagoGlobal(
+    val id: String = "",
     val clienteNombre: String = "",
     val monto: Double = 0.0,
     val fechaPago: Date? = null,
@@ -94,26 +97,35 @@ fun HistorialGlobalScreen(navController: NavController) {
     LaunchedEffect(Unit) {
         try {
             val snapshot = db.collection("pagos").get().await()
-            val lista = snapshot.documents.mapNotNull { doc ->
-                val fecha = try {
-                    when (val rawFecha = doc.get("fechaPago")) {
-                        is Timestamp -> rawFecha.toDate()
-                        is String -> SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).parse(rawFecha)
-                        else -> null
-                    }
-                } catch (_: Exception) {
-                    null
-                }
 
-                PagoGlobal(
-                    clienteNombre = doc.getString("clienteNombre") ?: "Cliente Desconocido",
-                    monto = doc.getDouble("monto") ?: 0.0,
-                    fechaPago = fecha,
-                    cobradorAsignado = doc.getString("cobradorAsignado") ?: "Sin asignar",
-                    metodoPago = doc.getString("metodoPago") ?: "Efectivo",
-                    lugar = doc.getString("lugar") ?: ""
-                )
-            }.sortedByDescending { it.fechaPago }
+            // Mapear/ordenar potencialmente miles de documentos es trabajo de
+            // CPU: se hace en Dispatchers.Default para no congelar la UI.
+            val lista = withContext(Dispatchers.Default) {
+                // Formateador local (no el `formato` compartido con la UI) para
+                // no compartir un SimpleDateFormat mutable entre hilos.
+                val parser = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                snapshot.documents.mapNotNull { doc ->
+                    val fecha = try {
+                        when (val rawFecha = doc.get("fechaPago")) {
+                            is Timestamp -> rawFecha.toDate()
+                            is String -> parser.parse(rawFecha)
+                            else -> null
+                        }
+                    } catch (_: Exception) {
+                        null
+                    }
+
+                    PagoGlobal(
+                        id = doc.id,
+                        clienteNombre = doc.getString("clienteNombre") ?: "Cliente Desconocido",
+                        monto = doc.getDouble("monto") ?: 0.0,
+                        fechaPago = fecha,
+                        cobradorAsignado = doc.getString("cobradorAsignado") ?: "Sin asignar",
+                        metodoPago = doc.getString("metodoPago") ?: "Efectivo",
+                        lugar = doc.getString("lugar") ?: ""
+                    )
+                }.sortedByDescending { it.fechaPago }
+            }
 
             pagos = lista
             aplicarFiltro()
@@ -320,7 +332,7 @@ fun HistorialGlobalScreen(navController: NavController) {
                         }
                     }
                 } else {
-                    items(pagosFiltrados) { pago ->
+                    items(pagosFiltrados, key = { it.id.ifEmpty { it.hashCode() } }) { pago ->
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()

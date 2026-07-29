@@ -127,7 +127,7 @@ fun CobradorScreen(navController: NavController, uid: String) {
                 }
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(clientes) { cliente ->
+                    items(clientes, key = { it.nombre }) { cliente ->
                         Card(
                             modifier = Modifier.fillMaxWidth()
                         ) {

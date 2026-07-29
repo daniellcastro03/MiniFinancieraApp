@@ -174,9 +174,13 @@ fun ClientesVista(navController: NavController, uid: String, rol: String) {
     // ✅ FIX: "Todos" muestra absolutamente todos sin excluir ningún estado.
     // Búsqueda "inteligente": tolera errores de tipeo, nombre/apellido invertido
     // y segundo nombre salteado (ver BusquedaUtils.coincideAproximado).
-    val clientesFiltrados = clientes.filter {
-        (estadoSeleccionado == "Todos" || it.estado.equals(estadoSeleccionado, ignoreCase = true)) &&
-                (search.isBlank() || coincideAproximado(search, it.nombre))
+    // remember(keys) evita repetir la búsqueda difusa (costosa) en cada
+    // recomposición que no tenga que ver con la lista/búsqueda (p. ej. al scrollear).
+    val clientesFiltrados = remember(clientes, estadoSeleccionado, search) {
+        clientes.filter {
+            (estadoSeleccionado == "Todos" || it.estado.equals(estadoSeleccionado, ignoreCase = true)) &&
+                    (search.isBlank() || coincideAproximado(search, it.nombre))
+        }
     }
 
     // Calcular estadísticas globales de forma eficiente
@@ -848,7 +852,12 @@ fun ClienteCardMejorado(
 
                 if (cliente.fotoPersona.isNotBlank()) {
                     Image(
-                        painter = rememberAsyncImagePainter(cliente.fotoPersona),
+                        painter = rememberAsyncImagePainter(
+                            model = coil.request.ImageRequest.Builder(context)
+                                .data(cliente.fotoPersona)
+                                .size(200, 200)
+                                .build()
+                        ),
                         contentDescription = "Foto del cliente",
                         modifier = Modifier.size(64.dp)
                     )

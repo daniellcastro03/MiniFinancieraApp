@@ -228,10 +228,14 @@ fun UsuariosVista(navController: NavController, rol: String) {
                 }
             }
 
-            val listaFiltrada = usuarios.filter {
-                (filtroRol == "todos" || it.rol == filtroRol) &&
-                        (filtroEstado == "todos" || it.estado == filtroEstado) &&
-                        (busqueda.isBlank() || coincideAproximado(busqueda, it.nombre) || it.codigo.contains(busqueda, true))
+            // remember(keys) evita repetir la búsqueda difusa (costosa) en cada
+            // recomposición que no tenga que ver con la lista/filtros (p. ej. al scrollear).
+            val listaFiltrada = remember(usuarios, filtroRol, filtroEstado, busqueda) {
+                usuarios.filter {
+                    (filtroRol == "todos" || it.rol == filtroRol) &&
+                            (filtroEstado == "todos" || it.estado == filtroEstado) &&
+                            (busqueda.isBlank() || coincideAproximado(busqueda, it.nombre) || it.codigo.contains(busqueda, true))
+                }
             }
 
             // Lista de usuarios mejorada
@@ -382,8 +386,14 @@ fun ModernUserCard(
                     contentAlignment = Alignment.Center
                 ) {
                     if (usuario.fotoUrl.isNotBlank()) {
+                        val context = LocalContext.current
                         Image(
-                            painter = rememberAsyncImagePainter(usuario.fotoUrl),
+                            painter = rememberAsyncImagePainter(
+                                model = coil.request.ImageRequest.Builder(context)
+                                    .data(usuario.fotoUrl)
+                                    .size(200, 200)
+                                    .build()
+                            ),
                             contentDescription = null,
                             modifier = Modifier.fillMaxSize().clip(CircleShape)
                         )

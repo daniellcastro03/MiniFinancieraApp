@@ -85,7 +85,7 @@ fun ClientesAsignadosScreen(navController: NavController, cobradorNombre: String
         LazyColumn(modifier = Modifier
             .padding(padding)
             .padding(16.dp)) {
-            items(clientes) { cliente ->
+            items(clientes, key = { it.identidad.ifBlank { it.nombre } }) { cliente ->
                 Card(modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 8.dp)) {
@@ -113,7 +113,12 @@ fun ClientesAsignadosScreen(navController: NavController, cobradorNombre: String
 
                         if (cliente.foto.isNotBlank()) {
                             Image(
-                                painter = rememberAsyncImagePainter(cliente.foto),
+                                painter = rememberAsyncImagePainter(
+                                    model = coil.request.ImageRequest.Builder(context)
+                                        .data(cliente.foto)
+                                        .size(200, 200)
+                                        .build()
+                                ),
                                 contentDescription = null,
                                 modifier = Modifier.size(64.dp).background(Color.LightGray)
                             )

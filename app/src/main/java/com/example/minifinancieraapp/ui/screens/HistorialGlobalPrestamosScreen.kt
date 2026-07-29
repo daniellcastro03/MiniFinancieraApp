@@ -62,7 +62,7 @@ fun HistorialGlobalPrestamosScreen(navController: NavController) {
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(prestamos) { prestamo ->
+                    items(prestamos, key = { it.prestamoId.ifEmpty { it.fecha + it.cliente } }) { prestamo ->
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text("Cliente: ${prestamo.cliente}", fontSize = 16.sp)

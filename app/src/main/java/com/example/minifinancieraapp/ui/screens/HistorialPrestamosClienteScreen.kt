@@ -67,7 +67,7 @@ fun HistorialPrestamosClienteScreen(
                 .padding(padding)
                 .padding(16.dp)
         ) {
-            items(prestamos) { prestamo ->
+            items(prestamos, key = { it.id }) { prestamo ->
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()

@@ -11,6 +11,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
@@ -25,6 +26,7 @@ fun DetalleClienteScreen(navController: NavController, clienteId: String) {
     var cliente by remember { mutableStateOf<Map<String, Any>?>(null) }
     var loading by remember { mutableStateOf(true) }
     var fotoAmpliada by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
 
     LaunchedEffect(clienteId) {
         try {
@@ -126,7 +128,12 @@ fun DetalleClienteScreen(navController: NavController, clienteId: String) {
                             ) {
                                 Text(titulo, fontWeight = FontWeight.SemiBold)
                                 Image(
-                                    painter = rememberAsyncImagePainter(url),
+                                    painter = rememberAsyncImagePainter(
+                                        model = coil.request.ImageRequest.Builder(context)
+                                            .data(url)
+                                            .size(1080, 600)
+                                            .build()
+                                    ),
                                     contentDescription = titulo,
                                     modifier = Modifier
                                         .fillMaxWidth()

@@ -883,7 +883,7 @@ fun CuotasPrestamoScreen(
                 }
 
                 // ── LISTA CUOTAS ──────────────────────────────────────────
-                items(cuotas) { cuota ->
+                items(cuotas, key = { it.numero }) { cuota ->
                     CuotaCard(
                         cuota          = cuota,
                         dec            = dec,

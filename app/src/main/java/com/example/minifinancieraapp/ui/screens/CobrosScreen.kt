@@ -38,7 +38,7 @@ fun CobrosScreen(navController: NavController) {
         TopAppBar(title = { Text("Cobros") })
     }) { padding ->
         LazyColumn(modifier = Modifier.padding(padding).padding(16.dp)) {
-            items(clientesConPrestamo) { (cliente, prestamoId) ->
+            items(clientesConPrestamo, key = { it.second }) { (cliente, prestamoId) ->
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
