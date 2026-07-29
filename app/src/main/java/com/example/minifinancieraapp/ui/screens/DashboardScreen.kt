@@ -4,6 +4,7 @@ import android.app.DatePickerDialog
 import android.content.Context
 import android.widget.Toast
 import com.example.capitalexpressapp.core.formatearLempiras
+import com.example.capitalexpressapp.ui.theme.CEColors
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -121,7 +122,7 @@ fun DashboardScreen(navController: NavController) {
                     )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF1E3A8A)
+                    containerColor = CEColors.Primary
                 )
             )
         }
@@ -153,8 +154,8 @@ fun DashboardScreen(navController: NavController) {
                             .background(
                                 Brush.horizontalGradient(
                                     colors = listOf(
-                                        Color(0xFF3B82F6),
-                                        Color(0xFF1E3A8A)
+                                        CEColors.ActionBlue,
+                                        CEColors.Primary
                                     )
                                 )
                             )
@@ -462,7 +463,7 @@ fun DashboardScreen(navController: NavController) {
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF1E3A8A)
+                    containerColor = CEColors.Primary
                 )
             ) {
                 Icon(

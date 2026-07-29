@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.example.capitalexpressapp.core.formatearLempiras
+import com.example.capitalexpressapp.ui.theme.CEColors
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
@@ -135,7 +136,7 @@ fun HistorialGlobalScreen(navController: NavController) {
                     )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF0061A7),
+                    containerColor = CEColors.Primary,
                     titleContentColor = Color.White
                 )
             )
@@ -161,7 +162,7 @@ fun HistorialGlobalScreen(navController: NavController) {
                             verticalArrangement = Arrangement.Center
                         ) {
                             CircularProgressIndicator(
-                                color = Color(0xFF0061A7),
+                                color = CEColors.Primary,
                                 strokeWidth = 3.dp
                             )
                             Spacer(modifier = Modifier.height(16.dp))
@@ -180,8 +181,8 @@ fun HistorialGlobalScreen(navController: NavController) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF0061A7)),
-                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = CEColors.Primary),
+                        shape = RoundedCornerShape(24.dp),
                         elevation = CardDefaults.cardElevation(4.dp)
                     ) {
                         Column(
@@ -251,7 +252,7 @@ fun HistorialGlobalScreen(navController: NavController) {
                                 Icon(
                                     Icons.Default.CalendarToday,
                                     contentDescription = null,
-                                    tint = Color(0xFF0061A7),
+                                    tint = CEColors.Primary,
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -274,7 +275,7 @@ fun HistorialGlobalScreen(navController: NavController) {
                                         },
                                         label = { Text(opcion) },
                                         colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = Color(0xFF0061A7),
+                                            selectedContainerColor = CEColors.Primary,
                                             selectedLabelColor = Color.White
                                         )
                                     )
@@ -342,7 +343,7 @@ fun HistorialGlobalScreen(navController: NavController) {
                                                 Icon(
                                                     Icons.Default.Person,
                                                     contentDescription = null,
-                                                    tint = Color(0xFF0061A7),
+                                                    tint = CEColors.Primary,
                                                     modifier = Modifier.size(16.dp)
                                                 )
                                                 Spacer(modifier = Modifier.width(6.dp))
@@ -356,7 +357,7 @@ fun HistorialGlobalScreen(navController: NavController) {
 
                                         Card(
                                             colors = CardDefaults.cardColors(
-                                                containerColor = Color(0xFF0061A7).copy(alpha = 0.1f)
+                                                containerColor = CEColors.Primary.copy(alpha = 0.1f)
                                             ),
                                             shape = RoundedCornerShape(8.dp)
                                         ) {
@@ -367,14 +368,14 @@ fun HistorialGlobalScreen(navController: NavController) {
                                                 Icon(
                                                     Icons.Default.AttachMoney,
                                                     contentDescription = null,
-                                                    tint = Color(0xFF0061A7),
+                                                    tint = CEColors.Primary,
                                                     modifier = Modifier.size(18.dp)
                                                 )
                                                 Text(
                                                     formatearLempiras(pago.monto),
                                                     style = MaterialTheme.typography.titleMedium,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = Color(0xFF0061A7)
+                                                    color = CEColors.Primary
                                                 )
                                             }
                                         }
