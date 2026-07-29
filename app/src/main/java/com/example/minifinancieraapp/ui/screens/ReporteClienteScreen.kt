@@ -3,6 +3,7 @@ package com.example.capitalexpressapp.ui.screens
 import android.util.Log
 import android.widget.Toast
 import com.example.capitalexpressapp.core.formatearLempiras
+import com.example.capitalexpressapp.ui.theme.CEColors
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -431,7 +432,7 @@ fun ReporteClientesScreen(
             TopAppBar(
                 title = { Text("Reporte de Clientes", fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF0061A7),
+                    containerColor = CEColors.Primary,
                     titleContentColor = Color.White
                 ),
                 actions = {
@@ -492,7 +493,7 @@ fun ReporteClientesScreen(
                     .padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(color = Color(0xFF0061A7))
+                CircularProgressIndicator(color = CEColors.Primary)
             }
         } else {
             LazyColumn(
@@ -519,7 +520,7 @@ fun ReporteClientesScreen(
                             Text(
                                 "Filtros",
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0061A7)
+                                color = CEColors.Primary
                             )
 
                             Row(
@@ -569,7 +570,7 @@ fun ReporteClientesScreen(
                                 Icon(
                                     imageVector = Icons.Filled.Person,
                                     contentDescription = null,
-                                    tint = Color(0xFF0061A7)
+                                    tint = CEColors.Primary
                                 )
 
                                 var expanded by remember { mutableStateOf(false) }
@@ -634,7 +635,7 @@ fun ReporteClientesScreen(
 
                     Card(
                         colors = CardDefaults.cardColors(
-                            containerColor = Color(0xFF0061A7)
+                            containerColor = CEColors.Primary
                         ),
                         shape = RoundedCornerShape(16.dp)
                     ) {
@@ -738,7 +739,7 @@ private fun TablaClientesScrollable(
                 // HEADER
                 Row(
                     modifier = Modifier
-                        .background(Color(0xFF0061A7))
+                        .background(CEColors.Primary)
                         .padding(vertical = 8.dp, horizontal = 6.dp),
                     horizontalArrangement = Arrangement.Start
                 ) {
@@ -863,7 +864,7 @@ private fun StatChip(label: String, value: String) {
             ) {
                 Text(
                     value,
-                    color = Color(0xFF0061A7),
+                    color = CEColors.Primary,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                     fontWeight = FontWeight.Bold
                 )
