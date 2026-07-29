@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import com.example.capitalexpressapp.core.coincideAproximado
+import com.example.capitalexpressapp.ui.theme.CEColors
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -73,12 +74,11 @@ fun UsuariosVista(navController: NavController, rol: String) {
     val opcionesEstado = listOf("todos", "activo", "inactivo")
 
     // Colores personalizados
-    val primaryColor = Color(0xFF1976D2)
-    val secondaryColor = Color(0xFF42A5F5)
+    val primaryColor = CEColors.Primary
     val successColor = Color(0xFF4CAF50)
     val warningColor = Color(0xFFFF9800)
     val errorColor = Color(0xFFE53935)
-    val surfaceColor = Color(0xFFF8F9FA)
+    val surfaceColor = CEColors.Surface
 
     LaunchedEffect(Unit) {
         val usuariosSnapshot = db.collection("usuarios").get().await()
@@ -111,9 +111,7 @@ fun UsuariosVista(navController: NavController, rol: String) {
                     )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Brush.horizontalGradient(
-                        colors = listOf(primaryColor, secondaryColor)
-                    ).let { primaryColor }
+                    containerColor = primaryColor
                 )
             )
         },
@@ -375,12 +373,12 @@ fun ModernUserCard(
                         .background(
                             brush = Brush.radialGradient(
                                 colors = listOf(
-                                    Color(0xFF1976D2).copy(alpha = 0.1f),
-                                    Color(0xFF1976D2).copy(alpha = 0.3f)
+                                    CEColors.Primary.copy(alpha = 0.1f),
+                                    CEColors.Primary.copy(alpha = 0.3f)
                                 )
                             )
                         )
-                        .border(2.dp, Color(0xFF1976D2).copy(alpha = 0.3f), CircleShape),
+                        .border(2.dp, CEColors.Primary.copy(alpha = 0.3f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     if (usuario.fotoUrl.isNotBlank()) {
@@ -394,7 +392,7 @@ fun ModernUserCard(
                             Icons.Default.Person,
                             contentDescription = null,
                             modifier = Modifier.size(32.dp),
-                            tint = Color(0xFF1976D2)
+                            tint = CEColors.Primary
                         )
                     }
                 }
@@ -480,7 +478,7 @@ fun ModernUserCard(
             if (usuario.rol == "cobrador") {
                 Spacer(modifier = Modifier.height(12.dp))
                 Surface(
-                    color = Color(0xFF2196F3).copy(alpha = 0.1f),
+                    color = CEColors.ActionBlue.copy(alpha = 0.1f),
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Row(
@@ -491,13 +489,13 @@ fun ModernUserCard(
                             Icons.Default.Assignment,
                             contentDescription = null,
                             modifier = Modifier.size(16.dp),
-                            tint = Color(0xFF2196F3)
+                            tint = CEColors.ActionBlue
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Préstamos asignados: ${usuario.prestamosAsignados}",
                             fontSize = 13.sp,
-                            color = Color(0xFF2196F3),
+                            color = CEColors.ActionBlue,
                             fontWeight = FontWeight.Medium
                         )
                     }
@@ -515,8 +513,8 @@ fun ModernUserCard(
                 FilledTonalButton(
                     onClick = onEdit,
                     colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = Color(0xFFFF9800).copy(alpha = 0.1f),
-                        contentColor = Color(0xFFFF9800)
+                        containerColor = CEColors.ActionBlue.copy(alpha = 0.1f),
+                        contentColor = CEColors.ActionBlue
                     ),
                     modifier = Modifier.padding(end = 8.dp)
                 ) {
