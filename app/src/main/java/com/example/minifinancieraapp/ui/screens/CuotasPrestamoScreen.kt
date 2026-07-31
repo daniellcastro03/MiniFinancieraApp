@@ -57,6 +57,30 @@ data class CuotaInfo(
     val estaCompleta: Boolean get() = montoPagado >= total - 0.90
 }
 
+data class MoraIndividual(
+    val id: String,
+    val monto: Double,
+    val fechaMillis: Long,
+    val fechaTexto: String,
+    val aplicadaPor: String,
+    val sintetica: Boolean,
+    val montoPendiente: Double = monto,
+    val pagada: Boolean = false
+)
+
+private fun parseMoraIndividualUI(raw: Map<*, *>): MoraIndividual? {
+    val id = raw["id"] as? String ?: return null
+    val monto = (raw["monto"] as? Number)?.toDouble() ?: return null
+    val ts = raw["fechaAplicada"] as? Timestamp
+    val fechaMillis = ts?.toDate()?.time ?: 0L
+    val fechaTexto = ts?.let {
+        SimpleDateFormat("dd/MM/yyyy hh:mm a", Locale.getDefault()).format(it.toDate())
+    } ?: "N/D"
+    val aplicadaPor = raw["aplicadaPor"] as? String ?: "N/D"
+    val sintetica = raw["sintetica"] as? Boolean ?: false
+    return MoraIndividual(id, monto, fechaMillis, fechaTexto, aplicadaPor, sintetica)
+}
+
 // ===================== FUNCIONES CASCADA =====================
 
 private fun calcularFechaCuota(fechaInicio: Date, plazo: String, numeroCuota: Int): String {
@@ -251,6 +275,8 @@ fun CuotasPrestamoScreen(
     var numeroPrestamo            by remember { mutableStateOf("") }
     var numeroPrestamoDisplay     by remember { mutableStateOf("") }
     var mostrarDialogoCancelarMora by remember { mutableStateOf(false) }
+    var morasIndividualesUI       by remember { mutableStateOf(listOf<MoraIndividual>()) }
+    var moraIndividualAEliminar   by remember { mutableStateOf<MoraIndividual?>(null) }
 
     // ── RECARGA ──────────────────────────────────────────────────────────
     suspend fun recargarDatosCompletos() {
@@ -320,6 +346,39 @@ fun CuotasPrestamoScreen(
         val moraPendiente = (moraAplicada - totalMoraPagada).coerceAtLeast(0.0)
         saldoRestante = (totalPagarDoc - totalCuotasPagadas + moraPendiente).coerceAtLeast(0.0)
 
+        // ── Moras individuales (desglose para poder eliminar una por una) ──
+        val morasIndividualesRaw = (prestamoDoc.get("morasIndividuales") as? List<*>)
+            ?.mapNotNull { it as? Map<*, *> }
+            ?.mapNotNull { parseMoraIndividualUI(it) }
+            ?: emptyList()
+
+        val entradasMoraBase = if (morasIndividualesRaw.isNotEmpty()) {
+            morasIndividualesRaw.sortedBy { it.fechaMillis }
+        } else if (moraAplicada > 0.0) {
+            val fechaLegacy = prestamoDoc.getTimestamp("fechaUltimaMora")
+                ?: prestamoDoc.getTimestamp("fechaUltimaActualizacion")
+            listOf(
+                MoraIndividual(
+                    id          = "legacy",
+                    monto       = moraAplicada,
+                    fechaMillis = fechaLegacy?.toDate()?.time ?: 0L,
+                    fechaTexto  = fechaLegacy?.let {
+                        SimpleDateFormat("dd/MM/yyyy hh:mm a", Locale.getDefault()).format(it.toDate())
+                    } ?: "N/D",
+                    aplicadaPor = "N/D",
+                    sintetica   = true
+                )
+            )
+        } else emptyList()
+
+        var restanteMoraPagadaFifo = totalMoraPagada
+        morasIndividualesUI = entradasMoraBase.map { e ->
+            val aplicadoAEsta = minOf(e.monto, restanteMoraPagadaFifo).coerceAtLeast(0.0)
+            restanteMoraPagadaFifo = (restanteMoraPagadaFifo - aplicadoAEsta).coerceAtLeast(0.0)
+            val pendiente = (e.monto - aplicadoAEsta).coerceAtLeast(0.0)
+            e.copy(montoPendiente = pendiente, pagada = pendiente <= 0.01)
+        }
+
         // ── Cuota mora ───────────────────────────────────────────────────
         if (moraActiva) {
             val moraPagada = moraPendiente <= 0.01
@@ -340,6 +399,97 @@ fun CuotasPrestamoScreen(
         val cuotaMora      = cuotas.find { it.descripcion == "Mora" }
         estaSaldado = cuotasNormales.all { it.estaCompleta } &&
                 (moraAplicada == 0.0 || cuotaMora?.estaCompleta == true)
+    }
+
+    // ── ELIMINAR UNA MORA INDIVIDUAL (solo admin) ──────────────────────────
+    suspend fun eliminarMoraIndividual(entrada: MoraIndividual) {
+        withContext(Dispatchers.IO) {
+            val ref  = db.collection("prestamos").document(prestamoId)
+            val snap = ref.get().await()
+            val moraGuardada = snap.getDouble("mora") ?: 0.0
+
+            val pagosSnap = db.collection("pagos")
+                .whereEqualTo("prestamoId", prestamoId).get().await()
+            var totalCuotasPagadas  = 0.0
+            var totalMoraPagadaSnap = 0.0
+            for (pago in pagosSnap.documents) {
+                totalCuotasPagadas  += pago.getDouble("monto") ?: 0.0
+                totalMoraPagadaSnap += pago.getDouble("mora")  ?: 0.0
+            }
+
+            if (entrada.sintetica) {
+                // Mora "histórica" (préstamos viejos sin desglose individual):
+                // se cancela como bloque único, igual que "Cancelar mora".
+                val totalPagarBase = snap.getDouble("totalPagar") ?: 0.0
+                val nuevoSaldo  = (totalPagarBase - totalCuotasPagadas).coerceAtLeast(0.0)
+                val nuevoEstado = if (nuevoSaldo <= 0.01) "saldado" else "activo"
+                val updateData = mutableMapOf<String, Any>(
+                    "mora"                     to totalMoraPagadaSnap,
+                    "saldo"                    to nuevoSaldo,
+                    "morasAplicadas"           to emptyList<String>(),
+                    "morasIndividuales"        to emptyList<Map<String, Any>>(),
+                    "estado"                   to nuevoEstado,
+                    "fechaUltimaActualizacion" to Timestamp.now(),
+                    "fechaUltimaMora"          to com.google.firebase.firestore.FieldValue.delete()
+                )
+                if (nuevoEstado == "saldado") {
+                    updateData["fechaSaldado"]     = Timestamp.now()
+                    updateData["fechaCancelacion"] = Timestamp.now()
+                }
+                ref.update(updateData).await()
+            } else {
+                // Mora individual real: se recalcula (FIFO, con datos frescos)
+                // cuánto de ESTA entrada sigue pendiente y solo se descuenta eso.
+                data class RawEntry(val id: String, val monto: Double, val fechaMillis: Long, val raw: Map<*, *>)
+                fun parseRaw(m: Map<*, *>): RawEntry? {
+                    val id     = m["id"] as? String ?: return null
+                    val monto  = (m["monto"] as? Number)?.toDouble() ?: return null
+                    val ts     = m["fechaAplicada"] as? Timestamp
+                    return RawEntry(id, monto, ts?.toDate()?.time ?: 0L, m)
+                }
+
+                val entradasRaw = (snap.get("morasIndividuales") as? List<*>)
+                    ?.mapNotNull { it as? Map<*, *> }
+                    ?.mapNotNull { parseRaw(it) }
+                    ?.sortedBy { it.fechaMillis }
+                    ?: emptyList()
+
+                var restante = totalMoraPagadaSnap
+                var montoPendienteEntrada = 0.0
+                for (e in entradasRaw) {
+                    val aplicado = minOf(e.monto, restante).coerceAtLeast(0.0)
+                    restante = (restante - aplicado).coerceAtLeast(0.0)
+                    val pendiente = (e.monto - aplicado).coerceAtLeast(0.0)
+                    if (e.id == entrada.id) montoPendienteEntrada = pendiente
+                }
+
+                val nuevaMora  = (moraGuardada - montoPendienteEntrada).coerceAtLeast(0.0)
+                val saldoActual = snap.getDouble("saldo") ?: 0.0
+                val nuevoSaldo  = (saldoActual - montoPendienteEntrada).coerceAtLeast(0.0)
+                val nuevaListaRaw = entradasRaw.filter { it.id != entrada.id }.map { it.raw }
+                val nuevoEstado = when {
+                    nuevoSaldo <= 0.01 -> "saldado"
+                    nuevaMora  > 0.0   -> "mora"
+                    else               -> "activo"
+                }
+
+                val updateData = mutableMapOf<String, Any>(
+                    "mora"                     to nuevaMora,
+                    "saldo"                    to nuevoSaldo,
+                    "morasIndividuales"        to nuevaListaRaw,
+                    "estado"                   to nuevoEstado,
+                    "fechaUltimaActualizacion" to Timestamp.now()
+                )
+                if (nuevaMora <= 0.0)
+                    updateData["fechaUltimaMora"] = com.google.firebase.firestore.FieldValue.delete()
+                if (nuevoEstado == "saldado") {
+                    updateData["fechaSaldado"]     = Timestamp.now()
+                    updateData["fechaCancelacion"] = Timestamp.now()
+                }
+                ref.update(updateData).await()
+            }
+        }
+        recargarDatosCompletos()
     }
 
     // ── CARGA INICIAL ────────────────────────────────────────────────────
@@ -492,6 +642,79 @@ fun CuotasPrestamoScreen(
             dismissButton = {
                 OutlinedButton(
                     onClick = { mostrarDialogoCancelarMora = false },
+                    shape   = RoundedCornerShape(10.dp)
+                ) { Text("Volver", color = CTextSec) }
+            }
+        )
+    }
+
+    // ── DIÁLOGO ELIMINAR MORA INDIVIDUAL ────────────────────────────────
+    moraIndividualAEliminar?.let { entrada ->
+        AlertDialog(
+            onDismissRequest = { moraIndividualAEliminar = null },
+            containerColor   = Color.White,
+            shape            = RoundedCornerShape(20.dp),
+            title = {
+                Row(
+                    verticalAlignment     = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Default.Cancel, contentDescription = null,
+                        tint = CRed, modifier = Modifier.size(22.dp))
+                    Text("Eliminar mora", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = CRedSoft),
+                        shape  = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                "Se eliminará la mora de L.${dec.format(entrada.monto)} aplicada el ${entrada.fechaTexto}.",
+                                color = CRed, fontWeight = FontWeight.SemiBold, fontSize = 14.sp
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "Solo esta mora se anula; las demás moras y cuotas no se ven afectadas. Esta acción no se puede deshacer.",
+                                color = Color(0xFFB91C1C), fontSize = 12.sp
+                            )
+                        }
+                    }
+                    Text(
+                        "¿Confirmas la eliminación de esta mora?",
+                        fontSize = 14.sp, color = Color(0xFF374151),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val objetivo = entrada
+                        moraIndividualAEliminar = null
+                        scope.launch {
+                            try {
+                                eliminarMoraIndividual(objetivo)
+                                Toast.makeText(context, "✅ Mora eliminada", Toast.LENGTH_LONG).show()
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CRed),
+                    shape  = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Default.Cancel, contentDescription = null,
+                        modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Eliminar", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { moraIndividualAEliminar = null },
                     shape   = RoundedCornerShape(10.dp)
                 ) { Text("Volver", color = CTextSec) }
             }
@@ -773,6 +996,67 @@ fun CuotasPrestamoScreen(
                     }
                 }
 
+                // ── MORAS APLICADAS (individuales, admin puede eliminar) ───
+                if (morasIndividualesUI.isNotEmpty()) {
+                    item {
+                        Card(
+                            modifier  = Modifier.fillMaxWidth(),
+                            shape     = RoundedCornerShape(20.dp),
+                            colors    = CardDefaults.cardColors(containerColor = Color.White),
+                            elevation = CardDefaults.cardElevation(2.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    "Moras aplicadas",
+                                    fontSize = 16.sp, fontWeight = FontWeight.Bold, color = CRed
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                morasIndividualesUI.forEachIndexed { index, entrada ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(if (entrada.pagada) CGreenSoft else CRedSoft)
+                                            .padding(12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment     = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                "L.${dec.format(entrada.monto)}" +
+                                                    if (entrada.sintetica) " (histórica)" else "",
+                                                color = if (entrada.pagada) CGreen else CRed,
+                                                fontWeight = FontWeight.Bold, fontSize = 14.sp
+                                            )
+                                            Text(
+                                                entrada.fechaTexto,
+                                                color = CTextSec, fontSize = 11.sp
+                                            )
+                                            Text(
+                                                if (entrada.pagada) "Pagada"
+                                                else "Pendiente: L.${dec.format(entrada.montoPendiente)}",
+                                                color = if (entrada.pagada) CGreen else CAmber,
+                                                fontSize = 11.sp, fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                        if (!entrada.pagada && rol == "admin") {
+                                            IconButton(onClick = { moraIndividualAEliminar = entrada }) {
+                                                Icon(
+                                                    Icons.Default.Cancel,
+                                                    contentDescription = "Eliminar esta mora",
+                                                    tint = CRed
+                                                )
+                                            }
+                                        }
+                                    }
+                                    if (index != morasIndividualesUI.lastIndex)
+                                        Spacer(Modifier.height(8.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // ── PROGRESO ──────────────────────────────────────────────
                 item {
                     val cuotasNormales = cuotas.filter { it.descripcion != "Mora" }
@@ -959,7 +1243,7 @@ fun CuotasPrestamoScreen(
 
                                         val fechaActual = Timestamp.now()
                                         val fechaFormateada = SimpleDateFormat(
-                                            "dd/MM/yyyy HH:mm", Locale.getDefault())
+                                            "dd/MM/yyyy hh:mm a", Locale.getDefault())
                                             .format(fechaActual.toDate())
 
                                         val abonoManual = mapOf(
@@ -1005,7 +1289,9 @@ fun CuotasPrestamoScreen(
                                             tipoPago       = "Manual (Admin)",
                                             mora           = if (cuota.descripcion == "Mora")
                                                 cuota.total else 0.0,
-                                            saldoNuevoFijo = nuevoSaldo
+                                            saldoNuevoFijo = nuevoSaldo,
+                                            montoAplicadoCuota = if (cuota.descripcion == "Mora")
+                                                0.0 else cuota.total
                                         )
                                         if (pdfFile != null && pdfFile.exists())
                                             ReciboHelper.compartirReciboPDF(context, pdfFile)

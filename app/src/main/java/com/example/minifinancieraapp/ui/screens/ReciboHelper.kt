@@ -621,7 +621,9 @@ object ReciboHelper {
         cobrador: String,
         lugar: String,
         tipoPago: String,
-        mora: Double = 0.0
+        mora: Double = 0.0,
+        montoAplicadoCuota: Double? = null,
+        saldoNuevoFijo: Double? = null
     ) {
         try {
             val printerConnection = BluetoothPrintersConnections.selectFirstPaired()
@@ -653,13 +655,24 @@ object ReciboHelper {
 
             builder.append("[L]<b>TIPO DE PAGO:</b> $tipoPago\n")
             builder.append("[L]<b>COBRADOR:</b> $cobrador\n")
-            builder.append("[L]<b>SALDO ANTERIOR:</b> ${formatearLempiras(saldoAnterior)}\n")
+            builder.append(
+                "[L]<b>${if (mora > 0.0) "SALDO ANTES (CON MORA):" else "SALDO ANTERIOR:"}</b> " +
+                    "${formatearLempiras(saldoAnterior)}\n"
+            )
             if (mora > 0.0) {
                 builder.append("[L]<b>MORA APLICADA:</b> ${formatearLempiras(mora)}\n")
+                if (montoAplicadoCuota != null) {
+                    builder.append("[L]<b>APLICADO A CUOTA:</b> ${formatearLempiras(montoAplicadoCuota)}\n")
+                    builder.append("[L]<b>APLICADO A MORA:</b> ${formatearLempiras(mora)}\n")
+                    builder.append(
+                        "[L]Se tomaron ${formatearLempiras(montoAplicadoCuota)} para la cuota " +
+                            "y ${formatearLempiras(mora)} de mora.\n"
+                    )
+                }
             }
 
             val pagado = montoPagado.toDoubleOrNull() ?: 0.0
-            val saldoRestante = saldoAnterior + mora - pagado
+            val saldoRestante = saldoNuevoFijo ?: (saldoAnterior + mora - pagado)
 
             builder.append("[L]<b>TOTAL PAGADO:</b> ${formatearLempiras(pagado)}\n")
             builder.append("[L]<b>SALDO RESTANTE:</b> ${formatearLempiras(saldoRestante)}\n")
@@ -949,7 +962,7 @@ object ReciboHelper {
 
             // Fecha y hora
             val timestamp = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
-            val timeStamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            val timeStamp = SimpleDateFormat("hh:mm:ss a", Locale.getDefault()).format(Date())
             paintSmall.textAlign = Paint.Align.CENTER
             paintSmall.textSize = 7f
             canvas.drawText(timestamp, pageWidth / 2f, y, paintSmall)
@@ -2044,7 +2057,8 @@ object ReciboHelper {
         firma: String,
         tipoPago: String,
         mora: Double = 0.0,
-        saldoNuevoFijo: Double? = null
+        saldoNuevoFijo: Double? = null,
+        montoAplicadoCuota: Double? = null
     ): File? {
         return try {
             Log.d("ReciboPDF", "cliente='$cliente', cobrador='${cobrador ?: "null"}'")
@@ -2242,11 +2256,25 @@ object ReciboHelper {
             }
 
             drawCompactLine("Fecha", fecha)
-            drawCompactLine("Saldo", fmt(saldoPrevio))
+            drawCompactLine(if (mora > 0.0) "Saldo antes (con mora)" else "Saldo", fmt(saldoPrevio))
             drawCompactLine("Abono", fmt(pagoIngresado))
 
             if (mora > 0.0) {
-                drawCompactLine("Mora", fmt(mora))
+                drawCompactLine("Mora aplicada", fmt(mora))
+                if (montoAplicadoCuota != null) {
+                    drawCompactLine("Aplicado a cuota", fmt(montoAplicadoCuota))
+                    drawCompactLine("Aplicado a mora", fmt(mora))
+
+                    y += 4f
+                    paintLabel.textAlign = Paint.Align.LEFT
+                    val explicacion = "Se tomaron ${fmt(montoAplicadoCuota)} para la cuota y " +
+                        "${fmt(mora)} de mora."
+                    val explicacionLines = splitText(explicacion, contentWidth, paintLabel)
+                    explicacionLines.forEach { line ->
+                        canvas.drawText(line, margin, y, paintLabel)
+                        y += lineSpacing
+                    }
+                }
             }
 
             y += 8f
@@ -2257,7 +2285,7 @@ object ReciboHelper {
             paintLabel.textAlign = Paint.Align.LEFT
             paintLabel.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
             paintLabel.textSize = 9f
-            canvas.drawText("Saldo:", margin, y, paintLabel)
+            canvas.drawText(if (mora > 0.0) "Saldo (con mora):" else "Saldo:", margin, y, paintLabel)
             paintLabel.typeface = Typeface.MONOSPACE
             paintLabel.textSize = 8f
 
@@ -2297,7 +2325,7 @@ object ReciboHelper {
 
             // Fecha y hora
             val timestamp = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
-            val timeStamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            val timeStamp = SimpleDateFormat("hh:mm:ss a", Locale.getDefault()).format(Date())
             paintSmall.textAlign = Paint.Align.CENTER
             paintSmall.textSize = 7f
             canvas.drawText(timestamp, pageWidth / 2f, y, paintSmall)

@@ -35,7 +35,8 @@ data class PagoCuota(
     val mora: Double = 0.0,
     val lugar: String = "No especificado",
     val firma: String = "Capital Express",
-    val tipoPago: String = "Efectivo"
+    val tipoPago: String = "Efectivo",
+    val saldoRestante: Double? = null
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -48,7 +49,7 @@ fun HistorialCuotasPrestamoScreen(navController: NavController, prestamoId: Stri
     var pagos by remember { mutableStateOf(listOf<PagoCuota>()) }
     var cargando by remember { mutableStateOf(true) }
 
-    val fullDateFormatter = remember { SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()) }
+    val fullDateFormatter = remember { SimpleDateFormat("dd/MM/yyyy hh:mm a", Locale.getDefault()) }
 
     LaunchedEffect(prestamoId) {
         cargando = true
@@ -76,7 +77,8 @@ fun HistorialCuotasPrestamoScreen(navController: NavController, prestamoId: Stri
                     prestamoId = doc.getString("prestamoId") ?: "",
                     lugar = doc.getString("lugar") ?: "-",
                     firma = doc.getString("firma") ?: "-",
-                    tipoPago = doc.getString("tipoPago") ?: "Efectivo"
+                    tipoPago = doc.getString("tipoPago") ?: "Efectivo",
+                    saldoRestante = doc.getDouble("saldoRestante")
                 )
             }
         } catch (e: Exception) {
@@ -140,20 +142,24 @@ fun HistorialCuotasPrestamoScreen(navController: NavController, prestamoId: Stri
                             ) {
                                 Button(onClick = {
                                     scope.launch {
+                                        val saldoAntesConMora =
+                                            (pago.saldoRestante ?: 0.0) + pago.monto + pago.mora
                                         val archivoPDF = ReciboHelper.generarReciboPDF(
                                             context = context,
                                             cliente = pago.cliente,
                                             prestamoId = pago.prestamoId,
                                             fecha = pago.fechaPago,
-                                            montoPagado = pago.monto.toInt().toString(),
-                                            saldoAnterior = pago.monto,
+                                            montoPagado = (pago.monto + pago.mora).toInt().toString(),
+                                            saldoAnterior = saldoAntesConMora,
                                             proximoPago = pago.proximoPago ?: "-",
                                             cuota = pago.cuota,
                                             cobrador = pago.registradoPor,
                                             lugar = pago.lugar,
                                             firma = pago.firma,
                                             tipoPago = pago.tipoPago,
-                                            mora = pago.mora
+                                            mora = pago.mora,
+                                            saldoNuevoFijo = pago.saldoRestante,
+                                            montoAplicadoCuota = pago.monto
                                         )
                                         archivoPDF?.let {
                                             ReciboHelper.compartirReciboPDF(context, it)
@@ -165,19 +171,23 @@ fun HistorialCuotasPrestamoScreen(navController: NavController, prestamoId: Stri
 
                                 Button(onClick = {
                                     scope.launch {
+                                        val saldoAntesConMora =
+                                            (pago.saldoRestante ?: 0.0) + pago.monto + pago.mora
                                         ReciboHelper.imprimirRecibo(
                                             context = context,
                                             cliente = pago.cliente,
                                             prestamoId = pago.prestamoId,
                                             fecha = pago.fechaPago,
-                                            montoPagado = pago.monto.toInt().toString(),
-                                            saldoAnterior = pago.monto,
+                                            montoPagado = (pago.monto + pago.mora).toInt().toString(),
+                                            saldoAnterior = saldoAntesConMora,
                                             proximoPago = pago.proximoPago ?: "-",
                                             cuota = pago.cuota,
                                             cobrador = pago.registradoPor,
                                             lugar = pago.lugar,
                                             tipoPago = pago.tipoPago,
-                                            mora = pago.mora
+                                            mora = pago.mora,
+                                            montoAplicadoCuota = pago.monto,
+                                            saldoNuevoFijo = pago.saldoRestante
                                         )
                                     }
                                 }) {
@@ -190,7 +200,7 @@ fun HistorialCuotasPrestamoScreen(navController: NavController, prestamoId: Stri
 
                 item {
                     Spacer(modifier = Modifier.height(16.dp))
-                    val totalPagado = pagos.sumOf { it.monto }
+                    val totalPagado = pagos.sumOf { it.monto + it.mora }
                     Text("Total abonado: L. ${totalPagado.toInt()}", fontWeight = FontWeight.Bold)
                 }
             }

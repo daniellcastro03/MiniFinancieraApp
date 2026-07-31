@@ -972,7 +972,7 @@ fun RegistrarPagoScreen(
                             )
 
                             val fechaActual     = Timestamp.now()
-                            val fechaFormateada = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+                            val fechaFormateada = SimpleDateFormat("dd/MM/yyyy hh:mm a", Locale.getDefault())
                                 .format(fechaActual.toDate())
 
                             val nuevoMontoPagado  = totalRealmentePagado + abono
@@ -1055,7 +1055,8 @@ fun RegistrarPagoScreen(
                                 firma          = firmaPrestamista,
                                 tipoPago       = metodoPago,
                                 mora           = montoPagoMora,
-                                saldoNuevoFijo = nuevoSaldo
+                                saldoNuevoFijo = nuevoSaldo,
+                                montoAplicadoCuota = montoPagoNormal.coerceAtLeast(0.0)
                             )
 
                             val pdfGenerado = pdfFile != null && pdfFile.exists()

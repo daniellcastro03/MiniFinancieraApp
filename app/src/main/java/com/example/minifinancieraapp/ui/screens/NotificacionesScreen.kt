@@ -822,6 +822,15 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                         val saldoActual      = doc.getDouble("saldo") ?: 0.0
                         val morasAplicadas   = (doc.get("morasAplicadas") as? List<*>)
                             ?.mapNotNull { it as? String } ?: emptyList()
+                        val morasIndividuales = (doc.get("morasIndividuales") as? List<*>)
+                            ?.mapNotNull { it as? Map<*, *> } ?: emptyList()
+                        val nuevaMoraIndividual = mapOf(
+                            "id"             to UUID.randomUUID().toString(),
+                            "monto"          to montoMora,
+                            "fechaAplicada"  to Timestamp.now(),
+                            "aplicadaPor"    to uid,
+                            "sintetica"      to false
+                        )
 
                         // ✅ FIX: "totalPagar" es SIEMPRE la base fija del préstamo
                         // (monto + interés) y NUNCA debe incluir la mora. La mora
@@ -835,6 +844,7 @@ fun NotificacionesScreen(navController: NavHostController, uid: String, rol: Str
                             "saldo"                    to (saldoActual + montoMora),
                             "mora"                     to com.google.firebase.firestore.FieldValue.increment(montoMora),
                             "morasAplicadas"           to (morasAplicadas + "${clienteMora}_${System.currentTimeMillis()}"),
+                            "morasIndividuales"        to (morasIndividuales + nuevaMoraIndividual),
                             "estado"                   to "mora",
                             "fechaUltimaActualizacion" to Timestamp.now(),
                             "fechaUltimaMora"          to Timestamp.now()

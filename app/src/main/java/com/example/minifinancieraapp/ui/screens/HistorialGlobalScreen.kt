@@ -40,6 +40,7 @@ data class PagoGlobal(
     val id: String = "",
     val clienteNombre: String = "",
     val monto: Double = 0.0,
+    val mora: Double = 0.0,
     val fechaPago: Date? = null,
     val cobradorAsignado: String = "",
     val metodoPago: String = "",
@@ -56,7 +57,7 @@ fun HistorialGlobalScreen(navController: NavController) {
     var cargando by remember { mutableStateOf(true) }
 
     val formato = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
-    val formatoHora = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    val formatoHora = remember { SimpleDateFormat("hh:mm a", Locale.getDefault()) }
     val formatoMoneda = remember { NumberFormat.getCurrencyInstance(Locale("es", "HN")) }
 
     val opciones = listOf("Todos", "Hoy", "Semana", "Mes", "Año")
@@ -119,6 +120,7 @@ fun HistorialGlobalScreen(navController: NavController) {
                         id = doc.id,
                         clienteNombre = doc.getString("clienteNombre") ?: "Cliente Desconocido",
                         monto = doc.getDouble("monto") ?: 0.0,
+                        mora = doc.getDouble("mora") ?: 0.0,
                         fechaPago = fecha,
                         cobradorAsignado = doc.getString("cobradorAsignado") ?: "Sin asignar",
                         metodoPago = doc.getString("metodoPago") ?: "Efectivo",
@@ -228,7 +230,7 @@ fun HistorialGlobalScreen(navController: NavController) {
                                 }
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text(
-                                        formatearLempiras(pagosFiltrados.sumOf { it.monto }),
+                                        formatearLempiras(pagosFiltrados.sumOf { it.monto + it.mora }),
                                         style = MaterialTheme.typography.headlineSmall,
                                         color = Color.White,
                                         fontWeight = FontWeight.Bold
@@ -383,12 +385,21 @@ fun HistorialGlobalScreen(navController: NavController) {
                                                     tint = CEColors.Primary,
                                                     modifier = Modifier.size(18.dp)
                                                 )
-                                                Text(
-                                                    formatearLempiras(pago.monto),
-                                                    style = MaterialTheme.typography.titleMedium,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = CEColors.Primary
-                                                )
+                                                Column {
+                                                    Text(
+                                                        formatearLempiras(pago.monto + pago.mora),
+                                                        style = MaterialTheme.typography.titleMedium,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = CEColors.Primary
+                                                    )
+                                                    if (pago.mora > 0.0) {
+                                                        Text(
+                                                            "incl. ${formatearLempiras(pago.mora)} mora",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = Color(0xFFB91C1C)
+                                                        )
+                                                    }
+                                                }
                                             }
                                         }
                                     }

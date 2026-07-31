@@ -675,7 +675,7 @@ private suspend fun reimprimirRecibo(context: Context, pago: PagoItem) {
         }
 
         val fecha = pago.fecha
-        val montoPagado = pago.monto.toString()
+        val montoPagado = (pago.monto + pago.mora).toString()
         val saldoAnterior = (pago.saldoRestante ?: 0.0) + pago.monto + pago.mora
 
         // 🔥 FIX: Convertir proximoPago de forma segura
@@ -713,7 +713,8 @@ private suspend fun reimprimirRecibo(context: Context, pago: PagoItem) {
             firma = firma,
             tipoPago = tipoPago,
             mora = mora,
-            saldoNuevoFijo = saldoNuevoFijo
+            saldoNuevoFijo = saldoNuevoFijo,
+            montoAplicadoCuota = pago.monto
         )
 
         if (archivo != null && archivo.exists()) {
