@@ -33,6 +33,7 @@ import com.example.capitalexpressapp.core.formatearLempiras
 import com.example.capitalexpressapp.ui.screens.calcularDiasEfectivos
 import com.example.capitalexpressapp.util.PrestamoNumberHelper
 import com.example.capitalexpressapp.util.ReciboHelper
+import com.example.minifinancieraapp.ui.components.ImprimirOpcionesDialog
 import com.example.minifinancieraapp.ui.models.ClienteModel
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
@@ -70,7 +71,8 @@ object SolicitudColors {
 suspend fun aceptarSolicitudYGenerarRecibo(
     solicitud: Map<String, Any>,
     context: Context,
-    db: FirebaseFirestore
+    db: FirebaseFirestore,
+    onListoParaImprimir: ((accionImprimirDirecto: () -> Unit, accionSoloPdf: () -> Unit) -> Unit)? = null
 ): Boolean {
     return try {
         val formatter = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
@@ -311,20 +313,45 @@ suspend fun aceptarSolicitudYGenerarRecibo(
             )
 
             if (reciboFile != null && reciboFile.exists()) {
-                ReciboHelper.imprimirPDF(context, reciboFile)
-
-                val uri = FileProvider.getUriForFile(
-                    context,
-                    "${context.packageName}.fileprovider",
-                    reciboFile
-                )
-                val intent = Intent(Intent.ACTION_SEND).apply {
-                    type = "application/pdf"
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    putExtra(Intent.EXTRA_TEXT, "Recibo del préstamo generado desde Capital Express.")
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                val accionImprimirDirecto: () -> Unit = {
+                    ReciboHelper.imprimirReciboPrestamoDirecto(
+                        context = context,
+                        cliente = cliente.nombre,
+                        telefono = cliente.telefono,
+                        monto = monto,
+                        interesTotal = interesCalculado,
+                        mora = mora,
+                        cuotas = cuotas,
+                        fecha = fecha,
+                        lugar = lugar,
+                        numeroCobrador = numeroCobrador,
+                        numeroPrestamo = numeroPrestamoUnico,
+                        nombreCobrador = cobradorSolicitanteNombre,
+                        fechaProximoPago = proximoPagoString
+                    )
                 }
-                context.startActivity(Intent.createChooser(intent, "Compartir recibo con:"))
+                val accionSoloPdf: () -> Unit = {
+                    ReciboHelper.imprimirPDF(context, reciboFile)
+
+                    val uri = FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        reciboFile
+                    )
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "application/pdf"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        putExtra(Intent.EXTRA_TEXT, "Recibo del préstamo generado desde Capital Express.")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(Intent.createChooser(intent, "Compartir recibo con:"))
+                }
+
+                if (onListoParaImprimir != null) {
+                    onListoParaImprimir(accionImprimirDirecto, accionSoloPdf)
+                } else {
+                    accionSoloPdf()
+                }
             }
         } catch (reciboError: Exception) {
             Toast.makeText(
@@ -396,6 +423,11 @@ fun SolicitudesAdminScreen(navController: NavController) {
     var solicitudes by remember { mutableStateOf<List<SolicitudModel>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var procesandoId by remember { mutableStateOf<String?>(null) }
+
+    // Diálogo "Imprimir directo o solo PDF"
+    var mostrarDialogoImprimir by remember { mutableStateOf(false) }
+    var accionImprimirDirectoPendiente by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var accionSoloPdfPendiente by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     fun cargarSolicitudes() {
         scope.launch {
@@ -542,7 +574,12 @@ fun SolicitudesAdminScreen(navController: NavController) {
                                                 "usarInteresMensual" to solicitud.usarInteresMensual
                                             ),
                                             context = context,
-                                            db = db
+                                            db = db,
+                                            onListoParaImprimir = { accionImprimirDirecto, accionSoloPdf ->
+                                                accionImprimirDirectoPendiente = accionImprimirDirecto
+                                                accionSoloPdfPendiente = accionSoloPdf
+                                                mostrarDialogoImprimir = true
+                                            }
                                         )
 
                                         procesandoId = null
@@ -572,6 +609,20 @@ fun SolicitudesAdminScreen(navController: NavController) {
                     }
                 }
             }
+        }
+
+        if (mostrarDialogoImprimir) {
+            ImprimirOpcionesDialog(
+                onImprimirDirecto = {
+                    mostrarDialogoImprimir = false
+                    scope.launch { accionImprimirDirectoPendiente?.invoke() }
+                },
+                onSoloPdf = {
+                    mostrarDialogoImprimir = false
+                    accionSoloPdfPendiente?.invoke()
+                },
+                onDismiss = { mostrarDialogoImprimir = false }
+            )
         }
     }
 }

@@ -48,6 +48,7 @@ import androidx.core.content.FileProvider
 import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
 import com.example.capitalexpressapp.util.ReciboHelper
+import com.example.minifinancieraapp.ui.components.ImprimirOpcionesDialog
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
@@ -138,6 +139,12 @@ fun EditarPrestamoScreen(navController: NavController, prestamoId: String) {
     var isLoading       by remember { mutableStateOf(false) }
     var isLoadingDatos   by remember { mutableStateOf(true) }
     var reciboGenerado  by remember { mutableStateOf<File?>(null) }
+    var fechaGuardada   by remember { mutableStateOf("") }
+
+    // Diálogo "Imprimir directo o solo PDF"
+    var mostrarDialogoImprimir by remember { mutableStateOf(false) }
+    var accionImprimirDirecto by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var accionSoloPdf by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     var currentUid      by remember { mutableStateOf("") }
     var nombreCobrador  by remember { mutableStateOf("") }
@@ -815,16 +822,39 @@ fun EditarPrestamoScreen(navController: NavController, prestamoId: String) {
                                 )
                                 if (reciboFile != null && reciboFile.exists()) {
                                     reciboGenerado = reciboFile
-                                    ReciboHelper.imprimirPDF(context, reciboFile)
-                                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", reciboFile)
-                                    context.startActivity(Intent.createChooser(
-                                        Intent(Intent.ACTION_SEND).apply {
-                                            type = "application/pdf"
-                                            putExtra(Intent.EXTRA_STREAM, uri)
-                                            putExtra(Intent.EXTRA_TEXT, "Aquí está el recibo del préstamo actualizado desde Capital Express.")
-                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                        }, "Compartir recibo actualizado con:"
-                                    ))
+                                    fechaGuardada = fecha
+                                    accionImprimirDirecto = {
+                                        scope.launch {
+                                            ReciboHelper.imprimirReciboPrestamoDirecto(
+                                                context = context,
+                                                cliente = cliente,
+                                                telefono = "",
+                                                monto = montoDouble,
+                                                interesTotal = interesCalculado,
+                                                mora = moraDouble,
+                                                cuotas = cuotasInt,
+                                                fecha = fecha,
+                                                lugar = lugar,
+                                                numeroCobrador = numeroCobrador,
+                                                numeroPrestamo = prestamoId,
+                                                nombreCobrador = nombreCobrador,
+                                                fechaProximoPago = proximoPagoString
+                                            )
+                                        }
+                                    }
+                                    accionSoloPdf = {
+                                        ReciboHelper.imprimirPDF(context, reciboFile)
+                                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", reciboFile)
+                                        context.startActivity(Intent.createChooser(
+                                            Intent(Intent.ACTION_SEND).apply {
+                                                type = "application/pdf"
+                                                putExtra(Intent.EXTRA_STREAM, uri)
+                                                putExtra(Intent.EXTRA_TEXT, "Aquí está el recibo del préstamo actualizado desde Capital Express.")
+                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            }, "Compartir recibo actualizado con:"
+                                        ))
+                                    }
+                                    mostrarDialogoImprimir = true
                                     Toast.makeText(context, "Préstamo actualizado correctamente. Saldo real: L. ${"%.2f".format(saldoFinal)}", Toast.LENGTH_LONG).show()
                                 } else {
                                     Toast.makeText(context, "Préstamo actualizado. Saldo real: L. ${"%.2f".format(saldoFinal)}", Toast.LENGTH_LONG).show()
@@ -862,16 +892,38 @@ fun EditarPrestamoScreen(navController: NavController, prestamoId: String) {
                 OutlinedButton(
                     onClick = {
                         try {
-                            ReciboHelper.imprimirPDF(context, archivo)
-                            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", archivo)
-                            context.startActivity(Intent.createChooser(
-                                Intent(Intent.ACTION_SEND).apply {
-                                    type = "application/pdf"
-                                    putExtra(Intent.EXTRA_STREAM, uri)
-                                    putExtra(Intent.EXTRA_TEXT, "Aquí está el recibo del préstamo actualizado desde Capital Express.")
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }, "Compartir recibo con:"
-                            ))
+                            accionImprimirDirecto = {
+                                scope.launch {
+                                    ReciboHelper.imprimirReciboPrestamoDirecto(
+                                        context = context,
+                                        cliente = cliente,
+                                        telefono = "",
+                                        monto = montoDouble,
+                                        interesTotal = interesCalculado,
+                                        mora = moraDouble,
+                                        cuotas = cuotasInt,
+                                        fecha = fechaGuardada,
+                                        lugar = lugar,
+                                        numeroCobrador = numeroCobrador,
+                                        numeroPrestamo = prestamoId,
+                                        nombreCobrador = nombreCobrador,
+                                        fechaProximoPago = proximoPagoString
+                                    )
+                                }
+                            }
+                            accionSoloPdf = {
+                                ReciboHelper.imprimirPDF(context, archivo)
+                                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", archivo)
+                                context.startActivity(Intent.createChooser(
+                                    Intent(Intent.ACTION_SEND).apply {
+                                        type = "application/pdf"
+                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                        putExtra(Intent.EXTRA_TEXT, "Aquí está el recibo del préstamo actualizado desde Capital Express.")
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }, "Compartir recibo con:"
+                                ))
+                            }
+                            mostrarDialogoImprimir = true
                         } catch (e: Exception) {
                             Toast.makeText(context, "Error al reimprimir: ${e.message}", Toast.LENGTH_LONG).show()
                         }
@@ -888,6 +940,20 @@ fun EditarPrestamoScreen(navController: NavController, prestamoId: String) {
 
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    if (mostrarDialogoImprimir) {
+        ImprimirOpcionesDialog(
+            onImprimirDirecto = {
+                mostrarDialogoImprimir = false
+                accionImprimirDirecto?.invoke()
+            },
+            onSoloPdf = {
+                mostrarDialogoImprimir = false
+                accionSoloPdf?.invoke()
+            },
+            onDismiss = { mostrarDialogoImprimir = false }
+        )
     }
 }
 

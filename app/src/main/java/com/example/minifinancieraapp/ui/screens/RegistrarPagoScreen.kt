@@ -31,6 +31,7 @@ import com.example.capitalexpressapp.theme.PrimaryButton
 import com.example.capitalexpressapp.util.NetworkUtils.guardarAbonoPendiente
 import com.example.capitalexpressapp.util.NetworkUtils.isInternetAvailable
 import com.example.capitalexpressapp.util.ReciboHelper
+import com.example.minifinancieraapp.ui.components.ImprimirOpcionesDialog
 import com.example.minifinancieraapp.util.SessionManager
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
@@ -352,6 +353,11 @@ fun RegistrarPagoScreen(
     var expandedMetodoPago    by remember { mutableStateOf(false) }
     var nombreCobrador        by remember { mutableStateOf(cobrador) }
     var botonHabilitado       by remember { mutableStateOf(true) }
+
+    // Diálogo "Imprimir directo o solo PDF"
+    var mostrarDialogoImprimir by remember { mutableStateOf(false) }
+    var accionImprimirDirecto by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var accionSoloPdf by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     // Datos del préstamo
     var montoPrestamo         by remember { mutableStateOf(0.0) }
@@ -1062,8 +1068,31 @@ fun RegistrarPagoScreen(
                             val pdfGenerado = pdfFile != null && pdfFile.exists()
                             if (pdfGenerado) {
                                 archivoPDF = pdfFile
-                                try { ReciboHelper.imprimirPDF(context, pdfFile!!) } catch (_: Exception) {}
-                                ReciboHelper.compartirReciboPDF(context, pdfFile!!)
+                                accionImprimirDirecto = {
+                                    scope.launch {
+                                        ReciboHelper.imprimirRecibo(
+                                            context = context,
+                                            cliente = nombreCliente,
+                                            prestamoId = prestamoIdParaPDF,
+                                            fecha = fechaFormateada,
+                                            montoPagado = abono.toString(),
+                                            saldoAnterior = saldoAnteriorCorrecto,
+                                            proximoPago = proximoPagoValidado,
+                                            cuota = descripcionDetallada,
+                                            cobrador = nombreCobradorActivo,
+                                            lugar = lugar,
+                                            tipoPago = metodoPago,
+                                            mora = montoPagoMora,
+                                            saldoNuevoFijo = nuevoSaldo,
+                                            montoAplicadoCuota = montoPagoNormal.coerceAtLeast(0.0)
+                                        )
+                                    }
+                                }
+                                accionSoloPdf = {
+                                    try { ReciboHelper.imprimirPDF(context, pdfFile!!) } catch (_: Exception) {}
+                                    ReciboHelper.compartirReciboPDF(context, pdfFile!!)
+                                }
+                                mostrarDialogoImprimir = true
                             }
 
                             val abonoData = mapOf(
@@ -1170,10 +1199,14 @@ fun RegistrarPagoScreen(
                 ) {
                     OutlinedButton(
                         onClick = {
-                            archivoPDF?.let {
-                                try { ReciboHelper.imprimirPDF(context, it) }
-                                catch (_: Exception) {
-                                    Toast.makeText(context, "Error al reimprimir", Toast.LENGTH_SHORT).show()
+                            if (accionImprimirDirecto != null || accionSoloPdf != null) {
+                                mostrarDialogoImprimir = true
+                            } else {
+                                archivoPDF?.let {
+                                    try { ReciboHelper.imprimirPDF(context, it) }
+                                    catch (_: Exception) {
+                                        Toast.makeText(context, "Error al reimprimir", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }
                         },
@@ -1202,6 +1235,20 @@ fun RegistrarPagoScreen(
 
             Spacer(Modifier.height(8.dp))
         }
+    }
+
+    if (mostrarDialogoImprimir) {
+        ImprimirOpcionesDialog(
+            onImprimirDirecto = {
+                mostrarDialogoImprimir = false
+                accionImprimirDirecto?.invoke()
+            },
+            onSoloPdf = {
+                mostrarDialogoImprimir = false
+                accionSoloPdf?.invoke()
+            },
+            onDismiss = { mostrarDialogoImprimir = false }
+        )
     }
 }
 

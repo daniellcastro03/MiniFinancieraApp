@@ -695,6 +695,81 @@ object ReciboHelper {
         }
     }
 
+    /**
+     * Recibo de préstamo (desembolso) impreso directo por Bluetooth a la térmica,
+     * misma calibración (203dpi/48mm/32 cols) que [imprimirRecibo] para que no
+     * salga cortado ni con letra fuera de tamaño.
+     */
+    fun imprimirReciboPrestamoDirecto(
+        context: Context,
+        cliente: String,
+        telefono: String = "",
+        monto: Double,
+        interesTotal: Double,
+        mora: Double,
+        cuotas: Int,
+        fecha: String,
+        lugar: String,
+        numeroCobrador: String,
+        numeroPrestamo: String,
+        nombreCobrador: String = "Cobrador",
+        fechaProximoPago: String = ""
+    ) {
+        try {
+            val printerConnection = BluetoothPrintersConnections.selectFirstPaired()
+            if (printerConnection == null) {
+                Toast.makeText(context, "No hay impresora conectada", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            val printer = EscPosPrinter(printerConnection, 203, 48f, 32)
+            val builder = StringBuilder()
+
+            builder.append("[C]<font size='big'><b>CAPITAL EXPRESS</b></font>\n")
+            builder.append("[C]Inversiones Victoria\n")
+            builder.append("[C]Danlí, El Paraíso\n")
+            builder.append("[C]================================\n")
+
+            builder.append("[L]<b>FECHA:</b> $fecha\n")
+            builder.append("[L]<b>LUGAR:</b> $lugar\n")
+            builder.append("[L]--------------------------------\n")
+
+            builder.append("[L]<b>PRÉSTAMO Nº:</b> $numeroPrestamo\n")
+            builder.append("[L]<b>CLIENTE:</b> $cliente\n")
+            if (telefono.isNotBlank()) {
+                builder.append("[L]<b>TEL:</b> $telefono\n")
+            }
+            builder.append("[L]--------------------------------\n")
+
+            builder.append("[L]<b>COBRADOR:</b> $nombreCobrador\n")
+            builder.append("[L]<b>MONTO PRESTADO:</b> ${formatearLempiras(monto)}\n")
+            builder.append("[L]<b>INTERÉS:</b> ${formatearLempiras(interesTotal)}\n")
+            if (mora > 0.0) {
+                builder.append("[L]<b>MORA:</b> ${formatearLempiras(mora)}\n")
+            }
+            builder.append("[L]<b>TOTAL A PAGAR:</b> ${formatearLempiras(monto + interesTotal)}\n")
+            builder.append("[L]<b>CUOTAS:</b> $cuotas\n")
+            if (fechaProximoPago.isNotBlank()) {
+                builder.append("[L]<b>PRÓXIMO PAGO:</b> $fechaProximoPago\n")
+            }
+            builder.append("[L]--------------------------------\n")
+
+            builder.append("[L]\n")
+            builder.append("[L]Firma del cliente:\n")
+            builder.append("[L]______________________________\n")
+
+            builder.append("[C]================================\n")
+            builder.append("[C]Gracias por su confianza\n")
+            builder.append("[C]<b>Capital Express</b>\n")
+            builder.append("[C]<i>Tu aliado en finanzas</i>\n")
+
+            printer.printFormattedTextAndCut(builder.toString())
+
+        } catch (e: Exception) {
+            Toast.makeText(context, "Error al imprimir: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
 
     fun generarReciboPrestamoPDF(
         context: Context,

@@ -31,6 +31,7 @@ import com.example.capitalexpressapp.core.formatearLempiras
 import com.example.capitalexpressapp.ui.theme.CEColors
 import com.example.capitalexpressapp.util.ReciboHelper
 import com.example.capitalexpressapp.util.NetworkUtils.isInternetAvailable
+import com.example.minifinancieraapp.ui.components.ImprimirOpcionesDialog
 import com.example.minifinancieraapp.ui.models.PagoItem
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
@@ -655,6 +656,113 @@ private suspend fun eliminarPagoCorregido(
     }
 }
 
+/**
+ * Datos comunes de un [PagoItem] necesarios para reimprimir su recibo,
+ * reutilizados tanto por el flujo de PDF como por el de impresión directa ESC/POS.
+ */
+private data class DatosReciboPago(
+    val cliente: String,
+    val prestamoIdParaPDF: String,
+    val fecha: String,
+    val montoPagado: String,
+    val saldoAnterior: Double,
+    val proximoPago: String,
+    val cuota: String,
+    val cobrador: String,
+    val lugar: String,
+    val firma: String,
+    val tipoPago: String,
+    val mora: Double,
+    val saldoNuevoFijo: Double?,
+    val montoAplicadoCuota: Double
+)
+
+private suspend fun obtenerDatosReciboPago(pago: PagoItem): DatosReciboPago {
+    val db = FirebaseFirestore.getInstance()
+    val prestamoDoc = db.collection("prestamos").document(pago.prestamoId).get().await()
+
+    val cliente = prestamoDoc.getString("cliente") ?: ""
+
+    val numeroPrestamoStr = pago.numeroPrestamo.ifEmpty {
+        prestamoDoc.getString("numeroPrestamo")
+            ?: prestamoDoc.getLong("numeroPrestamo")?.toString()
+            ?: ""
+    }
+
+    val prestamoIdParaPDF = if (numeroPrestamoStr.isNotEmpty()) {
+        "Préstamo N° $numeroPrestamoStr"
+    } else {
+        "Préstamo"
+    }
+
+    val fecha = pago.fecha
+    val montoPagado = (pago.monto + pago.mora).toString()
+    val saldoAnterior = (pago.saldoRestante ?: 0.0) + pago.monto + pago.mora
+
+    // 🔥 FIX: Convertir proximoPago de forma segura
+    val proximoPagoRaw = prestamoDoc.get("proximoPago")
+    val proximoPago = when (proximoPagoRaw) {
+        null -> ""
+        is String -> proximoPagoRaw
+        is Number -> proximoPagoRaw.toString()
+        is com.google.firebase.Timestamp -> {
+            val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+            dateFormat.format(proximoPagoRaw.toDate())
+        }
+        else -> proximoPagoRaw.toString()
+    }
+
+    val cuota = pago.numeroCuota?.toString() ?: pago.cuota.ifEmpty { "1" }
+    val cobrador = pago.cobrador
+    val lugar = pago.lugar.ifEmpty { "Capital Express" }
+    val firma = pago.firma.ifEmpty { "" }
+    val tipoPago = pago.metodoPago.ifEmpty { pago.tipoPago }
+    val mora = pago.mora
+    val saldoNuevoFijo = pago.saldoRestante
+
+    return DatosReciboPago(
+        cliente = cliente,
+        prestamoIdParaPDF = prestamoIdParaPDF,
+        fecha = fecha,
+        montoPagado = montoPagado,
+        saldoAnterior = saldoAnterior,
+        proximoPago = proximoPago,
+        cuota = cuota,
+        cobrador = cobrador,
+        lugar = lugar,
+        firma = firma,
+        tipoPago = tipoPago,
+        mora = mora,
+        saldoNuevoFijo = saldoNuevoFijo,
+        montoAplicadoCuota = pago.monto
+    )
+}
+
+private suspend fun imprimirReciboPagoDirecto(context: Context, pago: PagoItem) {
+    try {
+        val d = obtenerDatosReciboPago(pago)
+        ReciboHelper.imprimirRecibo(
+            context = context,
+            cliente = d.cliente,
+            prestamoId = d.prestamoIdParaPDF,
+            fecha = d.fecha,
+            montoPagado = d.montoPagado,
+            saldoAnterior = d.saldoAnterior,
+            proximoPago = d.proximoPago,
+            cuota = d.cuota,
+            cobrador = d.cobrador,
+            lugar = d.lugar,
+            tipoPago = d.tipoPago,
+            mora = d.mora,
+            saldoNuevoFijo = d.saldoNuevoFijo,
+            montoAplicadoCuota = d.montoAplicadoCuota
+        )
+    } catch (e: Exception) {
+        Log.e("ImprimirReciboDirecto", "Error: ${e.message}", e)
+        Toast.makeText(context, "Error al imprimir: ${e.message}", Toast.LENGTH_LONG).show()
+    }
+}
+
 private suspend fun reimprimirRecibo(context: Context, pago: PagoItem) {
     try {
         val db = FirebaseFirestore.getInstance()
@@ -741,6 +849,11 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
 
     var pagos by remember { mutableStateOf(listOf<PagoItem>()) }
     var pagosFiltrados by remember { mutableStateOf(listOf<PagoItem>()) }
+
+    // Diálogo "Imprimir directo o solo PDF"
+    var mostrarDialogoImprimir by remember { mutableStateOf(false) }
+    var accionImprimirDirecto by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var accionSoloPdf by remember { mutableStateOf<(() -> Unit)?>(null) }
     var cuotasPendientesPorCliente by remember { mutableStateOf(listOf<Pair<String, List<CuotaPendiente>>>()) }
     var mostrandoPendientes by remember { mutableStateOf(false) }
     var cargandoPendientes by remember { mutableStateOf(false) }
@@ -1385,7 +1498,13 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                                 rol = rol,
                                 onEliminar = { pagoAEliminar = pago },
                                 onReimprimir = {
-                                    scope.launch { reimprimirRecibo(context, pago) }
+                                    accionImprimirDirecto = {
+                                        scope.launch { imprimirReciboPagoDirecto(context, pago) }
+                                    }
+                                    accionSoloPdf = {
+                                        scope.launch { reimprimirRecibo(context, pago) }
+                                    }
+                                    mostrarDialogoImprimir = true
                                 }
                             )
                         }
@@ -1515,6 +1634,20 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                     }
                 }
             }
+        }
+
+        if (mostrarDialogoImprimir) {
+            ImprimirOpcionesDialog(
+                onImprimirDirecto = {
+                    mostrarDialogoImprimir = false
+                    accionImprimirDirecto?.invoke()
+                },
+                onSoloPdf = {
+                    mostrarDialogoImprimir = false
+                    accionSoloPdf?.invoke()
+                },
+                onDismiss = { mostrarDialogoImprimir = false }
+            )
         }
     }
 }

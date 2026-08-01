@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.example.capitalexpressapp.util.ReciboHelper
 import com.example.capitalexpressapp.util.NetworkUtils.isInternetAvailable
+import com.example.minifinancieraapp.ui.components.ImprimirOpcionesDialog
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.gson.Gson
@@ -76,6 +77,11 @@ fun HistorialPagosPrestamoScreen(
     var prestamoInfo by remember { mutableStateOf<PrestamoInfo?>(null) }
     var cargando by remember { mutableStateOf(true) }
     var pagoAEliminar by remember { mutableStateOf<PagoDetalle?>(null) }
+
+    // Diálogo "Imprimir directo o solo PDF"
+    var mostrarDialogoImprimir by remember { mutableStateOf(false) }
+    var accionImprimirDirecto by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var accionSoloPdf by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     val formatter = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
 
@@ -421,19 +427,20 @@ fun HistorialPagosPrestamoScreen(
                                 ) {
                                     Button(
                                         onClick = {
-                                            scope.launch {
-                                                try {
-                                                    val saldoAnterior = pago.saldoRestante + pago.monto
-                                                    val proximoPago = if (pago.saldoRestante > 0) {
-                                                        formatearLempiras(pago.saldoRestante)
-                                                    } else {
-                                                        "Préstamo cancelado"
-                                                    }
+                                            val saldoAnterior = pago.saldoRestante + pago.monto
+                                            val proximoPago = if (pago.saldoRestante > 0) {
+                                                formatearLempiras(pago.saldoRestante)
+                                            } else {
+                                                "Préstamo cancelado"
+                                            }
+                                            val prestamoIdMostrar = if (pago.numeroPrestamo > 0) pago.numeroPrestamo.toString() else pago.prestamoId
 
-                                                    val file = ReciboHelper.generarReciboPDF(
+                                            accionImprimirDirecto = {
+                                                scope.launch {
+                                                    ReciboHelper.imprimirRecibo(
                                                         context = context,
                                                         cliente = pago.cliente,
-                                                        prestamoId = if (pago.numeroPrestamo > 0) pago.numeroPrestamo.toString() else pago.prestamoId,
+                                                        prestamoId = prestamoIdMostrar,
                                                         fecha = pago.fecha,
                                                         montoPagado = pago.monto.toString(),
                                                         saldoAnterior = saldoAnterior,
@@ -441,20 +448,41 @@ fun HistorialPagosPrestamoScreen(
                                                         cuota = pago.cuota,
                                                         cobrador = pago.cobrador,
                                                         lugar = pago.lugar,
-                                                        firma = pago.firma.ifBlank { pago.cobrador },
                                                         tipoPago = pago.metodoPago,
                                                         mora = pago.mora
                                                     )
-
-                                                    if (file != null) {
-                                                        ReciboHelper.imprimirPDF(context, file)
-                                                    } else {
-                                                        Toast.makeText(context, "Error al generar PDF", Toast.LENGTH_SHORT).show()
-                                                    }
-                                                } catch (e: Exception) {
-                                                    Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
                                                 }
                                             }
+                                            accionSoloPdf = {
+                                                scope.launch {
+                                                    try {
+                                                        val file = ReciboHelper.generarReciboPDF(
+                                                            context = context,
+                                                            cliente = pago.cliente,
+                                                            prestamoId = prestamoIdMostrar,
+                                                            fecha = pago.fecha,
+                                                            montoPagado = pago.monto.toString(),
+                                                            saldoAnterior = saldoAnterior,
+                                                            proximoPago = proximoPago,
+                                                            cuota = pago.cuota,
+                                                            cobrador = pago.cobrador,
+                                                            lugar = pago.lugar,
+                                                            firma = pago.firma.ifBlank { pago.cobrador },
+                                                            tipoPago = pago.metodoPago,
+                                                            mora = pago.mora
+                                                        )
+
+                                                        if (file != null) {
+                                                            ReciboHelper.imprimirPDF(context, file)
+                                                        } else {
+                                                            Toast.makeText(context, "Error al generar PDF", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    } catch (e: Exception) {
+                                                        Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                                                    }
+                                                }
+                                            }
+                                            mostrarDialogoImprimir = true
                                         },
                                         modifier = Modifier.weight(1f),
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2))
@@ -552,6 +580,20 @@ fun HistorialPagosPrestamoScreen(
                     Text("Cancelar")
                 }
             }
+        )
+    }
+
+    if (mostrarDialogoImprimir) {
+        ImprimirOpcionesDialog(
+            onImprimirDirecto = {
+                mostrarDialogoImprimir = false
+                accionImprimirDirecto?.invoke()
+            },
+            onSoloPdf = {
+                mostrarDialogoImprimir = false
+                accionSoloPdf?.invoke()
+            },
+            onDismiss = { mostrarDialogoImprimir = false }
         )
     }
 }

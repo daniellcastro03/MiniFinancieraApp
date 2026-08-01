@@ -14,6 +14,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.example.capitalexpressapp.util.ReciboHelper
+import com.example.minifinancieraapp.ui.components.ImprimirOpcionesDialog
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -87,6 +88,11 @@ fun EditarPagoScreen(
     var fecha by remember { mutableStateOf("") }
     var archivoPDF: File? by remember { mutableStateOf(null) }
     var isLoading by remember { mutableStateOf(false) }
+
+    // Diálogo "Imprimir directo o solo PDF"
+    var mostrarDialogoImprimir by remember { mutableStateOf(false) }
+    var accionImprimirDirecto by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var accionSoloPdf by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     // Variables para información del préstamo
     var plazoOriginal by remember { mutableStateOf("") }
@@ -397,24 +403,47 @@ fun EditarPagoScreen(
                                 val nuevoMonto = montoAbono.toDoubleOrNull() ?: 0.0
                                 val nuevaMora = mora.toDoubleOrNull() ?: 0.0
 
-                                archivoPDF = ReciboHelper.generarReciboPDF(
-                                    context = context,
-                                    cliente = clienteNombre,
-                                    prestamoId = prestamoId,
-                                    fecha = fecha,
-                                    montoPagado = nuevoMonto.toString(),
-                                    saldoAnterior = saldoActual,
-                                    proximoPago = "-",
-                                    cuota = cuota,
-                                    cobrador = firmaPrestamista,
-                                    lugar = lugar,
-                                    firma = firmaPrestamista,
-                                    tipoPago = tipoPago,
-                                    mora = nuevaMora
-                                )
-                                archivoPDF?.let {
-                                    ReciboHelper.imprimirPDF(context, it)
+                                accionImprimirDirecto = {
+                                    scope.launch {
+                                        ReciboHelper.imprimirRecibo(
+                                            context = context,
+                                            cliente = clienteNombre,
+                                            prestamoId = prestamoId,
+                                            fecha = fecha,
+                                            montoPagado = nuevoMonto.toString(),
+                                            saldoAnterior = saldoActual,
+                                            proximoPago = "-",
+                                            cuota = cuota,
+                                            cobrador = firmaPrestamista,
+                                            lugar = lugar,
+                                            tipoPago = tipoPago,
+                                            mora = nuevaMora
+                                        )
+                                    }
                                 }
+                                accionSoloPdf = {
+                                    scope.launch {
+                                        archivoPDF = ReciboHelper.generarReciboPDF(
+                                            context = context,
+                                            cliente = clienteNombre,
+                                            prestamoId = prestamoId,
+                                            fecha = fecha,
+                                            montoPagado = nuevoMonto.toString(),
+                                            saldoAnterior = saldoActual,
+                                            proximoPago = "-",
+                                            cuota = cuota,
+                                            cobrador = firmaPrestamista,
+                                            lugar = lugar,
+                                            firma = firmaPrestamista,
+                                            tipoPago = tipoPago,
+                                            mora = nuevaMora
+                                        )
+                                        archivoPDF?.let {
+                                            ReciboHelper.imprimirPDF(context, it)
+                                        }
+                                    }
+                                }
+                                mostrarDialogoImprimir = true
                             } catch (e: Exception) {
                                 Toast.makeText(context, "Error al imprimir: ${e.message}", Toast.LENGTH_LONG).show()
                             }
@@ -427,5 +456,19 @@ fun EditarPagoScreen(
                 }
             }
         }
+    }
+
+    if (mostrarDialogoImprimir) {
+        ImprimirOpcionesDialog(
+            onImprimirDirecto = {
+                mostrarDialogoImprimir = false
+                accionImprimirDirecto?.invoke()
+            },
+            onSoloPdf = {
+                mostrarDialogoImprimir = false
+                accionSoloPdf?.invoke()
+            },
+            onDismiss = { mostrarDialogoImprimir = false }
+        )
     }
 }
