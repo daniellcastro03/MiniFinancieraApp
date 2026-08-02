@@ -53,6 +53,8 @@ import kotlinx.coroutines.Dispatchers
 import java.util.Comparator
 import kotlin.comparisons.naturalOrder
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.NonCancellable
 import java.text.DecimalFormat
 import com.google.firebase.Timestamp
 import kotlin.math.max
@@ -69,6 +71,30 @@ data class CuotaAmortizacion(
 )
 
 object ReciboHelper {
+
+    /**
+     * Cierra la conexión Bluetooth de la impresora sin arriesgarse a colgar la
+     * app: corre en IO, con timeout corto, y en NonCancellable porque esto se
+     * llama desde bloques `finally` de corrutinas que pueden estar ya
+     * canceladas (p.ej. por el withTimeout de arriba) — sin NonCancellable,
+     * un `withContext` dentro de un `finally` ya cancelado lanza
+     * CancellationException de inmediato y nunca llega a desconectar.
+     */
+    private suspend fun desconectarImpresoraSinBloquear(printer: EscPosPrinter?) {
+        if (printer == null) return
+        withContext(NonCancellable) {
+            try {
+                withTimeout(3_000L) {
+                    withContext(Dispatchers.IO) {
+                        printer.disconnectPrinter()
+                    }
+                }
+            } catch (_: Exception) {
+                // Best-effort: si ni cerrar la conexión responde, no hay nada
+                // más que hacer del lado de la app.
+            }
+        }
+    }
 
     fun generarResumenDashboardPDF(
         context: Context,
@@ -615,7 +641,7 @@ object ReciboHelper {
         }
     }
 
-    fun imprimirRecibo(
+    suspend fun imprimirRecibo(
         context: Context,
         cliente: String,
         prestamoId: String,
@@ -640,8 +666,6 @@ object ReciboHelper {
                 return false
             }
 
-            val printerLocal = EscPosPrinter(printerConnection, 203, 80f, 48)
-            printer = printerLocal
             val builder = StringBuilder()
 
             builder.append("[C]================================\n")
@@ -656,7 +680,10 @@ object ReciboHelper {
             builder.append("[L]<b>LUGAR:</b> $lugar\n")
             builder.append("[L]--------------------------------\n")
 
-            val cuotaMostrar = if (cuotasTotales != null && cuotasTotales > 0) "$cuota de $cuotasTotales" else cuota
+            // Nunca inventar "de N" si no se conoce la cuota real (cuota en
+            // blanco) — mostrar un número de cuota incorrecto es peor que no
+            // mostrar ninguno.
+            val cuotaMostrar = if (cuota.isNotBlank() && cuotasTotales != null && cuotasTotales > 0) "$cuota de $cuotasTotales" else cuota
             builder.append("[L]<b>CLIENTE:</b> $cliente\n")
             builder.append("[L]<b>ID PRÉSTAMO:</b> $prestamoId\n")
             builder.append("[L]<b>CUOTA Nº:</b> $cuotaMostrar\n")
@@ -669,7 +696,7 @@ object ReciboHelper {
             builder.append("[L]<b>SALDO ANTERIOR:</b> ${formatearLempiras(saldoAntesDeMora)}\n")
             if (mora > 0.0) {
                 builder.append("[L]<b>MORA APLICADA:</b> ${formatearLempiras(mora)}\n")
-                builder.append("[L]<b>SALDO ANTERIOR (CON MORA):</b> ${formatearLempiras(saldoAnterior)}\n")
+                builder.append("[L]<b>SALDO CON MORA:</b> ${formatearLempiras(saldoAnterior)}\n")
                 if (montoAplicadoCuota != null) {
                     builder.append("[L]<b>APLICADO A CUOTA:</b> ${formatearLempiras(montoAplicadoCuota)}\n")
                     builder.append("[L]<b>APLICADO A MORA:</b> ${formatearLempiras(mora)}\n")
@@ -697,17 +724,25 @@ object ReciboHelper {
             builder.append("[C]<b>Capital Express</b>\n")
             builder.append("[C]<i>Tu aliado en finanzas</i>\n")
 
-            printerLocal.printFormattedTextAndCut(builder.toString())
+            // Conectar e imprimir es I/O bloqueante (Bluetooth clásico: connect()
+            // no tiene timeout propio y puede colgarse indefinidamente si la
+            // impresora quedó en mal estado). withTimeout + Dispatchers.IO
+            // garantiza que esto SIEMPRE termina (con éxito o con excepción) en
+            // vez de congelar la app/impresora esperando para siempre.
+            withContext(Dispatchers.IO) {
+                withTimeout(7_000L) {
+                    val printerLocal = EscPosPrinter(printerConnection, 203, 80f, 48)
+                    printer = printerLocal
+                    printerLocal.printFormattedTextAndCut(builder.toString())
+                }
+            }
             true
 
         } catch (e: Exception) {
             Toast.makeText(context, "Error al imprimir: ${e.message}", Toast.LENGTH_LONG).show()
             false
         } finally {
-            // Sin esto el socket Bluetooth queda abierto: la impresora (solo acepta
-            // una conexión a la vez) deja de responder a cualquier app hasta
-            // apagarla y encenderla de nuevo.
-            printer?.disconnectPrinter()
+            desconectarImpresoraSinBloquear(printer)
         }
     }
 
@@ -716,7 +751,7 @@ object ReciboHelper {
      * misma calibración (203dpi/48mm/32 cols) que [imprimirRecibo] para que no
      * salga cortado ni con letra fuera de tamaño.
      */
-    fun imprimirReciboPrestamoDirecto(
+    suspend fun imprimirReciboPrestamoDirecto(
         context: Context,
         cliente: String,
         telefono: String = "",
@@ -739,8 +774,6 @@ object ReciboHelper {
                 return false
             }
 
-            val printerLocal = EscPosPrinter(printerConnection, 203, 80f, 48)
-            printer = printerLocal
             val builder = StringBuilder()
 
             builder.append("[C]================================\n")
@@ -783,17 +816,20 @@ object ReciboHelper {
             builder.append("[C]<b>Capital Express</b>\n")
             builder.append("[C]<i>Tu aliado en finanzas</i>\n")
 
-            printerLocal.printFormattedTextAndCut(builder.toString())
+            withContext(Dispatchers.IO) {
+                withTimeout(7_000L) {
+                    val printerLocal = EscPosPrinter(printerConnection, 203, 80f, 48)
+                    printer = printerLocal
+                    printerLocal.printFormattedTextAndCut(builder.toString())
+                }
+            }
             true
 
         } catch (e: Exception) {
             Toast.makeText(context, "Error al imprimir: ${e.message}", Toast.LENGTH_LONG).show()
             false
         } finally {
-            // Sin esto el socket Bluetooth queda abierto: la impresora (solo acepta
-            // una conexión a la vez) deja de responder a cualquier app hasta
-            // apagarla y encenderla de nuevo.
-            printer?.disconnectPrinter()
+            desconectarImpresoraSinBloquear(printer)
         }
     }
 
@@ -906,17 +942,7 @@ object ReciboHelper {
             val lineSpacing = 12f
             var y = 20f
 
-            // Logo ajustado
-            runCatching {
-                BitmapFactory.decodeResource(context.resources, R.drawable.logo_capital)?.let {
-                    val logoSize = 45
-                    val scaled = Bitmap.createScaledBitmap(it, logoSize, logoSize, true)
-                    canvas.drawBitmap(scaled, (pageWidth - logoSize) / 2f, y, null)
-                    y += logoSize + 10f
-                }
-            }.onFailure {
-                y += 10f
-            }
+            y += 10f
 
             // Encabezado
             canvas.drawText("CAPITAL", pageWidth / 2f, y, paintHeader)
@@ -2266,27 +2292,7 @@ object ReciboHelper {
             val lineSpacing = 12f
             var y = 20f
 
-            // Logo — más grande y con un anillo marcado alrededor para que no se
-            // pierda al imprimirlo (antes era muy chico y quedaba borroso/plano).
-            runCatching {
-                BitmapFactory.decodeResource(context.resources, R.drawable.logo_capital)?.let {
-                    val logoSize = 85
-                    val scaled = Bitmap.createScaledBitmap(it, logoSize, logoSize, true)
-                    val cx = pageWidth / 2f
-                    val cy = y + logoSize / 2f
-                    val radio = logoSize / 2f + 4f
-                    canvas.drawCircle(cx, cy, radio, Paint().apply {
-                        color = Color.BLACK
-                        style = Paint.Style.STROKE
-                        strokeWidth = 2.5f
-                        isAntiAlias = true
-                    })
-                    canvas.drawBitmap(scaled, (pageWidth - logoSize) / 2f, y, null)
-                    y += logoSize + 14f
-                }
-            }.onFailure {
-                y += 10f
-            }
+            y += 10f
 
             // Encabezado
             canvas.drawText("CAPITAL", pageWidth / 2f, y, paintHeader)
@@ -2335,7 +2341,10 @@ object ReciboHelper {
             y += 20f
 
             // Cuotas completadas (centrado, sin truncar)
-            val cuotaMostrar = if (cuotasTotales != null && cuotasTotales > 0) "$cuota de $cuotasTotales" else cuota
+            // Nunca inventar "de N" si no se conoce la cuota real (cuota en
+            // blanco) — mostrar un número de cuota incorrecto es peor que no
+            // mostrar ninguno.
+            val cuotaMostrar = if (cuota.isNotBlank() && cuotasTotales != null && cuotasTotales > 0) "$cuota de $cuotasTotales" else cuota
             val cuotasPagadas = cuota.split(" de ").firstOrNull() ?: cuota
             paintSmall.textAlign = Paint.Align.CENTER
             val cuotasLines = splitText("$cuotasPagadas completas", contentWidth, paintSmall)
@@ -2375,7 +2384,7 @@ object ReciboHelper {
 
             if (mora > 0.0) {
                 drawCompactLine("Mora aplicada", fmt(mora))
-                drawCompactLine("Saldo anterior (con mora)", fmt(saldoPrevio))
+                drawCompactLine("Saldo con mora", fmt(saldoPrevio))
             }
 
             drawCompactLine("Abono", fmt(pagoIngresado))

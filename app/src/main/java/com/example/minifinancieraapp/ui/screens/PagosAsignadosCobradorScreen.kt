@@ -564,11 +564,15 @@ private fun procesarDocumentoPagoCobrador(
             else                            -> metodoPago
         }
 
-        val cuota = when {
+        // Los pagos del sistema de cascada (RegistrarPagoScreen) guardan la
+        // descripción real de cuota en "descripcionCuotas" (ej. "Cuota #16"),
+        // no en "numeroCuota"/"cuota" — sin esto el recibo mostraba "1" para
+        // CUALQUIER pago de ese sistema sin importar la cuota real.
+        val cuota = doc.getString("descripcionCuotas") ?: when {
             doc.contains("numeroCuota")  -> doc.get("numeroCuota").toString()
             doc.contains("cuota")        -> doc.get("cuota").toString()
             doc.contains("cuotaActual")  -> doc.get("cuotaActual").toString()
-            else                         -> "1"
+            else                         -> ""
         }
 
         val lugar = doc.getString("lugar") ?: ""

@@ -418,6 +418,13 @@ private fun procesarDocumentoPagoMejorado(
             }
         }
 
+        // Los pagos registrados por el sistema de cascada (RegistrarPagoScreen)
+        // NO guardan "numeroCuota"/"cuota" a nivel raíz — la descripción real
+        // ("Cuota #16" o "Cuotas #16 a #17") queda en "descripcionCuotas". Sin
+        // esto, el recibo mostraba "1" (el default viejo) para CUALQUIER pago
+        // de ese sistema, sin importar la cuota real — bug serio, ya corregido.
+        val descripcionCuotasDoc = doc.getString("descripcionCuotas")
+
         val metodoPago = doc.getString("metodoPago") ?: doc.getString("tipoPago") ?: "Efectivo"
 
         val numeroPrestamo = when (val v = doc.get("numeroPrestamo") ?: prestamo["numeroPrestamo"]) {
@@ -444,7 +451,7 @@ private fun procesarDocumentoPagoMejorado(
             fecha          = "$fechaStr $horaStr",
             prestamoId     = prestamoId,
             numeroCuota    = numeroCuotaVal,
-            cuota          = numeroCuotaVal?.toString() ?: "",
+            cuota          = descripcionCuotasDoc ?: numeroCuotaVal?.toString() ?: "",
             metodoPago     = metodoPago,
             tipoPago       = metodoPago,
             notas          = doc.getString("notas"),
@@ -724,7 +731,9 @@ private suspend fun obtenerDatosReciboPago(pago: PagoItem): DatosReciboPago {
         else -> proximoPagoRaw.toString()
     }
 
-    val cuota = pago.numeroCuota?.toString() ?: pago.cuota.ifEmpty { "1" }
+    // OJO: nunca poner un default fijo tipo "1" acá — mostraba una cuota
+    // falsa en el recibo cuando no se conocía la real (bug ya reportado).
+    val cuota = pago.cuota.ifBlank { pago.numeroCuota?.toString() ?: "" }
     val cobrador = pago.cobrador
     val lugar = pago.lugar.ifEmpty { "Capital Express" }
     val firma = pago.firma.ifEmpty { "" }
