@@ -702,6 +702,35 @@ data class DatosReciboPago(
     val cuotasTotales: Int
 )
 
+/**
+ * Reformatea la fecha/hora del pago a 12h ("dd/MM/yyyy hh:mm a") sin importar
+ * en qué formato haya quedado guardada — Admin (HistorialPagosScreen) ya
+ * guardaba en 12h, pero Cobrador (PagosAsignadosCobradorScreen) guardaba en
+ * 24h con segundos, así que el recibo salía distinto según desde dónde se
+ * imprimiera. Si no logra parsear ningún formato conocido, deja el texto
+ * original tal cual (mejor mostrar algo que nada).
+ */
+private val FORMATOS_FECHA_PAGO_CONOCIDOS = listOf(
+    "dd/MM/yyyy hh:mm a",
+    "dd/MM/yyyy HH:mm:ss",
+    "dd/MM/yyyy HH:mm",
+    "dd/MM/yyyy"
+)
+
+private fun formatearFechaPago12h(fechaStr: String): String {
+    val salida = SimpleDateFormat("dd/MM/yyyy hh:mm a", Locale.getDefault())
+    for (patron in FORMATOS_FECHA_PAGO_CONOCIDOS) {
+        try {
+            val formatter = SimpleDateFormat(patron, Locale.getDefault()).apply { isLenient = false }
+            val fecha = formatter.parse(fechaStr.trim()) ?: continue
+            return salida.format(fecha)
+        } catch (_: Exception) {
+            // probar el siguiente formato
+        }
+    }
+    return fechaStr
+}
+
 suspend fun obtenerDatosReciboPago(pago: PagoItem): DatosReciboPago {
     val db = FirebaseFirestore.getInstance()
     val prestamoDoc = db.collection("prestamos").document(pago.prestamoId).get().await()
@@ -720,7 +749,7 @@ suspend fun obtenerDatosReciboPago(pago: PagoItem): DatosReciboPago {
         "Préstamo"
     }
 
-    val fecha = pago.fecha
+    val fecha = formatearFechaPago12h(pago.fecha)
     val montoPagado = (pago.monto + pago.mora).toString()
     val saldoAnterior = (pago.saldoRestante ?: 0.0) + pago.monto + pago.mora
 

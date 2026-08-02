@@ -2341,8 +2341,8 @@ object ReciboHelper {
             canvas.drawText("Doc ${fecha.replace("/", "")}", pageWidth / 2f, y, paintSmall)
             y += 14f
 
-            // Cliente
-            val clienteLines = splitText("Sr(a) $cliente", contentWidth, paintSmall)
+            // Cliente — siempre en mayúscula en el recibo, venga como venga
+            val clienteLines = splitText("Sr(a) ${cliente.uppercase()}", contentWidth, paintSmall)
             paintSmall.textAlign = Paint.Align.CENTER
             clienteLines.forEach { line ->
                 canvas.drawText(line, pageWidth / 2f, y, paintSmall)
@@ -2350,8 +2350,8 @@ object ReciboHelper {
             }
             y += 8f
 
-            // Monto del abono
-            canvas.drawText("Abono", pageWidth / 2f, y, paintSmall)
+            // Total pagado (cuota + mora, lo que efectivamente dio el cliente)
+            canvas.drawText("TOTAL PAGADO", pageWidth / 2f, y, paintSmall)
             y += 14f
             canvas.drawText(fmt(pagoIngresado), pageWidth / 2f, y, paintAmount)
             y += 20f
@@ -2403,13 +2403,15 @@ object ReciboHelper {
                 drawCompactLine("Saldo con mora", fmt(saldoPrevio))
             }
 
-            drawCompactLine("Abono", fmt(pagoIngresado))
+            drawCompactLine("Total pagado", fmt(pagoIngresado))
 
-            if (mora > 0.0) {
-                if (montoAplicadoCuota != null) {
-                    drawCompactLine("Aplicado a cuota", fmt(montoAplicadoCuota))
-                    drawCompactLine("Aplicado a mora", fmt(mora))
+            // Desglose de a dónde fue el pago — siempre visible (aunque no
+            // haya mora, para que sea consistente), no solo cuando mora > 0.
+            if (montoAplicadoCuota != null) {
+                drawCompactLine("Aplicado a cuota", fmt(montoAplicadoCuota))
+                drawCompactLine("Aplicado a mora", fmt(mora))
 
+                if (mora > 0.0) {
                     y += 4f
                     paintLabel.textAlign = Paint.Align.LEFT
                     val explicacion = "Se tomaron ${fmt(montoAplicadoCuota)} para la cuota y " +
