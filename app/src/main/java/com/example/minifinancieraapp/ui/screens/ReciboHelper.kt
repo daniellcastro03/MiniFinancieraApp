@@ -561,7 +561,7 @@ object ReciboHelper {
                 return
             }
 
-            val printer = EscPosPrinter(printerConnection, 203, 48f, 32)
+            val printer = EscPosPrinter(printerConnection, 203, 80f, 48)
             val builder = StringBuilder()
 
             builder.append("[C]===============================\n")
@@ -632,7 +632,7 @@ object ReciboHelper {
                 return
             }
 
-            val printer = EscPosPrinter(printerConnection, 203, 48f, 32)
+            val printer = EscPosPrinter(printerConnection, 203, 80f, 48)
             val builder = StringBuilder()
 
             // Logo más grande (80mm impresora térmica)
@@ -722,7 +722,7 @@ object ReciboHelper {
                 return
             }
 
-            val printer = EscPosPrinter(printerConnection, 203, 48f, 32)
+            val printer = EscPosPrinter(printerConnection, 203, 80f, 48)
             val builder = StringBuilder()
 
             builder.append("[C]<font size='big'><b>CAPITAL EXPRESS</b></font>\n")
