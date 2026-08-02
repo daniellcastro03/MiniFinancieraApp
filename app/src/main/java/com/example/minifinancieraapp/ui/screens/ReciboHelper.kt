@@ -2331,8 +2331,13 @@ object ReciboHelper {
             }
             y += 4f
 
-            // Información del préstamo
-            val prestamoLines = splitText("Prestamo N° $prestamoId", contentWidth, paintSmall)
+            // Información del préstamo — algunos llamadores ya mandan
+            // "Préstamo N° X" armado, otros solo el ID crudo: no anteponer
+            // "Prestamo N°" de nuevo si ya viene incluido (salía duplicado).
+            val prestamoTexto = if (prestamoId.trim().startsWith("Préstamo", ignoreCase = true) ||
+                prestamoId.trim().startsWith("Prestamo", ignoreCase = true)
+            ) prestamoId else "Prestamo N° $prestamoId"
+            val prestamoLines = splitText(prestamoTexto, contentWidth, paintSmall)
             prestamoLines.forEach { line ->
                 canvas.drawText(line, pageWidth / 2f, y, paintSmall)
                 y += 11f
@@ -2350,8 +2355,8 @@ object ReciboHelper {
             }
             y += 8f
 
-            // Total pagado (cuota + mora, lo que efectivamente dio el cliente)
-            canvas.drawText("TOTAL PAGADO", pageWidth / 2f, y, paintSmall)
+            // Abono (cuota + mora, lo que efectivamente dio el cliente)
+            canvas.drawText("Abono", pageWidth / 2f, y, paintSmall)
             y += 14f
             canvas.drawText(fmt(pagoIngresado), pageWidth / 2f, y, paintAmount)
             y += 20f
@@ -2403,7 +2408,7 @@ object ReciboHelper {
                 drawCompactLine("Saldo con mora", fmt(saldoPrevio))
             }
 
-            drawCompactLine("Total pagado", fmt(pagoIngresado))
+            drawCompactLine("Abono", fmt(pagoIngresado))
 
             // Desglose de a dónde fue el pago — siempre visible (aunque no
             // haya mora, para que sea consistente), no solo cuando mora > 0.
@@ -2445,23 +2450,23 @@ object ReciboHelper {
             // Próximo pago
             if (proximoPago.isNotBlank() && !proximoPago.equals("saldado", ignoreCase = true)) {
                 paintSmall.textAlign = Paint.Align.CENTER
-                canvas.drawText("Proximo:", pageWidth / 2f, y, paintSmall)
+                canvas.drawText("Próxima fecha de pago:", pageWidth / 2f, y, paintSmall)
                 y += 11f
                 canvas.drawText(proximoPago, pageWidth / 2f, y, paintSmall)
                 y += 14f
             }
 
-            // Contacto
+            // Cobrado por (quién recibió el pago)
             paintSmall.textAlign = Paint.Align.CENTER
             paintSmall.textSize = 7f
-            val contactoLines = splitText("Consultas llamar:", contentWidth, paintSmall)
+            val contactoLines = splitText("Cobrado por:", contentWidth, paintSmall)
             contactoLines.forEach { line ->
                 canvas.drawText(line, pageWidth / 2f, y, paintSmall)
                 y += 10f
             }
 
             cobrador?.let {
-                canvas.drawText("($it)", pageWidth / 2f, y, paintSmall)
+                canvas.drawText(it, pageWidth / 2f, y, paintSmall)
                 y += 14f
             } ?: run { y += 10f }
             paintSmall.textSize = 9f

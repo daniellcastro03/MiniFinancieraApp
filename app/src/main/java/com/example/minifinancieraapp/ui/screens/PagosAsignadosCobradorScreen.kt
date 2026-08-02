@@ -964,12 +964,15 @@ private fun PagoCardCobrador(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(if (esAbonoParcial) "Abono realizado" else "Total pagado", fontSize = 12.sp, color = Color.Gray)
                     Text(
-                        formatearLempiras(pago.monto),
+                        // ✅ FIX: "Total pagado" debe ser cuota + mora (lo que
+                        // realmente dio el cliente), no solo pago.monto — antes
+                        // mostraba 972 con esa etiqueta cuando el cliente había
+                        // dado 1000 (972 cuota + 28 mora).
+                        formatearLempiras(pago.monto + pago.mora),
                         fontWeight = FontWeight.Bold, fontSize = 20.sp,
                         color = when { esAbonoParcial -> Color(0xFFFF9800); esManual -> Color(0xFF673AB7); else -> Color(0xFF2E7D32) }
                     )
-                    if (pago.mora > 0)
-                        Text("Base: ${formatearLempiras(pago.monto - pago.mora)}", fontSize = 12.sp, color = Color.Gray)
+                    Text("Cuota: ${formatearLempiras(pago.monto)}", fontSize = 12.sp, color = Color.Gray)
                     if (esAbonoParcial && (pago.saldoRestante ?: 0.0) > 0)
                         Text("Resta de cuota: ${formatearLempiras(pago.saldoRestante ?: 0.0)}", fontSize = 12.sp, color = Color(0xFFFF9800), fontWeight = FontWeight.Medium)
                 }

@@ -2105,15 +2105,25 @@ fun PagoCard(
 
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        formatearLempiras(pago.monto),
+                        formatearLempiras(pago.monto + pago.mora),
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF4CAF50)
                     )
+                    Text(
+                        "Total pagado",
+                        fontSize = 10.sp,
+                        color = Color.Gray
+                    )
+                    Text(
+                        "Cuota: ${formatearLempiras(pago.monto)}",
+                        fontSize = 11.sp,
+                        color = Color.Gray
+                    )
                     if (pago.mora > 0) {
                         Text(
-                            "+ ${formatearLempiras(pago.mora)} mora",
-                            fontSize = 12.sp,
+                            "Mora: ${formatearLempiras(pago.mora)}",
+                            fontSize = 11.sp,
                             color = Color(0xFFFF5722)
                         )
                     }
