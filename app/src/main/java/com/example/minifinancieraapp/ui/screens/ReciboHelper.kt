@@ -623,7 +623,8 @@ object ReciboHelper {
         tipoPago: String,
         mora: Double = 0.0,
         montoAplicadoCuota: Double? = null,
-        saldoNuevoFijo: Double? = null
+        saldoNuevoFijo: Double? = null,
+        cuotasTotales: Int? = null
     ): Boolean {
         return try {
             val printerConnection = BluetoothPrintersConnections.selectFirstPaired()
@@ -635,7 +636,9 @@ object ReciboHelper {
             val printer = EscPosPrinter(printerConnection, 203, 80f, 48)
             val builder = StringBuilder()
 
+            builder.append("[C]================================\n")
             builder.append("[C]<font size='big'><b>CAPITAL EXPRESS</b></font>\n")
+            builder.append("[C]================================\n")
             builder.append("[C]Inversiones Victoria\n")
             builder.append("[C]Danlí, El Paraíso\n")
             builder.append("[C]<i>Tu socio financiero de confianza</i>\n")
@@ -645,19 +648,20 @@ object ReciboHelper {
             builder.append("[L]<b>LUGAR:</b> $lugar\n")
             builder.append("[L]--------------------------------\n")
 
+            val cuotaMostrar = if (cuotasTotales != null && cuotasTotales > 0) "$cuota de $cuotasTotales" else cuota
             builder.append("[L]<b>CLIENTE:</b> $cliente\n")
             builder.append("[L]<b>ID PRÉSTAMO:</b> $prestamoId\n")
-            builder.append("[L]<b>CUOTA Nº:</b> $cuota\n")
+            builder.append("[L]<b>CUOTA Nº:</b> $cuotaMostrar\n")
             builder.append("[L]--------------------------------\n")
 
             builder.append("[L]<b>TIPO DE PAGO:</b> $tipoPago\n")
             builder.append("[L]<b>COBRADOR:</b> $cobrador\n")
-            builder.append(
-                "[L]<b>${if (mora > 0.0) "SALDO ANTES (CON MORA):" else "SALDO ANTERIOR:"}</b> " +
-                    "${formatearLempiras(saldoAnterior)}\n"
-            )
+
+            val saldoAntesDeMora = (saldoAnterior - mora).coerceAtLeast(0.0)
+            builder.append("[L]<b>SALDO ANTERIOR:</b> ${formatearLempiras(saldoAntesDeMora)}\n")
             if (mora > 0.0) {
                 builder.append("[L]<b>MORA APLICADA:</b> ${formatearLempiras(mora)}\n")
+                builder.append("[L]<b>SALDO ANTERIOR (CON MORA):</b> ${formatearLempiras(saldoAnterior)}\n")
                 if (montoAplicadoCuota != null) {
                     builder.append("[L]<b>APLICADO A CUOTA:</b> ${formatearLempiras(montoAplicadoCuota)}\n")
                     builder.append("[L]<b>APLICADO A MORA:</b> ${formatearLempiras(mora)}\n")
@@ -672,7 +676,7 @@ object ReciboHelper {
             val saldoRestante = saldoNuevoFijo ?: (saldoAnterior + mora - pagado)
 
             builder.append("[L]<b>TOTAL PAGADO:</b> ${formatearLempiras(pagado)}\n")
-            builder.append("[L]<b>SALDO RESTANTE:</b> ${formatearLempiras(saldoRestante)}\n")
+            builder.append("[L]<b>SALDO PENDIENTE:</b> ${formatearLempiras(saldoRestante)}\n")
             builder.append("[L]<b>PRÓXIMO PAGO:</b> $proximoPago\n")
             builder.append("[L]--------------------------------\n")
 
@@ -724,7 +728,9 @@ object ReciboHelper {
             val printer = EscPosPrinter(printerConnection, 203, 80f, 48)
             val builder = StringBuilder()
 
+            builder.append("[C]================================\n")
             builder.append("[C]<font size='big'><b>CAPITAL EXPRESS</b></font>\n")
+            builder.append("[C]================================\n")
             builder.append("[C]Inversiones Victoria\n")
             builder.append("[C]Danlí, El Paraíso\n")
             builder.append("[C]================================\n")
@@ -2134,7 +2140,8 @@ object ReciboHelper {
         tipoPago: String,
         mora: Double = 0.0,
         saldoNuevoFijo: Double? = null,
-        montoAplicadoCuota: Double? = null
+        montoAplicadoCuota: Double? = null,
+        cuotasTotales: Int? = null
     ): File? {
         return try {
             Log.d("ReciboPDF", "cliente='$cliente', cobrador='${cobrador ?: "null"}'")
@@ -2239,13 +2246,23 @@ object ReciboHelper {
             val lineSpacing = 12f
             var y = 20f
 
-            // Logo
+            // Logo — más grande y con un anillo marcado alrededor para que no se
+            // pierda al imprimirlo (antes era muy chico y quedaba borroso/plano).
             runCatching {
                 BitmapFactory.decodeResource(context.resources, R.drawable.logo_capital)?.let {
-                    val logoSize = 45
+                    val logoSize = 85
                     val scaled = Bitmap.createScaledBitmap(it, logoSize, logoSize, true)
+                    val cx = pageWidth / 2f
+                    val cy = y + logoSize / 2f
+                    val radio = logoSize / 2f + 4f
+                    canvas.drawCircle(cx, cy, radio, Paint().apply {
+                        color = Color.BLACK
+                        style = Paint.Style.STROKE
+                        strokeWidth = 2.5f
+                        isAntiAlias = true
+                    })
                     canvas.drawBitmap(scaled, (pageWidth - logoSize) / 2f, y, null)
-                    y += logoSize + 10f
+                    y += logoSize + 14f
                 }
             }.onFailure {
                 y += 10f
@@ -2298,6 +2315,7 @@ object ReciboHelper {
             y += 20f
 
             // Cuotas completadas (centrado, sin truncar)
+            val cuotaMostrar = if (cuotasTotales != null && cuotasTotales > 0) "$cuota de $cuotasTotales" else cuota
             val cuotasPagadas = cuota.split(" de ").firstOrNull() ?: cuota
             paintSmall.textAlign = Paint.Align.CENTER
             val cuotasLines = splitText("$cuotasPagadas completas", contentWidth, paintSmall)
@@ -2325,18 +2343,24 @@ object ReciboHelper {
             canvas.drawText("Cuotas:", margin, y, paintLabel)
             y += lineSpacing
 
-            val cuotaLines = splitText(cuota, contentWidth, paintLabel)
+            val cuotaLines = splitText(cuotaMostrar, contentWidth, paintLabel)
             cuotaLines.forEach { line ->
                 canvas.drawText(line, margin, y, paintLabel)
                 y += lineSpacing
             }
 
+            val saldoAntesDeMora = (saldoPrevio - mora).coerceAtLeast(0.0)
             drawCompactLine("Fecha", fecha)
-            drawCompactLine(if (mora > 0.0) "Saldo antes (con mora)" else "Saldo", fmt(saldoPrevio))
-            drawCompactLine("Abono", fmt(pagoIngresado))
+            drawCompactLine("Saldo anterior", fmt(saldoAntesDeMora))
 
             if (mora > 0.0) {
                 drawCompactLine("Mora aplicada", fmt(mora))
+                drawCompactLine("Saldo anterior (con mora)", fmt(saldoPrevio))
+            }
+
+            drawCompactLine("Abono", fmt(pagoIngresado))
+
+            if (mora > 0.0) {
                 if (montoAplicadoCuota != null) {
                     drawCompactLine("Aplicado a cuota", fmt(montoAplicadoCuota))
                     drawCompactLine("Aplicado a mora", fmt(mora))
@@ -2361,7 +2385,7 @@ object ReciboHelper {
             paintLabel.textAlign = Paint.Align.LEFT
             paintLabel.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
             paintLabel.textSize = 9f
-            canvas.drawText(if (mora > 0.0) "Saldo (con mora):" else "Saldo:", margin, y, paintLabel)
+            canvas.drawText("Saldo pendiente:", margin, y, paintLabel)
             paintLabel.typeface = Typeface.MONOSPACE
             paintLabel.textSize = 8f
 

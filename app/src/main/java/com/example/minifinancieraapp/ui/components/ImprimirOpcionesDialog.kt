@@ -1,6 +1,7 @@
 package com.example.minifinancieraapp.ui.components
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.widget.Toast
@@ -14,22 +15,49 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.launch
 
 /**
  * true si la app ya tiene permiso para usar Bluetooth clásico (conectar/listar
  * dispositivos vinculados). En Android < 12 este permiso no existe como runtime
  * permission (BLUETOOTH/BLUETOOTH_ADMIN son de instalación), así que siempre es true.
  */
-private fun tienePermisoBluetoothConnect(context: android.content.Context): Boolean {
+private fun tienePermisoBluetoothConnect(context: Context): Boolean {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
     return ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) ==
         PackageManager.PERMISSION_GRANTED
+}
+
+/**
+ * Intenta imprimir directo y, si falla, cae automáticamente a [accionSoloPdf].
+ *
+ * IMPORTANTE: se debe lanzar con el `scope` de la PANTALLA (rememberCoroutineScope
+ * del composable dueño de la pantalla), nunca con el scope de este diálogo — el
+ * diálogo se cierra (y su propio scope se cancela) apenas el usuario toca
+ * "Imprimir", así que si la impresión corriera en el scope del diálogo se
+ * cancelaría a mitad de camino ("The coroutine scope left the composition").
+ */
+suspend fun intentarImprimirConRespaldo(
+    context: Context,
+    accionImprimirDirecto: (suspend () -> Boolean)?,
+    accionSoloPdf: (() -> Unit)?
+) {
+    val exito = try {
+        accionImprimirDirecto?.invoke() ?: false
+    } catch (e: Exception) {
+        false
+    }
+    if (!exito) {
+        Toast.makeText(
+            context,
+            "No se pudo imprimir directo, abriendo el PDF como respaldo…",
+            Toast.LENGTH_SHORT
+        ).show()
+        accionSoloPdf?.invoke()
+    }
 }
 
 /**
@@ -40,46 +68,26 @@ private fun tienePermisoBluetoothConnect(context: android.content.Context): Bool
  * En Android 12+ conectarse a un dispositivo Bluetooth vinculado requiere el
  * permiso runtime BLUETOOTH_CONNECT (ya declarado en el manifest, pero hay que
  * pedirlo en tiempo de ejecución) — si no está concedido, se solicita antes de
- * intentar imprimir.
+ * disparar [onImprimirDirecto].
  *
- * [onImprimirDirecto] debe devolver `true` si logró imprimir. Si devuelve `false`
- * (falla de conexión, impresora apagada, etc.) o el permiso de Bluetooth es
- * denegado, el diálogo cae automáticamente a [onSoloPdf] como respaldo — así
- * el usuario siempre termina con algo (recibo impreso o PDF abierto), nunca
- * se queda sin nada por un fallo silencioso.
+ * [onImprimirDirecto] es un simple disparador (`() -> Unit`): quien lo implementa
+ * debe lanzar la corrutina con SU PROPIO scope de pantalla y usar
+ * [intentarImprimirConRespaldo] para el respaldo automático a PDF — no lo hace
+ * este diálogo, porque su scope se cancela apenas se cierra.
  */
 @Composable
 fun ImprimirOpcionesDialog(
-    onImprimirDirecto: suspend () -> Boolean,
+    onImprimirDirecto: () -> Unit,
     onSoloPdf: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-
-    fun intentarImprimirDirecto() {
-        scope.launch {
-            val exito = try {
-                onImprimirDirecto()
-            } catch (e: Exception) {
-                false
-            }
-            if (!exito) {
-                Toast.makeText(
-                    context,
-                    "No se pudo imprimir directo, abriendo el PDF como respaldo…",
-                    Toast.LENGTH_SHORT
-                ).show()
-                onSoloPdf()
-            }
-        }
-    }
 
     val solicitarPermisoBluetooth = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { concedido ->
         if (concedido) {
-            intentarImprimirDirecto()
+            onImprimirDirecto()
         } else {
             Toast.makeText(
                 context,
@@ -106,7 +114,7 @@ fun ImprimirOpcionesDialog(
         confirmButton = {
             TextButton(onClick = {
                 if (tienePermisoBluetoothConnect(context)) {
-                    intentarImprimirDirecto()
+                    onImprimirDirecto()
                 } else {
                     solicitarPermisoBluetooth.launch(Manifest.permission.BLUETOOTH_CONNECT)
                 }

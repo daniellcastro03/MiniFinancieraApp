@@ -22,5 +22,6 @@ data class PagoItem(
     val cuota: String = "",
     val notas: String? = null,
     val fechaPago: String? = null,
-    val timestamp: Timestamp? = null
+    val timestamp: Timestamp? = null,
+    val cuotasTotales: Int = 0
 )

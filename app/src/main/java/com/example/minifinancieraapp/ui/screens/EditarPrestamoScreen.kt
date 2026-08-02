@@ -49,6 +49,7 @@ import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
 import com.example.capitalexpressapp.util.ReciboHelper
 import com.example.minifinancieraapp.ui.components.ImprimirOpcionesDialog
+import com.example.minifinancieraapp.ui.components.intentarImprimirConRespaldo
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
@@ -942,7 +943,7 @@ fun EditarPrestamoScreen(navController: NavController, prestamoId: String) {
         ImprimirOpcionesDialog(
             onImprimirDirecto = {
                 mostrarDialogoImprimir = false
-                accionImprimirDirecto?.invoke() ?: false
+                scope.launch { intentarImprimirConRespaldo(context, accionImprimirDirecto, accionSoloPdf) }
             },
             onSoloPdf = {
                 mostrarDialogoImprimir = false

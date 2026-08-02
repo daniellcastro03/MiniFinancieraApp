@@ -22,6 +22,7 @@ import androidx.navigation.NavController
 import com.example.capitalexpressapp.util.ReciboHelper
 import com.example.capitalexpressapp.util.NetworkUtils.isInternetAvailable
 import com.example.minifinancieraapp.ui.components.ImprimirOpcionesDialog
+import com.example.minifinancieraapp.ui.components.intentarImprimirConRespaldo
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.gson.Gson
@@ -585,7 +586,7 @@ fun HistorialPagosPrestamoScreen(
         ImprimirOpcionesDialog(
             onImprimirDirecto = {
                 mostrarDialogoImprimir = false
-                accionImprimirDirecto?.invoke() ?: false
+                scope.launch { intentarImprimirConRespaldo(context, accionImprimirDirecto, accionSoloPdf) }
             },
             onSoloPdf = {
                 mostrarDialogoImprimir = false

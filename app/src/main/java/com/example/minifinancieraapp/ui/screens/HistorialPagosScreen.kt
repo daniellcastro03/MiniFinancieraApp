@@ -32,6 +32,7 @@ import com.example.capitalexpressapp.ui.theme.CEColors
 import com.example.capitalexpressapp.util.ReciboHelper
 import com.example.capitalexpressapp.util.NetworkUtils.isInternetAvailable
 import com.example.minifinancieraapp.ui.components.ImprimirOpcionesDialog
+import com.example.minifinancieraapp.ui.components.intentarImprimirConRespaldo
 import com.example.minifinancieraapp.ui.models.PagoItem
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
@@ -425,6 +426,14 @@ private fun procesarDocumentoPagoMejorado(
             else -> ""
         }
 
+        val cuotasTotalesVal = when (val c = prestamo["cuotas"]) {
+            is Long   -> c.toInt()
+            is Int    -> c
+            is Double -> c.toInt()
+            is String -> c.toIntOrNull() ?: 0
+            else -> 0
+        }
+
         PagoItem(
             docId          = doc.id,
             cliente        = clienteNombre,
@@ -441,7 +450,8 @@ private fun procesarDocumentoPagoMejorado(
             notas          = doc.getString("notas"),
             timestamp      = timestamp,
             saldoRestante  = saldoActual,
-            numeroPrestamo = numeroPrestamo
+            numeroPrestamo = numeroPrestamo,
+            cuotasTotales  = cuotasTotalesVal
         )
     } catch (e: Exception) {
         Log.e("ProcesarPago", "Error en ${doc.id}: ${e.message}")
@@ -675,7 +685,8 @@ private data class DatosReciboPago(
     val tipoPago: String,
     val mora: Double,
     val saldoNuevoFijo: Double?,
-    val montoAplicadoCuota: Double
+    val montoAplicadoCuota: Double,
+    val cuotasTotales: Int
 )
 
 private suspend fun obtenerDatosReciboPago(pago: PagoItem): DatosReciboPago {
@@ -720,6 +731,7 @@ private suspend fun obtenerDatosReciboPago(pago: PagoItem): DatosReciboPago {
     val tipoPago = pago.metodoPago.ifEmpty { pago.tipoPago }
     val mora = pago.mora
     val saldoNuevoFijo = pago.saldoRestante
+    val cuotasTotales = prestamoDoc.getLong("cuotas")?.toInt() ?: pago.cuotasTotales
 
     return DatosReciboPago(
         cliente = cliente,
@@ -735,7 +747,8 @@ private suspend fun obtenerDatosReciboPago(pago: PagoItem): DatosReciboPago {
         tipoPago = tipoPago,
         mora = mora,
         saldoNuevoFijo = saldoNuevoFijo,
-        montoAplicadoCuota = pago.monto
+        montoAplicadoCuota = pago.monto,
+        cuotasTotales = cuotasTotales
     )
 }
 
@@ -767,64 +780,25 @@ private suspend fun imprimirReciboPagoDirecto(context: Context, pago: PagoItem):
 
 private suspend fun reimprimirRecibo(context: Context, pago: PagoItem) {
     try {
-        val db = FirebaseFirestore.getInstance()
-        val prestamoDoc = db.collection("prestamos").document(pago.prestamoId).get().await()
-
-        val cliente = prestamoDoc.getString("cliente") ?: ""
-
-        val numeroPrestamoStr = pago.numeroPrestamo.ifEmpty {
-            prestamoDoc.getString("numeroPrestamo")
-                ?: prestamoDoc.getLong("numeroPrestamo")?.toString()
-                ?: ""
-        }
-
-        val prestamoIdParaPDF = if (numeroPrestamoStr.isNotEmpty()) {
-            "Préstamo N° $numeroPrestamoStr"
-        } else {
-            "Préstamo"
-        }
-
-        val fecha = pago.fecha
-        val montoPagado = (pago.monto + pago.mora).toString()
-        val saldoAnterior = (pago.saldoRestante ?: 0.0) + pago.monto + pago.mora
-
-        // 🔥 FIX: Convertir proximoPago de forma segura
-        val proximoPagoRaw = prestamoDoc.get("proximoPago")
-        val proximoPago = when (proximoPagoRaw) {
-            null -> ""
-            is String -> proximoPagoRaw
-            is Number -> proximoPagoRaw.toString()
-            is com.google.firebase.Timestamp -> {
-                val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-                dateFormat.format(proximoPagoRaw.toDate())
-            }
-            else -> proximoPagoRaw.toString()
-        }
-
-        val cuota = pago.numeroCuota?.toString() ?: pago.cuota.ifEmpty { "1" }
-        val cobrador = pago.cobrador
-        val lugar = pago.lugar.ifEmpty { "Capital Express" }
-        val firma = pago.firma.ifEmpty { "" }
-        val tipoPago = pago.metodoPago.ifEmpty { pago.tipoPago }
-        val mora = pago.mora
-        val saldoNuevoFijo = pago.saldoRestante
+        val d = obtenerDatosReciboPago(pago)
 
         val archivo = ReciboHelper.generarReciboPDF(
             context = context,
-            cliente = cliente,
-            prestamoId = prestamoIdParaPDF,
-            fecha = fecha,
-            montoPagado = montoPagado,
-            saldoAnterior = saldoAnterior,
-            proximoPago = proximoPago,
-            cuota = cuota,
-            cobrador = cobrador,
-            lugar = lugar,
-            firma = firma,
-            tipoPago = tipoPago,
-            mora = mora,
-            saldoNuevoFijo = saldoNuevoFijo,
-            montoAplicadoCuota = pago.monto
+            cliente = d.cliente,
+            prestamoId = d.prestamoIdParaPDF,
+            fecha = d.fecha,
+            montoPagado = d.montoPagado,
+            saldoAnterior = d.saldoAnterior,
+            proximoPago = d.proximoPago,
+            cuota = d.cuota,
+            cobrador = d.cobrador,
+            lugar = d.lugar,
+            firma = d.firma,
+            tipoPago = d.tipoPago,
+            mora = d.mora,
+            saldoNuevoFijo = d.saldoNuevoFijo,
+            montoAplicadoCuota = d.montoAplicadoCuota,
+            cuotasTotales = d.cuotasTotales
         )
 
         if (archivo != null && archivo.exists()) {
@@ -1659,7 +1633,7 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
             ImprimirOpcionesDialog(
                 onImprimirDirecto = {
                     mostrarDialogoImprimir = false
-                    accionImprimirDirecto?.invoke() ?: false
+                    scope.launch { intentarImprimirConRespaldo(context, accionImprimirDirecto, accionSoloPdf) }
                 },
                 onSoloPdf = {
                     mostrarDialogoImprimir = false

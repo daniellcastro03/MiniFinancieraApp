@@ -1,5 +1,6 @@
 package com.example.capitalexpressapp.ui.screens
 
+import android.content.Intent
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
@@ -18,9 +19,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import androidx.navigation.NavController
 import com.example.capitalexpressapp.core.formatearLempiras
 import com.example.capitalexpressapp.ui.theme.CEColors
+import com.example.capitalexpressapp.util.ReciboHelper
+import com.example.minifinancieraapp.ui.components.ImprimirOpcionesDialog
+import com.example.minifinancieraapp.ui.components.intentarImprimirConRespaldo
+import com.example.minifinancieraapp.ui.models.ClienteModel
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
@@ -77,6 +83,70 @@ fun VerPrestamoScreen(
     val dateFormatter = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
 
     var clienteId by remember { mutableStateOf("") }
+
+    // Diálogo "Imprimir directo o solo PDF"
+    var mostrarDialogoImprimir by remember { mutableStateOf(false) }
+    var accionImprimirDirecto by remember { mutableStateOf<(suspend () -> Boolean)?>(null) }
+    var accionSoloPdf by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    fun imprimirRecibo() {
+        val p = prestamo ?: return
+        val cliente = ClienteModel(
+            id = p.clienteId,
+            nombre = p.cliente,
+            telefono = p.telefono ?: "",
+            direccionCasa = p.direccion ?: ""
+        )
+        accionImprimirDirecto = {
+            ReciboHelper.imprimirReciboPrestamoDirecto(
+                context = context,
+                cliente = p.cliente,
+                telefono = p.telefono ?: "",
+                monto = p.monto,
+                interesTotal = p.interesTotal,
+                mora = 0.0,
+                cuotas = p.cuotas,
+                fecha = p.fecha,
+                lugar = p.direccion ?: "",
+                numeroCobrador = "",
+                numeroPrestamo = p.numeroPrestamo ?: p.id,
+                nombreCobrador = p.cobrador,
+                fechaProximoPago = p.proximoPago
+            )
+        }
+        accionSoloPdf = {
+            scope.launch {
+                val reciboFile = ReciboHelper.generarReciboPrestamoPDF(
+                    context = context,
+                    cliente = cliente,
+                    monto = p.monto,
+                    interesTotal = p.interesTotal,
+                    mora = 0.0,
+                    cuotas = p.cuotas,
+                    fecha = p.fecha,
+                    lugar = p.direccion ?: "",
+                    numeroCobrador = "",
+                    numeroPrestamo = p.numeroPrestamo ?: p.id,
+                    nombreCobrador = p.cobrador,
+                    fechaProximoPago = p.proximoPago
+                )
+                if (reciboFile != null && reciboFile.exists()) {
+                    ReciboHelper.imprimirPDF(context, reciboFile)
+                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", reciboFile)
+                    context.startActivity(Intent.createChooser(
+                        Intent(Intent.ACTION_SEND).apply {
+                            type = "application/pdf"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }, "Compartir recibo"
+                    ))
+                } else {
+                    Toast.makeText(context, "Error al generar el recibo", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        mostrarDialogoImprimir = true
+    }
 
     fun cargarPrestamo() {
         scope.launch {
@@ -952,10 +1022,39 @@ fun VerPrestamoScreen(
                         Text("Ver Cuotas del Préstamo", fontWeight = FontWeight.Bold)
                     }
 
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedButton(
+                        onClick = { imprimirRecibo() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        enabled = !isProcessing
+                    ) {
+                        Icon(Icons.Default.Print, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Reimprimir Recibo del Préstamo", fontWeight = FontWeight.Bold)
+                    }
+
                     Spacer(modifier = Modifier.height(24.dp))
                 }
             }
         }
+    }
+
+    if (mostrarDialogoImprimir) {
+        ImprimirOpcionesDialog(
+            onImprimirDirecto = {
+                mostrarDialogoImprimir = false
+                scope.launch { intentarImprimirConRespaldo(context, accionImprimirDirecto, accionSoloPdf) }
+            },
+            onSoloPdf = {
+                mostrarDialogoImprimir = false
+                accionSoloPdf?.invoke()
+            },
+            onDismiss = { mostrarDialogoImprimir = false }
+        )
     }
 }
 

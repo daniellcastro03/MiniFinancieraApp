@@ -32,6 +32,7 @@ import com.example.capitalexpressapp.util.NetworkUtils.guardarAbonoPendiente
 import com.example.capitalexpressapp.util.NetworkUtils.isInternetAvailable
 import com.example.capitalexpressapp.util.ReciboHelper
 import com.example.minifinancieraapp.ui.components.ImprimirOpcionesDialog
+import com.example.minifinancieraapp.ui.components.intentarImprimirConRespaldo
 import com.example.minifinancieraapp.util.SessionManager
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
@@ -1062,7 +1063,8 @@ fun RegistrarPagoScreen(
                                 tipoPago       = metodoPago,
                                 mora           = montoPagoMora,
                                 saldoNuevoFijo = nuevoSaldo,
-                                montoAplicadoCuota = montoPagoNormal.coerceAtLeast(0.0)
+                                montoAplicadoCuota = montoPagoNormal.coerceAtLeast(0.0),
+                                cuotasTotales  = cuotasTotales
                             )
 
                             val pdfGenerado = pdfFile != null && pdfFile.exists()
@@ -1083,7 +1085,8 @@ fun RegistrarPagoScreen(
                                         tipoPago = metodoPago,
                                         mora = montoPagoMora,
                                         saldoNuevoFijo = nuevoSaldo,
-                                        montoAplicadoCuota = montoPagoNormal.coerceAtLeast(0.0)
+                                        montoAplicadoCuota = montoPagoNormal.coerceAtLeast(0.0),
+                                        cuotasTotales = cuotasTotales
                                     )
                                 }
                                 accionSoloPdf = {
@@ -1239,7 +1242,7 @@ fun RegistrarPagoScreen(
         ImprimirOpcionesDialog(
             onImprimirDirecto = {
                 mostrarDialogoImprimir = false
-                accionImprimirDirecto?.invoke() ?: false
+                scope.launch { intentarImprimirConRespaldo(context, accionImprimirDirecto, accionSoloPdf) }
             },
             onSoloPdf = {
                 mostrarDialogoImprimir = false

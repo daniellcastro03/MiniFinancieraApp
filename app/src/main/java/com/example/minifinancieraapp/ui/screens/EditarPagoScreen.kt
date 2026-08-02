@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.example.capitalexpressapp.util.ReciboHelper
 import com.example.minifinancieraapp.ui.components.ImprimirOpcionesDialog
+import com.example.minifinancieraapp.ui.components.intentarImprimirConRespaldo
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -460,7 +461,7 @@ fun EditarPagoScreen(
         ImprimirOpcionesDialog(
             onImprimirDirecto = {
                 mostrarDialogoImprimir = false
-                accionImprimirDirecto?.invoke() ?: false
+                scope.launch { intentarImprimirConRespaldo(context, accionImprimirDirecto, accionSoloPdf) }
             },
             onSoloPdf = {
                 mostrarDialogoImprimir = false

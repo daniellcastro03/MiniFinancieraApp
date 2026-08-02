@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.example.capitalexpressapp.util.ReciboHelper
 import com.example.minifinancieraapp.ui.components.ImprimirOpcionesDialog
+import com.example.minifinancieraapp.ui.components.intentarImprimirConRespaldo
 import com.example.minifinancieraapp.ui.models.PagoItem
 import com.example.minifinancieraapp.util.SessionManager
 import com.google.firebase.Timestamp
@@ -387,7 +388,7 @@ fun PagosAsignadosCobradorScreen(navController: NavController) {
         ImprimirOpcionesDialog(
             onImprimirDirecto = {
                 mostrarDialogoImprimir = false
-                accionImprimirDirecto?.invoke() ?: false
+                scope.launch { intentarImprimirConRespaldo(context, accionImprimirDirecto, accionSoloPdf) }
             },
             onSoloPdf = {
                 mostrarDialogoImprimir = false
@@ -605,6 +606,14 @@ private fun procesarDocumentoPagoCobrador(
             else      -> doc.getString("numeroPrestamo") ?: ""
         }
 
+        val cuotasTotalesVal = when (val c = datosPrestamoInt?.get("cuotas")) {
+            is Long   -> c.toInt()
+            is Int    -> c
+            is Double -> c.toInt()
+            is String -> c.toIntOrNull() ?: 0
+            else -> 0
+        }
+
         return PagoItem(
             docId          = doc.id,
             cliente        = clienteNombre,
@@ -619,7 +628,8 @@ private fun procesarDocumentoPagoCobrador(
             firma          = firma,
             tipoPago       = tipoPagoFinal,
             saldoRestante  = saldoRestante,
-            numeroPrestamo = numeroPrestamoStr
+            numeroPrestamo = numeroPrestamoStr,
+            cuotasTotales  = cuotasTotalesVal
         )
 
     } catch (e: Exception) {
@@ -1037,7 +1047,8 @@ private suspend fun reimprimirReciboCobrador(context: android.content.Context, p
             lugar         = pago.lugar,
             firma         = pago.firma.ifBlank { pago.cobrador },
             tipoPago      = pago.tipoPago,
-            mora          = pago.mora
+            mora          = pago.mora,
+            cuotasTotales = pago.cuotasTotales
         )
         if (file != null) {
             // ✅ CORRECCIÓN: compartirReciboPDF muestra WhatsApp, Drive, Adobe, etc.
@@ -1066,7 +1077,8 @@ private suspend fun imprimirReciboCobradorDirecto(context: android.content.Conte
             cobrador      = pago.cobrador,
             lugar         = pago.lugar,
             tipoPago      = pago.tipoPago,
-            mora          = pago.mora
+            mora          = pago.mora,
+            cuotasTotales = pago.cuotasTotales
         )
     } catch (e: Exception) {
         Toast.makeText(context, "Error al imprimir: ${e.message}", Toast.LENGTH_LONG).show()

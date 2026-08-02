@@ -51,6 +51,7 @@ import coil.compose.rememberAsyncImagePainter
 import com.example.capitalexpressapp.util.PrestamoNumberHelper
 import com.example.capitalexpressapp.util.ReciboHelper
 import com.example.minifinancieraapp.ui.components.ImprimirOpcionesDialog
+import com.example.minifinancieraapp.ui.components.intentarImprimirConRespaldo
 import com.example.minifinancieraapp.ui.models.ClienteModel
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
@@ -880,7 +881,7 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
         ImprimirOpcionesDialog(
             onImprimirDirecto = {
                 mostrarDialogoImprimir = false
-                accionImprimirDirecto?.invoke() ?: false
+                scope.launch { intentarImprimirConRespaldo(context, accionImprimirDirecto, accionSoloPdf) }
             },
             onSoloPdf = {
                 mostrarDialogoImprimir = false
