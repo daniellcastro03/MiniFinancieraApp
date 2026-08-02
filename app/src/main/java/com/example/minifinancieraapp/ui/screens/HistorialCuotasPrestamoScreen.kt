@@ -171,9 +171,13 @@ fun HistorialCuotasPrestamoScreen(navController: NavController, prestamoId: Stri
 
                                 Button(onClick = {
                                     scope.launch {
+                                        // Antes esto llamaba a ReciboHelper.imprimirRecibo (Bluetooth
+                                        // directo) — se desactivó en toda la app porque congelaba la
+                                        // impresora sin forma confiable de evitarlo. Ahora va directo
+                                        // al flujo de PDF/RawBT, igual que el resto de pantallas.
                                         val saldoAntesConMora =
                                             (pago.saldoRestante ?: 0.0) + pago.monto + pago.mora
-                                        ReciboHelper.imprimirRecibo(
+                                        val archivoPDF = ReciboHelper.generarReciboPDF(
                                             context = context,
                                             cliente = pago.cliente,
                                             prestamoId = pago.prestamoId,
@@ -184,11 +188,15 @@ fun HistorialCuotasPrestamoScreen(navController: NavController, prestamoId: Stri
                                             cuota = pago.cuota,
                                             cobrador = pago.registradoPor,
                                             lugar = pago.lugar,
+                                            firma = pago.firma,
                                             tipoPago = pago.tipoPago,
                                             mora = pago.mora,
-                                            montoAplicadoCuota = pago.monto,
-                                            saldoNuevoFijo = pago.saldoRestante
+                                            saldoNuevoFijo = pago.saldoRestante,
+                                            montoAplicadoCuota = pago.monto
                                         )
+                                        if (archivoPDF != null) {
+                                            ReciboHelper.imprimirPDF(context, archivoPDF)
+                                        }
                                     }
                                 }) {
                                     Text("Imprimir")
