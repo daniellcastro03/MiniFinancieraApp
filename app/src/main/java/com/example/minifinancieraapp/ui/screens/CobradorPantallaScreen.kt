@@ -2,6 +2,7 @@ package com.example.minifinancieraapp.ui.screens
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -26,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
 import com.example.capitalexpressapp.core.ActualizacionOverlay
+import com.example.capitalexpressapp.core.VERSION_APP
 import com.example.capitalexpressapp.ui.theme.CEColors
 import com.example.capitalexpressapp.ui.theme.SeccionTitulo
 import com.example.minifinancieraapp.util.SessionManager
@@ -42,8 +44,14 @@ fun CobradorPantallaScreen(navController: NavController, uid: String) {
     val fotoUrl = session.getFotoUrl()
     var mostrarDialogoCerrarSesion by remember { mutableStateOf(false) }
     var hayAbonosPendientes by remember { mutableStateOf(false) }
+    var chequeoManualActualizacion by remember { mutableStateOf(0) }
 
-    ActualizacionOverlay()
+    ActualizacionOverlay(
+        chequeoManualId = chequeoManualActualizacion,
+        onSinActualizaciones = {
+            Toast.makeText(context, "No hay actualizaciones disponibles", Toast.LENGTH_SHORT).show()
+        }
+    )
 
     // Verifica si hay abonos pendientes en SharedPreferences
     LaunchedEffect(Unit) {
@@ -82,6 +90,9 @@ fun CobradorPantallaScreen(navController: NavController, uid: String) {
                     }
                 },
                 actions = {
+                    IconButton(onClick = { navController.navigate("NotificacionesScreen/$uid/cobrador") }) {
+                        Icon(Icons.Default.Notifications, contentDescription = "Notificaciones", tint = Color.White)
+                    }
                     IconButton(onClick = { mostrarDialogoCerrarSesion = true }) {
                         Icon(
                             Icons.AutoMirrored.Filled.Logout,
@@ -230,6 +241,17 @@ fun CobradorPantallaScreen(navController: NavController, uid: String) {
                     iconoColor = CEColors.Primary
                 ) {
                     navController.navigate("NotificacionesScreen/$uid/cobrador")
+                }
+            }
+            item {
+                FilaOpcion(
+                    icon = Icons.Default.Update,
+                    label = "Buscar Actualizaciones",
+                    subtitle = "Versión actual: v$VERSION_APP",
+                    iconoFondo = CEColors.SurfaceContainer,
+                    iconoColor = CEColors.Primary
+                ) {
+                    chequeoManualActualizacion++
                 }
             }
 

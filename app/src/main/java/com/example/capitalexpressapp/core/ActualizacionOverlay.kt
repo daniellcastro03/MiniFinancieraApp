@@ -1,5 +1,6 @@
 package com.example.capitalexpressapp.core
 
+import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -49,10 +50,26 @@ fun ActualizacionOverlay(
                 scope.launch {
                     try {
                         val archivo = ActualizacionService.descargarApk(context, disponible) { progreso = it }
-                        ActualizacionService.instalarApk(context, archivo)
+                        if (!ActualizacionService.puedeInstalarApks(context)) {
+                            // Sin este permiso especial, abrir el instalador puede no
+                            // mostrar nada visible en algunos Android/OEM — de ahí el
+                            // bug de "toco Actualizar y no pasa nada". Mandamos al
+                            // usuario directo al toggle en vez de fallar en silencio.
+                            Toast.makeText(
+                                context,
+                                "Activa \"Instalar apps desconocidas\" para Capital Express y volvé a tocar Actualizar",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            ActualizacionService.abrirAjustesInstalarDesconocidas(context)
+                        } else {
+                            ActualizacionService.instalarApk(context, archivo)
+                        }
                     } catch (e: Exception) {
-                        // Descarga/instalación falló (sin internet a mitad de camino, etc.):
-                        // no hay nada que mostrarle al usuario que no sea reintentar después.
+                        Toast.makeText(
+                            context,
+                            "No se pudo descargar la actualización: ${e.message}",
+                            Toast.LENGTH_LONG
+                        ).show()
                     } finally {
                         descargando = false
                         actualizacion = null

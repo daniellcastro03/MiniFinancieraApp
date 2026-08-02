@@ -2,6 +2,8 @@ package com.example.capitalexpressapp.core
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -14,7 +16,7 @@ import java.net.URL
  * Versión publicada como release de GitHub. Debe coincidir con `versionCode` en
  * app/build.gradle.kts y con el tag de la release (`vN`). Subir en 1 en cada release nueva.
  */
-const val VERSION_APP = 18
+const val VERSION_APP = 19
 
 private const val REPO = "daniellcastro03/MiniFinancieraApp"
 private const val AUTORIDAD_FILE_PROVIDER = "com.example.capitalexpressapp.fileprovider"
@@ -111,6 +113,24 @@ object ActualizacionService {
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+        }
+        context.startActivity(intent)
+    }
+
+    /**
+     * "Instalar apps desconocidas" es un permiso especial (no runtime normal):
+     * si no está concedido, `instalarApk` puede no mostrar nada visible en
+     * algunos Android/OEM (en vez de la pantalla de instalación) — de ahí el
+     * bug reportado de "toco Actualizar, la barra termina y no pasa nada,
+     * hasta que vuelvo a Buscar Actualizaciones" (la segunda vez ya estaba
+     * concedido). Hay que chequearlo ANTES de llamar a `instalarApk`.
+     */
+    fun puedeInstalarApks(context: Context): Boolean = context.packageManager.canRequestPackageInstalls()
+
+    fun abrirAjustesInstalarDesconocidas(context: Context) {
+        val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+            data = Uri.parse("package:${context.packageName}")
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
         context.startActivity(intent)
     }
