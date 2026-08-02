@@ -554,6 +554,7 @@ object ReciboHelper {
 
 
     fun imprimirResumenPagosBluetooth(context: Context, pagos: List<PagoItem>) {
+        var printer: EscPosPrinter? = null
         try {
             val printerConnection = BluetoothPrintersConnections.selectFirstPaired()
             if (printerConnection == null) {
@@ -561,7 +562,7 @@ object ReciboHelper {
                 return
             }
 
-            val printer = EscPosPrinter(printerConnection, 203, 80f, 48)
+            printer = EscPosPrinter(printerConnection, 203, 80f, 48)
             val builder = StringBuilder()
 
             builder.append("[C]===============================\n")
@@ -606,6 +607,11 @@ object ReciboHelper {
 
         } catch (e: Exception) {
             Toast.makeText(context, "Error al imprimir: ${e.message}", Toast.LENGTH_LONG).show()
+        } finally {
+            // Sin esto el socket Bluetooth queda abierto: la impresora (solo acepta
+            // una conexión a la vez) deja de responder a cualquier app hasta
+            // apagarla y encenderla de nuevo.
+            printer?.disconnectPrinter()
         }
     }
 
@@ -626,6 +632,7 @@ object ReciboHelper {
         saldoNuevoFijo: Double? = null,
         cuotasTotales: Int? = null
     ): Boolean {
+        var printer: EscPosPrinter? = null
         return try {
             val printerConnection = BluetoothPrintersConnections.selectFirstPaired()
             if (printerConnection == null) {
@@ -633,7 +640,8 @@ object ReciboHelper {
                 return false
             }
 
-            val printer = EscPosPrinter(printerConnection, 203, 80f, 48)
+            val printerLocal = EscPosPrinter(printerConnection, 203, 80f, 48)
+            printer = printerLocal
             val builder = StringBuilder()
 
             builder.append("[C]================================\n")
@@ -689,12 +697,17 @@ object ReciboHelper {
             builder.append("[C]<b>Capital Express</b>\n")
             builder.append("[C]<i>Tu aliado en finanzas</i>\n")
 
-            printer.printFormattedTextAndCut(builder.toString())
+            printerLocal.printFormattedTextAndCut(builder.toString())
             true
 
         } catch (e: Exception) {
             Toast.makeText(context, "Error al imprimir: ${e.message}", Toast.LENGTH_LONG).show()
             false
+        } finally {
+            // Sin esto el socket Bluetooth queda abierto: la impresora (solo acepta
+            // una conexión a la vez) deja de responder a cualquier app hasta
+            // apagarla y encenderla de nuevo.
+            printer?.disconnectPrinter()
         }
     }
 
@@ -718,6 +731,7 @@ object ReciboHelper {
         nombreCobrador: String = "Cobrador",
         fechaProximoPago: String = ""
     ): Boolean {
+        var printer: EscPosPrinter? = null
         return try {
             val printerConnection = BluetoothPrintersConnections.selectFirstPaired()
             if (printerConnection == null) {
@@ -725,7 +739,8 @@ object ReciboHelper {
                 return false
             }
 
-            val printer = EscPosPrinter(printerConnection, 203, 80f, 48)
+            val printerLocal = EscPosPrinter(printerConnection, 203, 80f, 48)
+            printer = printerLocal
             val builder = StringBuilder()
 
             builder.append("[C]================================\n")
@@ -768,12 +783,17 @@ object ReciboHelper {
             builder.append("[C]<b>Capital Express</b>\n")
             builder.append("[C]<i>Tu aliado en finanzas</i>\n")
 
-            printer.printFormattedTextAndCut(builder.toString())
+            printerLocal.printFormattedTextAndCut(builder.toString())
             true
 
         } catch (e: Exception) {
             Toast.makeText(context, "Error al imprimir: ${e.message}", Toast.LENGTH_LONG).show()
             false
+        } finally {
+            // Sin esto el socket Bluetooth queda abierto: la impresora (solo acepta
+            // una conexión a la vez) deja de responder a cualquier app hasta
+            // apagarla y encenderla de nuevo.
+            printer?.disconnectPrinter()
         }
     }
 
