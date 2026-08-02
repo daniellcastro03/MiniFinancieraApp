@@ -677,8 +677,14 @@ private suspend fun eliminarPagoCorregido(
 /**
  * Datos comunes de un [PagoItem] necesarios para reimprimir su recibo,
  * reutilizados tanto por el flujo de PDF como por el de impresión directa ESC/POS.
+ *
+ * No es `private`: [PagosAsignadosCobradorScreen] (pantalla de Cobrador) la
+ * reutiliza para que el recibo salga IGUAL en Admin y en Cobrador — antes
+ * tenía su propia lógica duplicada e incompleta (no sumaba la mora al monto
+ * pagado, no mandaba `montoAplicadoCuota`/`saldoNuevoFijo`, y el próximo pago
+ * quedaba hardcodeado a "Consultar sistema").
  */
-private data class DatosReciboPago(
+data class DatosReciboPago(
     val cliente: String,
     val prestamoIdParaPDF: String,
     val fecha: String,
@@ -696,7 +702,7 @@ private data class DatosReciboPago(
     val cuotasTotales: Int
 )
 
-private suspend fun obtenerDatosReciboPago(pago: PagoItem): DatosReciboPago {
+suspend fun obtenerDatosReciboPago(pago: PagoItem): DatosReciboPago {
     val db = FirebaseFirestore.getInstance()
     val prestamoDoc = db.collection("prestamos").document(pago.prestamoId).get().await()
 
@@ -778,7 +784,8 @@ private suspend fun imprimirReciboPagoDirecto(context: Context, pago: PagoItem):
             tipoPago = d.tipoPago,
             mora = d.mora,
             saldoNuevoFijo = d.saldoNuevoFijo,
-            montoAplicadoCuota = d.montoAplicadoCuota
+            montoAplicadoCuota = d.montoAplicadoCuota,
+            cuotasTotales = d.cuotasTotales
         )
     } catch (e: Exception) {
         Log.e("ImprimirReciboDirecto", "Error: ${e.message}", e)

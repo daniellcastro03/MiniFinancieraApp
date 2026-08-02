@@ -2187,7 +2187,11 @@ object ReciboHelper {
         mora: Double = 0.0,
         saldoNuevoFijo: Double? = null,
         montoAplicadoCuota: Double? = null,
-        cuotasTotales: Int? = null
+        cuotasTotales: Int? = null,
+        // Al registrar un pago se imprimen 2 páginas en el mismo PDF
+        // ("ORIGINAL" + "COPIA"); al reimprimir desde Historial/Mis Pagos
+        // solo se genera "COPIA" (default).
+        copias: List<String> = listOf("COPIA")
     ): File? {
         return try {
             Log.d("ReciboPDF", "cliente='$cliente', cobrador='${cobrador ?: "null"}'")
@@ -2217,7 +2221,9 @@ object ReciboHelper {
             val contentWidth = pageWidth - (margin * 2)
 
             val pdfDocument = PdfDocument()
-            val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create()
+
+            copias.forEachIndexed { indiceCopia, etiquetaCopia ->
+            val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, indiceCopia + 1).create()
             val page = pdfDocument.startPage(pageInfo)
             val canvas = page.canvas
 
@@ -2300,7 +2306,17 @@ object ReciboHelper {
             canvas.drawText("EXPRESS", pageWidth / 2f, y, paintHeader)
             y += 14f
             canvas.drawText("FINANCIERA", pageWidth / 2f, y, paintSmall)
-            y += 16f
+            y += 14f
+
+            // ORIGINAL / COPIA
+            canvas.drawText("[ $etiquetaCopia ]", pageWidth / 2f, y, Paint().apply {
+                color = Color.BLACK
+                textAlign = Paint.Align.CENTER
+                textSize = 8f
+                typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                isAntiAlias = true
+            })
+            y += 14f
 
             // Línea
             canvas.drawLine(margin, y, pageWidth - margin, y, paintLine)
@@ -2473,6 +2489,7 @@ object ReciboHelper {
 
             // Guardar PDF
             pdfDocument.finishPage(page)
+            } // fin copias.forEachIndexed
 
             val timestampFile = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             val fileName = "recibo_${prestamoId.replace(" ", "_")}_$timestampFile.pdf"

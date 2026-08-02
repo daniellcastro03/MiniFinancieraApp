@@ -1064,7 +1064,12 @@ fun RegistrarPagoScreen(
                                 mora           = montoPagoMora,
                                 saldoNuevoFijo = nuevoSaldo,
                                 montoAplicadoCuota = montoPagoNormal.coerceAtLeast(0.0),
-                                cuotasTotales  = cuotasTotales
+                                cuotasTotales  = cuotasTotales,
+                                // Al registrar el pago se imprimen 2 páginas en el
+                                // mismo PDF: ORIGINAL (para el cliente) + COPIA
+                                // (para el cobrador). Los reimprimir posteriores
+                                // (Historial/Mis Pagos) solo generan COPIA.
+                                copias         = listOf("ORIGINAL", "COPIA")
                             )
 
                             val pdfGenerado = pdfFile != null && pdfFile.exists()

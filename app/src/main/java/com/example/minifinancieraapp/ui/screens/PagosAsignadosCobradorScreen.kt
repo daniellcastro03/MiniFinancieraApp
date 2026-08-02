@@ -3,6 +3,7 @@ package com.example.minifinancieraapp.ui.screens
 import android.app.DatePickerDialog
 import android.widget.Toast
 import com.example.capitalexpressapp.core.formatearLempiras
+import com.example.capitalexpressapp.ui.screens.obtenerDatosReciboPago
 import com.example.capitalexpressapp.ui.theme.CEColors
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -1035,24 +1036,32 @@ private fun PagoCardCobrador(
 // ─────────────────────────────────────────────────────────────────────────────
 // ✅ CORRECCIÓN: usar compartirReciboPDF en lugar de imprimirPDF
 // ─────────────────────────────────────────────────────────────────────────────
+// El recibo de Cobrador ahora usa exactamente los mismos datos que Admin
+// (obtenerDatosReciboPago, definida en HistorialPagosScreen.kt) — antes tenía
+// su propia lógica duplicada e incompleta: no sumaba la mora al monto pagado
+// (mostraba 972 en vez de 1000), no mandaba montoAplicadoCuota/saldoNuevoFijo
+// (por eso no salía el desglose de mora abajo), y el próximo pago quedaba
+// hardcodeado a "Consultar sistema" en vez de leerlo del préstamo.
 private suspend fun reimprimirReciboCobrador(context: android.content.Context, pago: PagoItem) {
     try {
-        val saldoAnterior = (pago.saldoRestante ?: 0.0) + pago.monto
+        val d = obtenerDatosReciboPago(pago)
         val file = ReciboHelper.generarReciboPDF(
             context       = context,
-            cliente       = pago.cliente,
-            prestamoId    = if (pago.numeroPrestamo.isNotEmpty()) "Préstamo Nº ${pago.numeroPrestamo}" else pago.prestamoId,
-            fecha         = pago.fecha.split(" ").firstOrNull() ?: pago.fecha,
-            montoPagado   = pago.monto.toString(),
-            saldoAnterior = saldoAnterior,
-            proximoPago   = "Consultar sistema",
-            cuota         = pago.cuota,
-            cobrador      = pago.cobrador,
-            lugar         = pago.lugar,
-            firma         = pago.firma.ifBlank { pago.cobrador },
-            tipoPago      = pago.tipoPago,
-            mora          = pago.mora,
-            cuotasTotales = pago.cuotasTotales
+            cliente       = d.cliente,
+            prestamoId    = d.prestamoIdParaPDF,
+            fecha         = d.fecha,
+            montoPagado   = d.montoPagado,
+            saldoAnterior = d.saldoAnterior,
+            proximoPago   = d.proximoPago,
+            cuota         = d.cuota,
+            cobrador      = d.cobrador,
+            lugar         = d.lugar,
+            firma         = d.firma,
+            tipoPago      = d.tipoPago,
+            mora          = d.mora,
+            saldoNuevoFijo = d.saldoNuevoFijo,
+            montoAplicadoCuota = d.montoAplicadoCuota,
+            cuotasTotales = d.cuotasTotales
         )
         if (file != null) {
             // ✅ CORRECCIÓN: compartirReciboPDF muestra WhatsApp, Drive, Adobe, etc.
@@ -1068,21 +1077,23 @@ private suspend fun reimprimirReciboCobrador(context: android.content.Context, p
 
 private suspend fun imprimirReciboCobradorDirecto(context: android.content.Context, pago: PagoItem): Boolean {
     return try {
-        val saldoAnterior = (pago.saldoRestante ?: 0.0) + pago.monto
+        val d = obtenerDatosReciboPago(pago)
         ReciboHelper.imprimirRecibo(
             context       = context,
-            cliente       = pago.cliente,
-            prestamoId    = if (pago.numeroPrestamo.isNotEmpty()) "Préstamo Nº ${pago.numeroPrestamo}" else pago.prestamoId,
-            fecha         = pago.fecha.split(" ").firstOrNull() ?: pago.fecha,
-            montoPagado   = pago.monto.toString(),
-            saldoAnterior = saldoAnterior,
-            proximoPago   = "Consultar sistema",
-            cuota         = pago.cuota,
-            cobrador      = pago.cobrador,
-            lugar         = pago.lugar,
-            tipoPago      = pago.tipoPago,
-            mora          = pago.mora,
-            cuotasTotales = pago.cuotasTotales
+            cliente       = d.cliente,
+            prestamoId    = d.prestamoIdParaPDF,
+            fecha         = d.fecha,
+            montoPagado   = d.montoPagado,
+            saldoAnterior = d.saldoAnterior,
+            proximoPago   = d.proximoPago,
+            cuota         = d.cuota,
+            cobrador      = d.cobrador,
+            lugar         = d.lugar,
+            tipoPago      = d.tipoPago,
+            mora          = d.mora,
+            saldoNuevoFijo = d.saldoNuevoFijo,
+            montoAplicadoCuota = d.montoAplicadoCuota,
+            cuotasTotales = d.cuotasTotales
         )
     } catch (e: Exception) {
         Toast.makeText(context, "Error al imprimir: ${e.message}", Toast.LENGTH_LONG).show()
