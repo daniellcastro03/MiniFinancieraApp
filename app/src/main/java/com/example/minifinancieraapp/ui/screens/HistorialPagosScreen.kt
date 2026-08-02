@@ -38,6 +38,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -738,8 +739,8 @@ private suspend fun obtenerDatosReciboPago(pago: PagoItem): DatosReciboPago {
     )
 }
 
-private suspend fun imprimirReciboPagoDirecto(context: Context, pago: PagoItem) {
-    try {
+private suspend fun imprimirReciboPagoDirecto(context: Context, pago: PagoItem): Boolean {
+    return try {
         val d = obtenerDatosReciboPago(pago)
         ReciboHelper.imprimirRecibo(
             context = context,
@@ -760,6 +761,7 @@ private suspend fun imprimirReciboPagoDirecto(context: Context, pago: PagoItem) 
     } catch (e: Exception) {
         Log.e("ImprimirReciboDirecto", "Error: ${e.message}", e)
         Toast.makeText(context, "Error al imprimir: ${e.message}", Toast.LENGTH_LONG).show()
+        false
     }
 }
 
@@ -852,7 +854,7 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
 
     // Diálogo "Imprimir directo o solo PDF"
     var mostrarDialogoImprimir by remember { mutableStateOf(false) }
-    var accionImprimirDirecto by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var accionImprimirDirecto by remember { mutableStateOf<(suspend () -> Boolean)?>(null) }
     var accionSoloPdf by remember { mutableStateOf<(() -> Unit)?>(null) }
     var cuotasPendientesPorCliente by remember { mutableStateOf(listOf<Pair<String, List<CuotaPendiente>>>()) }
     var mostrandoPendientes by remember { mutableStateOf(false) }
@@ -1067,20 +1069,37 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                     return@launch
                 }
 
-                // ✅ 3 queries en PARALELO (usuarios se pide una sola vez: antes
+                // ✅ usuarios y pagos en PARALELO (usuarios se pide una sola vez: antes
                 // había una segunda consulta idéntica solo para leer el rol).
                 val usuariosDeferred = async { db.collection("usuarios").get().await() }
-                val prestamosDeferred = async {
-                    db.collection("prestamos").get().await().associateBy({ it.id }, { it.data })
-                }
                 // ✅ SIN orderBy ni limit — trae todos los docs independiente del nombre del campo fecha
                 val pagosDeferred = async {
                     db.collection("pagos").get().await().documents
                 }
 
                 val usuariosSnap  = usuariosDeferred.await()
-                val prestamos     = prestamosDeferred.await()
                 val todosLosDocs  = pagosDeferred.await()
+
+                // ✅ Antes se traía la colección COMPLETA de "prestamos" (todo el
+                // sistema, aunque el pago sea viejo o de un préstamo saldado hace
+                // meses) solo para resolver un puñado de campos por pago. Ahora
+                // solo se piden los préstamos realmente referenciados por los
+                // pagos ya cargados, en tandas de 10 (límite de whereIn).
+                val prestamoIdsReferenciados = todosLosDocs
+                    .mapNotNull { it.getString("prestamoId") }
+                    .distinct()
+
+                val prestamos: Map<String, Map<String, Any?>> = if (prestamoIdsReferenciados.isEmpty()) {
+                    emptyMap()
+                } else {
+                    prestamoIdsReferenciados.chunked(10).map { chunk ->
+                        async {
+                            db.collection("prestamos")
+                                .whereIn(com.google.firebase.firestore.FieldPath.documentId(), chunk)
+                                .get().await().documents
+                        }
+                    }.awaitAll().flatten().associateBy({ it.id }, { it.data ?: emptyMap() })
+                }
 
                 // El mapeo/orden de cientos-miles de documentos es trabajo de
                 // CPU: se hace en Dispatchers.Default para que la ruedita de
@@ -1499,7 +1518,7 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
                                 onEliminar = { pagoAEliminar = pago },
                                 onReimprimir = {
                                     accionImprimirDirecto = {
-                                        scope.launch { imprimirReciboPagoDirecto(context, pago) }
+                                        imprimirReciboPagoDirecto(context, pago)
                                     }
                                     accionSoloPdf = {
                                         scope.launch { reimprimirRecibo(context, pago) }
@@ -1640,7 +1659,7 @@ fun HistorialPagosScreen(navController: NavController, rol: String) {
             ImprimirOpcionesDialog(
                 onImprimirDirecto = {
                     mostrarDialogoImprimir = false
-                    accionImprimirDirecto?.invoke()
+                    accionImprimirDirecto?.invoke() ?: false
                 },
                 onSoloPdf = {
                     mostrarDialogoImprimir = false

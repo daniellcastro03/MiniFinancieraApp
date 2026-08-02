@@ -624,19 +624,16 @@ object ReciboHelper {
         mora: Double = 0.0,
         montoAplicadoCuota: Double? = null,
         saldoNuevoFijo: Double? = null
-    ) {
-        try {
+    ): Boolean {
+        return try {
             val printerConnection = BluetoothPrintersConnections.selectFirstPaired()
             if (printerConnection == null) {
                 Toast.makeText(context, "No hay impresora conectada", Toast.LENGTH_SHORT).show()
-                return
+                return false
             }
 
             val printer = EscPosPrinter(printerConnection, 203, 80f, 48)
             val builder = StringBuilder()
-
-            // Logo más grande (80mm impresora térmica)
-            builder.append("[C]<img>${context.getExternalFilesDir(null)?.absolutePath}/logo_capital.png</img>\n")
 
             builder.append("[C]<font size='big'><b>CAPITAL EXPRESS</b></font>\n")
             builder.append("[C]Inversiones Victoria\n")
@@ -689,9 +686,11 @@ object ReciboHelper {
             builder.append("[C]<i>Tu aliado en finanzas</i>\n")
 
             printer.printFormattedTextAndCut(builder.toString())
+            true
 
         } catch (e: Exception) {
             Toast.makeText(context, "Error al imprimir: ${e.message}", Toast.LENGTH_LONG).show()
+            false
         }
     }
 
@@ -714,12 +713,12 @@ object ReciboHelper {
         numeroPrestamo: String,
         nombreCobrador: String = "Cobrador",
         fechaProximoPago: String = ""
-    ) {
-        try {
+    ): Boolean {
+        return try {
             val printerConnection = BluetoothPrintersConnections.selectFirstPaired()
             if (printerConnection == null) {
                 Toast.makeText(context, "No hay impresora conectada", Toast.LENGTH_SHORT).show()
-                return
+                return false
             }
 
             val printer = EscPosPrinter(printerConnection, 203, 80f, 48)
@@ -764,9 +763,11 @@ object ReciboHelper {
             builder.append("[C]<i>Tu aliado en finanzas</i>\n")
 
             printer.printFormattedTextAndCut(builder.toString())
+            true
 
         } catch (e: Exception) {
             Toast.makeText(context, "Error al imprimir: ${e.message}", Toast.LENGTH_LONG).show()
+            false
         }
     }
 

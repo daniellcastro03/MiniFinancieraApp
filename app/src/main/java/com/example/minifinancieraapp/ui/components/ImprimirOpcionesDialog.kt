@@ -14,10 +14,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.launch
 
 /**
  * true si la app ya tiene permiso para usar Bluetooth clásico (conectar/listar
@@ -38,27 +40,53 @@ private fun tienePermisoBluetoothConnect(context: android.content.Context): Bool
  * En Android 12+ conectarse a un dispositivo Bluetooth vinculado requiere el
  * permiso runtime BLUETOOTH_CONNECT (ya declarado en el manifest, pero hay que
  * pedirlo en tiempo de ejecución) — si no está concedido, se solicita antes de
- * invocar [onImprimirDirecto].
+ * intentar imprimir.
+ *
+ * [onImprimirDirecto] debe devolver `true` si logró imprimir. Si devuelve `false`
+ * (falla de conexión, impresora apagada, etc.) o el permiso de Bluetooth es
+ * denegado, el diálogo cae automáticamente a [onSoloPdf] como respaldo — así
+ * el usuario siempre termina con algo (recibo impreso o PDF abierto), nunca
+ * se queda sin nada por un fallo silencioso.
  */
 @Composable
 fun ImprimirOpcionesDialog(
-    onImprimirDirecto: () -> Unit,
+    onImprimirDirecto: suspend () -> Boolean,
     onSoloPdf: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    fun intentarImprimirDirecto() {
+        scope.launch {
+            val exito = try {
+                onImprimirDirecto()
+            } catch (e: Exception) {
+                false
+            }
+            if (!exito) {
+                Toast.makeText(
+                    context,
+                    "No se pudo imprimir directo, abriendo el PDF como respaldo…",
+                    Toast.LENGTH_SHORT
+                ).show()
+                onSoloPdf()
+            }
+        }
+    }
 
     val solicitarPermisoBluetooth = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { concedido ->
         if (concedido) {
-            onImprimirDirecto()
+            intentarImprimirDirecto()
         } else {
             Toast.makeText(
                 context,
-                "Se necesita el permiso de Bluetooth para imprimir directo en la térmica",
+                "Permiso de Bluetooth denegado, abriendo el PDF como respaldo…",
                 Toast.LENGTH_LONG
             ).show()
+            onSoloPdf()
         }
     }
 
@@ -73,12 +101,12 @@ fun ImprimirOpcionesDialog(
         },
         title = { Text("¿Cómo desea imprimir?") },
         text = {
-            Text("Puede imprimir el recibo directo en la impresora térmica conectada por Bluetooth, o solo generar el PDF para verlo o compartirlo.")
+            Text("Puede imprimir el recibo directo en la impresora térmica conectada por Bluetooth, o solo generar el PDF para verlo o compartirlo. Si la impresión directa falla, se abrirá el PDF automáticamente.")
         },
         confirmButton = {
             TextButton(onClick = {
                 if (tienePermisoBluetoothConnect(context)) {
-                    onImprimirDirecto()
+                    intentarImprimirDirecto()
                 } else {
                     solicitarPermisoBluetooth.launch(Manifest.permission.BLUETOOTH_CONNECT)
                 }

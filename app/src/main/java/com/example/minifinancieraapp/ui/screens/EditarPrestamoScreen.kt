@@ -143,7 +143,7 @@ fun EditarPrestamoScreen(navController: NavController, prestamoId: String) {
 
     // Diálogo "Imprimir directo o solo PDF"
     var mostrarDialogoImprimir by remember { mutableStateOf(false) }
-    var accionImprimirDirecto by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var accionImprimirDirecto by remember { mutableStateOf<(suspend () -> Boolean)?>(null) }
     var accionSoloPdf by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     var currentUid      by remember { mutableStateOf("") }
@@ -824,23 +824,21 @@ fun EditarPrestamoScreen(navController: NavController, prestamoId: String) {
                                     reciboGenerado = reciboFile
                                     fechaGuardada = fecha
                                     accionImprimirDirecto = {
-                                        scope.launch {
-                                            ReciboHelper.imprimirReciboPrestamoDirecto(
-                                                context = context,
-                                                cliente = cliente,
-                                                telefono = "",
-                                                monto = montoDouble,
-                                                interesTotal = interesCalculado,
-                                                mora = moraDouble,
-                                                cuotas = cuotasInt,
-                                                fecha = fecha,
-                                                lugar = lugar,
-                                                numeroCobrador = numeroCobrador,
-                                                numeroPrestamo = prestamoId,
-                                                nombreCobrador = nombreCobrador,
-                                                fechaProximoPago = proximoPagoString
-                                            )
-                                        }
+                                        ReciboHelper.imprimirReciboPrestamoDirecto(
+                                            context = context,
+                                            cliente = cliente,
+                                            telefono = "",
+                                            monto = montoDouble,
+                                            interesTotal = interesCalculado,
+                                            mora = moraDouble,
+                                            cuotas = cuotasInt,
+                                            fecha = fecha,
+                                            lugar = lugar,
+                                            numeroCobrador = numeroCobrador,
+                                            numeroPrestamo = prestamoId,
+                                            nombreCobrador = nombreCobrador,
+                                            fechaProximoPago = proximoPagoString
+                                        )
                                     }
                                     accionSoloPdf = {
                                         ReciboHelper.imprimirPDF(context, reciboFile)
@@ -893,23 +891,21 @@ fun EditarPrestamoScreen(navController: NavController, prestamoId: String) {
                     onClick = {
                         try {
                             accionImprimirDirecto = {
-                                scope.launch {
-                                    ReciboHelper.imprimirReciboPrestamoDirecto(
-                                        context = context,
-                                        cliente = cliente,
-                                        telefono = "",
-                                        monto = montoDouble,
-                                        interesTotal = interesCalculado,
-                                        mora = moraDouble,
-                                        cuotas = cuotasInt,
-                                        fecha = fechaGuardada,
-                                        lugar = lugar,
-                                        numeroCobrador = numeroCobrador,
-                                        numeroPrestamo = prestamoId,
-                                        nombreCobrador = nombreCobrador,
-                                        fechaProximoPago = proximoPagoString
-                                    )
-                                }
+                                ReciboHelper.imprimirReciboPrestamoDirecto(
+                                    context = context,
+                                    cliente = cliente,
+                                    telefono = "",
+                                    monto = montoDouble,
+                                    interesTotal = interesCalculado,
+                                    mora = moraDouble,
+                                    cuotas = cuotasInt,
+                                    fecha = fechaGuardada,
+                                    lugar = lugar,
+                                    numeroCobrador = numeroCobrador,
+                                    numeroPrestamo = prestamoId,
+                                    nombreCobrador = nombreCobrador,
+                                    fechaProximoPago = proximoPagoString
+                                )
                             }
                             accionSoloPdf = {
                                 ReciboHelper.imprimirPDF(context, archivo)
@@ -946,7 +942,7 @@ fun EditarPrestamoScreen(navController: NavController, prestamoId: String) {
         ImprimirOpcionesDialog(
             onImprimirDirecto = {
                 mostrarDialogoImprimir = false
-                accionImprimirDirecto?.invoke()
+                accionImprimirDirecto?.invoke() ?: false
             },
             onSoloPdf = {
                 mostrarDialogoImprimir = false

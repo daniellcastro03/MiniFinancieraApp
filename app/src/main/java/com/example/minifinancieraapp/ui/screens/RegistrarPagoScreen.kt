@@ -356,7 +356,7 @@ fun RegistrarPagoScreen(
 
     // Diálogo "Imprimir directo o solo PDF"
     var mostrarDialogoImprimir by remember { mutableStateOf(false) }
-    var accionImprimirDirecto by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var accionImprimirDirecto by remember { mutableStateOf<(suspend () -> Boolean)?>(null) }
     var accionSoloPdf by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     // Datos del préstamo
@@ -1069,24 +1069,22 @@ fun RegistrarPagoScreen(
                             if (pdfGenerado) {
                                 archivoPDF = pdfFile
                                 accionImprimirDirecto = {
-                                    scope.launch {
-                                        ReciboHelper.imprimirRecibo(
-                                            context = context,
-                                            cliente = nombreCliente,
-                                            prestamoId = prestamoIdParaPDF,
-                                            fecha = fechaFormateada,
-                                            montoPagado = abono.toString(),
-                                            saldoAnterior = saldoAnteriorCorrecto,
-                                            proximoPago = proximoPagoValidado,
-                                            cuota = descripcionDetallada,
-                                            cobrador = nombreCobradorActivo,
-                                            lugar = lugar,
-                                            tipoPago = metodoPago,
-                                            mora = montoPagoMora,
-                                            saldoNuevoFijo = nuevoSaldo,
-                                            montoAplicadoCuota = montoPagoNormal.coerceAtLeast(0.0)
-                                        )
-                                    }
+                                    ReciboHelper.imprimirRecibo(
+                                        context = context,
+                                        cliente = nombreCliente,
+                                        prestamoId = prestamoIdParaPDF,
+                                        fecha = fechaFormateada,
+                                        montoPagado = abono.toString(),
+                                        saldoAnterior = saldoAnteriorCorrecto,
+                                        proximoPago = proximoPagoValidado,
+                                        cuota = descripcionDetallada,
+                                        cobrador = nombreCobradorActivo,
+                                        lugar = lugar,
+                                        tipoPago = metodoPago,
+                                        mora = montoPagoMora,
+                                        saldoNuevoFijo = nuevoSaldo,
+                                        montoAplicadoCuota = montoPagoNormal.coerceAtLeast(0.0)
+                                    )
                                 }
                                 accionSoloPdf = {
                                     try { ReciboHelper.imprimirPDF(context, pdfFile!!) } catch (_: Exception) {}
@@ -1241,7 +1239,7 @@ fun RegistrarPagoScreen(
         ImprimirOpcionesDialog(
             onImprimirDirecto = {
                 mostrarDialogoImprimir = false
-                accionImprimirDirecto?.invoke()
+                accionImprimirDirecto?.invoke() ?: false
             },
             onSoloPdf = {
                 mostrarDialogoImprimir = false

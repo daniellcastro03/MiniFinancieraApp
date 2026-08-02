@@ -91,7 +91,7 @@ fun EditarPagoScreen(
 
     // Diálogo "Imprimir directo o solo PDF"
     var mostrarDialogoImprimir by remember { mutableStateOf(false) }
-    var accionImprimirDirecto by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var accionImprimirDirecto by remember { mutableStateOf<(suspend () -> Boolean)?>(null) }
     var accionSoloPdf by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     // Variables para información del préstamo
@@ -404,22 +404,20 @@ fun EditarPagoScreen(
                                 val nuevaMora = mora.toDoubleOrNull() ?: 0.0
 
                                 accionImprimirDirecto = {
-                                    scope.launch {
-                                        ReciboHelper.imprimirRecibo(
-                                            context = context,
-                                            cliente = clienteNombre,
-                                            prestamoId = prestamoId,
-                                            fecha = fecha,
-                                            montoPagado = nuevoMonto.toString(),
-                                            saldoAnterior = saldoActual,
-                                            proximoPago = "-",
-                                            cuota = cuota,
-                                            cobrador = firmaPrestamista,
-                                            lugar = lugar,
-                                            tipoPago = tipoPago,
-                                            mora = nuevaMora
-                                        )
-                                    }
+                                    ReciboHelper.imprimirRecibo(
+                                        context = context,
+                                        cliente = clienteNombre,
+                                        prestamoId = prestamoId,
+                                        fecha = fecha,
+                                        montoPagado = nuevoMonto.toString(),
+                                        saldoAnterior = saldoActual,
+                                        proximoPago = "-",
+                                        cuota = cuota,
+                                        cobrador = firmaPrestamista,
+                                        lugar = lugar,
+                                        tipoPago = tipoPago,
+                                        mora = nuevaMora
+                                    )
                                 }
                                 accionSoloPdf = {
                                     scope.launch {
@@ -462,7 +460,7 @@ fun EditarPagoScreen(
         ImprimirOpcionesDialog(
             onImprimirDirecto = {
                 mostrarDialogoImprimir = false
-                accionImprimirDirecto?.invoke()
+                accionImprimirDirecto?.invoke() ?: false
             },
             onSoloPdf = {
                 mostrarDialogoImprimir = false

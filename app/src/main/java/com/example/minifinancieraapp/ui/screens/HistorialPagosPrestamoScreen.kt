@@ -80,7 +80,7 @@ fun HistorialPagosPrestamoScreen(
 
     // Diálogo "Imprimir directo o solo PDF"
     var mostrarDialogoImprimir by remember { mutableStateOf(false) }
-    var accionImprimirDirecto by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var accionImprimirDirecto by remember { mutableStateOf<(suspend () -> Boolean)?>(null) }
     var accionSoloPdf by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     val formatter = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
@@ -436,22 +436,20 @@ fun HistorialPagosPrestamoScreen(
                                             val prestamoIdMostrar = if (pago.numeroPrestamo > 0) pago.numeroPrestamo.toString() else pago.prestamoId
 
                                             accionImprimirDirecto = {
-                                                scope.launch {
-                                                    ReciboHelper.imprimirRecibo(
-                                                        context = context,
-                                                        cliente = pago.cliente,
-                                                        prestamoId = prestamoIdMostrar,
-                                                        fecha = pago.fecha,
-                                                        montoPagado = pago.monto.toString(),
-                                                        saldoAnterior = saldoAnterior,
-                                                        proximoPago = proximoPago,
-                                                        cuota = pago.cuota,
-                                                        cobrador = pago.cobrador,
-                                                        lugar = pago.lugar,
-                                                        tipoPago = pago.metodoPago,
-                                                        mora = pago.mora
-                                                    )
-                                                }
+                                                ReciboHelper.imprimirRecibo(
+                                                    context = context,
+                                                    cliente = pago.cliente,
+                                                    prestamoId = prestamoIdMostrar,
+                                                    fecha = pago.fecha,
+                                                    montoPagado = pago.monto.toString(),
+                                                    saldoAnterior = saldoAnterior,
+                                                    proximoPago = proximoPago,
+                                                    cuota = pago.cuota,
+                                                    cobrador = pago.cobrador,
+                                                    lugar = pago.lugar,
+                                                    tipoPago = pago.metodoPago,
+                                                    mora = pago.mora
+                                                )
                                             }
                                             accionSoloPdf = {
                                                 scope.launch {
@@ -587,7 +585,7 @@ fun HistorialPagosPrestamoScreen(
         ImprimirOpcionesDialog(
             onImprimirDirecto = {
                 mostrarDialogoImprimir = false
-                accionImprimirDirecto?.invoke()
+                accionImprimirDirecto?.invoke() ?: false
             },
             onSoloPdf = {
                 mostrarDialogoImprimir = false

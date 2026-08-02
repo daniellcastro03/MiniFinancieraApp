@@ -27,12 +27,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.example.capitalexpressapp.util.ReciboHelper
+import com.example.minifinancieraapp.ui.components.ImprimirOpcionesDialog
 import com.example.minifinancieraapp.ui.models.PagoItem
 import com.example.minifinancieraapp.util.SessionManager
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -99,6 +101,11 @@ fun PagosAsignadosCobradorScreen(navController: NavController) {
     var fechaFin       by remember { mutableStateOf<Date?>(null) }
     var generandoPDF   by remember { mutableStateOf(false) }
 
+    // Diálogo "Imprimir directo o solo PDF"
+    var mostrarDialogoImprimir by remember { mutableStateOf(false) }
+    var accionImprimirDirecto by remember { mutableStateOf<(suspend () -> Boolean)?>(null) }
+    var accionSoloPdf by remember { mutableStateOf<(() -> Unit)?>(null) }
+
     // ── Filtrado ─────────────────────────────────────────────────────────────
     fun aplicarFiltros(
         lista:  List<PagoItem>,
@@ -138,23 +145,42 @@ fun PagosAsignadosCobradorScreen(navController: NavController) {
                 }
                 isLoading = true
 
-                // Las 3 consultas van en paralelo en vez de una tras otra.
-                val (usuariosSnap, prestamosSnap, pagosSnap) = coroutineScope {
-                    val usuariosDeferred = async { db.collection("usuarios").get().await() }
-                    val prestamosDeferred = async { db.collection("prestamos").get().await() }
-                    val pagosDeferred = async {
-                        db.collection("pagos").whereEqualTo("registradoPor", uidCobrador).get().await()
-                    }
-                    Triple(usuariosDeferred.await(), prestamosDeferred.await(), pagosDeferred.await())
+                // Solo se piden los pagos de ESTE cobrador (ya filtrado por Firestore).
+                // Antes también se traían las colecciones COMPLETAS de "usuarios" y
+                // "prestamos" (todo el sistema) solo para resolver un puñado de
+                // nombres/números — eso era el cuello de botella real. Como el nombre
+                // del cobrador ya se conoce (viene de la sesión, y "registradoPor" en
+                // todos estos pagos es siempre este mismo uid por el whereEqualTo de
+                // abajo) no hace falta traer "usuarios" para nada. Y de "prestamos"
+                // solo se piden los documentos realmente referenciados por estos pagos.
+                val pagosSnap = db.collection("pagos")
+                    .whereEqualTo("registradoPor", uidCobrador)
+                    .get().await()
+
+                val prestamoIdsReferenciados = pagosSnap.documents
+                    .mapNotNull { it.getString("prestamoId") }
+                    .distinct()
+
+                val prestamosMap: Map<String, Map<String, Any>> = if (prestamoIdsReferenciados.isEmpty()) {
+                    emptyMap()
+                } else {
+                    coroutineScope {
+                        prestamoIdsReferenciados.chunked(10).map { chunk ->
+                            async {
+                                db.collection("prestamos")
+                                    .whereIn(com.google.firebase.firestore.FieldPath.documentId(), chunk)
+                                    .get().await().documents
+                            }
+                        }.awaitAll().flatten()
+                    }.associateBy({ it.id }, { it.data ?: emptyMap() })
                 }
+
+                val usuariosMap = mapOf(uidCobrador to (nombreCobrador ?: uidCobrador))
 
                 // mapNotNull + sortedByDescending (con parseo de fecha por cada
                 // comparación) es trabajo de CPU: se hace en Dispatchers.Default
                 // para que la ruedita de carga no se vea trabada.
                 val listaCargada = withContext(Dispatchers.Default) {
-                    val usuariosMap = usuariosSnap.documents.associateBy({ it.id }, { it.getString("nombre") ?: it.id })
-                    val prestamosMap = prestamosSnap.documents.associateBy({ it.id }, { it.data ?: emptyMap() })
-
                     pagosSnap.documents
                         .mapNotNull { doc ->
                             try { procesarDocumentoPagoCobrador(doc, usuariosMap, prestamosMap, formatter) }
@@ -343,7 +369,11 @@ fun PagosAsignadosCobradorScreen(navController: NavController) {
                                 session      = session,
                                 context      = context,
                                 onReimprimir = {
-                                    scope.launch { reimprimirReciboCobrador(context, pago) }
+                                    accionImprimirDirecto = { imprimirReciboCobradorDirecto(context, pago) }
+                                    accionSoloPdf = {
+                                        scope.launch { reimprimirReciboCobrador(context, pago) }
+                                    }
+                                    mostrarDialogoImprimir = true
                                 }
                             )
                         }
@@ -351,6 +381,20 @@ fun PagosAsignadosCobradorScreen(navController: NavController) {
                 }
             }
         }
+    }
+
+    if (mostrarDialogoImprimir) {
+        ImprimirOpcionesDialog(
+            onImprimirDirecto = {
+                mostrarDialogoImprimir = false
+                accionImprimirDirecto?.invoke() ?: false
+            },
+            onSoloPdf = {
+                mostrarDialogoImprimir = false
+                accionSoloPdf?.invoke()
+            },
+            onDismiss = { mostrarDialogoImprimir = false }
+        )
     }
 }
 
@@ -959,16 +1003,16 @@ private fun PagoCardCobrador(
                 }
             }
 
-            // Botón reimprimir — ahora muestra selector de apps (compartir)
+            // Reimprimir: pregunta si imprimir directo a la térmica o solo PDF/compartir
             Button(
                 onClick  = onReimprimir,
                 modifier = Modifier.fillMaxWidth(),
                 colors   = ButtonDefaults.buttonColors(containerColor = CEColors.ActionBlue),
                 shape    = RoundedCornerShape(12.dp)
             ) {
-                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.Print, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Compartir Recibo", fontSize = 14.sp)
+                Text("Reimprimir", fontSize = 14.sp)
             }
         }
     }
@@ -1004,5 +1048,28 @@ private suspend fun reimprimirReciboCobrador(context: android.content.Context, p
         }
     } catch (e: Exception) {
         Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+    }
+}
+
+private suspend fun imprimirReciboCobradorDirecto(context: android.content.Context, pago: PagoItem): Boolean {
+    return try {
+        val saldoAnterior = (pago.saldoRestante ?: 0.0) + pago.monto
+        ReciboHelper.imprimirRecibo(
+            context       = context,
+            cliente       = pago.cliente,
+            prestamoId    = if (pago.numeroPrestamo.isNotEmpty()) "Préstamo Nº ${pago.numeroPrestamo}" else pago.prestamoId,
+            fecha         = pago.fecha.split(" ").firstOrNull() ?: pago.fecha,
+            montoPagado   = pago.monto.toString(),
+            saldoAnterior = saldoAnterior,
+            proximoPago   = "Consultar sistema",
+            cuota         = pago.cuota,
+            cobrador      = pago.cobrador,
+            lugar         = pago.lugar,
+            tipoPago      = pago.tipoPago,
+            mora          = pago.mora
+        )
+    } catch (e: Exception) {
+        Toast.makeText(context, "Error al imprimir: ${e.message}", Toast.LENGTH_LONG).show()
+        false
     }
 }

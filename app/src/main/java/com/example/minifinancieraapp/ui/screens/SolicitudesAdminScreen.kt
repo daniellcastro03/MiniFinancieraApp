@@ -72,7 +72,7 @@ suspend fun aceptarSolicitudYGenerarRecibo(
     solicitud: Map<String, Any>,
     context: Context,
     db: FirebaseFirestore,
-    onListoParaImprimir: ((accionImprimirDirecto: () -> Unit, accionSoloPdf: () -> Unit) -> Unit)? = null
+    onListoParaImprimir: ((accionImprimirDirecto: suspend () -> Boolean, accionSoloPdf: () -> Unit) -> Unit)? = null
 ): Boolean {
     return try {
         val formatter = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
@@ -313,7 +313,7 @@ suspend fun aceptarSolicitudYGenerarRecibo(
             )
 
             if (reciboFile != null && reciboFile.exists()) {
-                val accionImprimirDirecto: () -> Unit = {
+                val accionImprimirDirecto: suspend () -> Boolean = {
                     ReciboHelper.imprimirReciboPrestamoDirecto(
                         context = context,
                         cliente = cliente.nombre,
@@ -426,7 +426,7 @@ fun SolicitudesAdminScreen(navController: NavController) {
 
     // Diálogo "Imprimir directo o solo PDF"
     var mostrarDialogoImprimir by remember { mutableStateOf(false) }
-    var accionImprimirDirectoPendiente by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var accionImprimirDirectoPendiente by remember { mutableStateOf<(suspend () -> Boolean)?>(null) }
     var accionSoloPdfPendiente by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     fun cargarSolicitudes() {
@@ -615,7 +615,7 @@ fun SolicitudesAdminScreen(navController: NavController) {
             ImprimirOpcionesDialog(
                 onImprimirDirecto = {
                     mostrarDialogoImprimir = false
-                    scope.launch { accionImprimirDirectoPendiente?.invoke() }
+                    accionImprimirDirectoPendiente?.invoke() ?: false
                 },
                 onSoloPdf = {
                     mostrarDialogoImprimir = false
