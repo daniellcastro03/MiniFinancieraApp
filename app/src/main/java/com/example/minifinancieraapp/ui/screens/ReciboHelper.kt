@@ -2241,7 +2241,13 @@ object ReciboHelper {
             }
 
             val pageWidth = 189
-            val pageHeight = 756
+            // El contenido real (con mora, desglose y las 2 fechas nuevas)
+            // termina alrededor de los ~530pt — con 756pt (10.5") quedaban
+            // ~3" de papel en blanco impreso de más al final de cada recibo.
+            // Se recorta 2" (144pt) exactas, dejando ~1.4" de margen extra
+            // por si algún campo viene más largo de lo normal (nombres/lugar
+            // largos), sin arriesgarse a cortar contenido.
+            val pageHeight = 612
             val margin = 15f
             val contentWidth = pageWidth - (margin * 2)
 
