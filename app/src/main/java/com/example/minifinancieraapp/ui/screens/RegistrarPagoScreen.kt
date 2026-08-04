@@ -360,6 +360,13 @@ fun RegistrarPagoScreen(
     var accionImprimirDirecto by remember { mutableStateOf<(suspend () -> Boolean)?>(null) }
     var accionSoloPdf by remember { mutableStateOf<(() -> Unit)?>(null) }
 
+    // "¿Necesita copia?" — el ORIGINAL se imprime solo (su propio trabajo de
+    // impresión); si el usuario confirma, la COPIA se genera e imprime aparte,
+    // como un recibo distinto, para que la impresora los separe/corte entre uno
+    // y otro (con los dos juntos en un mismo PDF salían pegados en el mismo papel).
+    var mostrarDialogoCopia by remember { mutableStateOf(false) }
+    var accionImprimirCopia by remember { mutableStateOf<(suspend () -> Unit)?>(null) }
+
     // Datos del préstamo
     var montoPrestamo         by remember { mutableStateOf(0.0) }
     var interesTotal          by remember { mutableStateOf(0.0) }
@@ -1048,7 +1055,13 @@ fun RegistrarPagoScreen(
                             val prestamoIdParaPDF = if (numeroPrestamoActual.isNotEmpty() && numeroPrestamoActual != "0")
                                 "Préstamo N° $numeroPrestamoActual" else "Préstamo"
 
-                            val pdfFile = ReciboHelper.generarReciboPDF(
+                            // Antes se imprimían ORIGINAL+COPIA como 2 páginas de un
+                            // mismo PDF/trabajo de impresión — salían pegadas en el
+                            // mismo papel, sin separación. Ahora el ORIGINAL se
+                            // imprime solo (su propio trabajo) y la COPIA, si el
+                            // usuario la pide, se genera e imprime aparte, como un
+                            // recibo distinto.
+                            val pdfOriginal = ReciboHelper.generarReciboPDF(
                                 context        = context,
                                 cliente        = nombreCliente,
                                 prestamoId     = prestamoIdParaPDF,
@@ -1065,40 +1078,45 @@ fun RegistrarPagoScreen(
                                 saldoNuevoFijo = nuevoSaldo,
                                 montoAplicadoCuota = montoPagoNormal.coerceAtLeast(0.0),
                                 cuotasTotales  = cuotasTotales,
-                                // Al registrar el pago se imprimen 2 páginas en el
-                                // mismo PDF: ORIGINAL (para el cliente) + COPIA
-                                // (para el cobrador). Los reimprimir posteriores
-                                // (Historial/Mis Pagos) solo generan COPIA.
-                                copias         = listOf("ORIGINAL", "COPIA")
+                                copias         = listOf("ORIGINAL")
                             )
 
-                            val pdfGenerado = pdfFile != null && pdfFile.exists()
+                            val pdfGenerado = pdfOriginal != null && pdfOriginal.exists()
                             if (pdfGenerado) {
-                                archivoPDF = pdfFile
-                                accionImprimirDirecto = {
-                                    ReciboHelper.imprimirRecibo(
-                                        context = context,
-                                        cliente = nombreCliente,
-                                        prestamoId = prestamoIdParaPDF,
-                                        fecha = fechaFormateada,
-                                        montoPagado = abono.toString(),
-                                        saldoAnterior = saldoAnteriorCorrecto,
-                                        proximoPago = proximoPagoValidado,
-                                        cuota = descripcionDetallada,
-                                        cobrador = nombreCobradorActivo,
-                                        lugar = lugar,
-                                        tipoPago = metodoPago,
-                                        mora = montoPagoMora,
+                                archivoPDF = pdfOriginal
+                                accionSoloPdf = {
+                                    try { ReciboHelper.imprimirPDF(context, pdfOriginal!!) } catch (_: Exception) {}
+                                }
+                                // Se imprime el ORIGINAL de una vez (sin diálogo — ya
+                                // no hay elección real desde que se desactivó la
+                                // impresión directa) y luego se pregunta por la copia.
+                                try { ReciboHelper.imprimirPDF(context, pdfOriginal!!) } catch (_: Exception) {}
+
+                                accionImprimirCopia = {
+                                    val pdfCopia = ReciboHelper.generarReciboPDF(
+                                        context        = context,
+                                        cliente        = nombreCliente,
+                                        prestamoId     = prestamoIdParaPDF,
+                                        fecha          = fechaFormateada,
+                                        montoPagado    = abono.toString(),
+                                        saldoAnterior  = saldoAnteriorCorrecto,
+                                        proximoPago    = proximoPagoValidado,
+                                        cuota          = descripcionDetallada,
+                                        cobrador       = nombreCobradorActivo,
+                                        lugar          = lugar,
+                                        firma          = firmaPrestamista,
+                                        tipoPago       = metodoPago,
+                                        mora           = montoPagoMora,
                                         saldoNuevoFijo = nuevoSaldo,
                                         montoAplicadoCuota = montoPagoNormal.coerceAtLeast(0.0),
-                                        cuotasTotales = cuotasTotales
+                                        cuotasTotales  = cuotasTotales,
+                                        copias         = listOf("COPIA")
                                     )
+                                    if (pdfCopia != null) {
+                                        try { ReciboHelper.imprimirPDF(context, pdfCopia) } catch (_: Exception) {}
+                                    }
                                 }
-                                accionSoloPdf = {
-                                    try { ReciboHelper.imprimirPDF(context, pdfFile!!) } catch (_: Exception) {}
-                                    ReciboHelper.compartirReciboPDF(context, pdfFile!!)
-                                }
-                                mostrarDialogoImprimir = true
+                                mostrarDialogoCopia = true
                             }
 
                             val abonoData = mapOf(
@@ -1254,6 +1272,24 @@ fun RegistrarPagoScreen(
                 accionSoloPdf?.invoke()
             },
             onDismiss = { mostrarDialogoImprimir = false }
+        )
+    }
+
+    if (mostrarDialogoCopia) {
+        AlertDialog(
+            onDismissRequest = { mostrarDialogoCopia = false },
+            icon = { Icon(Icons.Default.Print, contentDescription = null) },
+            title = { Text("¿Necesita copia?") },
+            text = { Text("El original ya se envió a imprimir. Si el cliente necesita una copia, se imprime aparte como un recibo distinto.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    mostrarDialogoCopia = false
+                    scope.launch { accionImprimirCopia?.invoke() }
+                }) { Text("Sí, imprimir copia") }
+            },
+            dismissButton = {
+                TextButton(onClick = { mostrarDialogoCopia = false }) { Text("No") }
+            }
         )
     }
 }
