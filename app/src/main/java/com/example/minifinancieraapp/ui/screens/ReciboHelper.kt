@@ -1316,6 +1316,25 @@ object ReciboHelper {
                 return true
             }
 
+            // RawBT (y varias apps de impresión térmica) no se registran como
+            // visor de PDF (ACTION_VIEW) — solo aceptan compartir (ACTION_SEND).
+            // Sin este respaldo, acá se rendía con "no hay visor PDF" aunque
+            // RawBT estuviera instalado y funcionando (el botón "Compartir" sí
+            // lo encontraba, porque usa ACTION_SEND).
+            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/pdf"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val sendActivities = packageManager.queryIntentActivities(sendIntent, 0)
+            if (sendActivities.isNotEmpty()) {
+                val chooser = Intent.createChooser(sendIntent, "Imprimir recibo con")
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(chooser)
+                Log.d("ReciboPDF", "✅ PDF enviado a imprimir vía selector: ${file.name}")
+                return true
+            }
+
             // No hay apps disponibles
             Log.w("ReciboPDF", "⚠️ No hay aplicación para abrir PDFs instalada")
             Toast.makeText(

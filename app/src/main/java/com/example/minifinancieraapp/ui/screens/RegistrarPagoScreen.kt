@@ -119,31 +119,33 @@ private suspend fun resolverNombreCobrador(
     db: FirebaseFirestore,
     uidParam: String
 ): String {
-    fun getCachedName(ctx: Context): String? =
+    // ⚠️ Bug corregido: el cache era una única llave global ("nombreCobrador"),
+    // no por uid, y se consultaba ANTES de intentar resolver el uid actual.
+    // Resultado: apenas un cobrador se cacheaba una vez, TODOS los demás
+    // cobradores del mismo dispositivo salían con ese mismo nombre en el
+    // recibo ("Cobrado por"), sin importar quién estuviera realmente
+    // registrando el pago. Ahora el cache es por uid y solo se usa como
+    // último respaldo (sin internet), nunca antes de resolver el uid real.
+    fun getCachedName(ctx: Context, uid: String): String? =
         ctx.getSharedPreferences("recibo_cache", Context.MODE_PRIVATE)
-            .getString("nombreCobrador", null)
+            .getString("nombreCobrador_$uid", null)
 
-    fun setCachedName(ctx: Context, value: String) =
+    fun setCachedName(ctx: Context, uid: String, value: String) =
         ctx.getSharedPreferences("recibo_cache", Context.MODE_PRIVATE)
-            .edit().putString("nombreCobrador", value).apply()
+            .edit().putString("nombreCobrador_$uid", value).apply()
 
     if (uidParam.contains(" ") && uidParam.length < 40 &&
         !uidParam.equals("COBRADOR", ignoreCase = true) &&
         !uidParam.equals("Sin asignar", ignoreCase = true)
     ) {
-        val nice = uidParam.trim()
-        setCachedName(context, nice)
-        return nice
+        return uidParam.trim()
     }
-
-    val cached = getCachedName(context)
-    if (!cached.isNullOrBlank()) return cached.trim()
 
     try {
         val snap = db.collection("usuarios").document(uidParam).get().await()
         if (snap.exists()) {
             val nombre = snap.getString("nombre")?.trim()
-            if (!nombre.isNullOrBlank()) { setCachedName(context, nombre); return nombre }
+            if (!nombre.isNullOrBlank()) { setCachedName(context, uidParam, nombre); return nombre }
         }
     } catch (_: Exception) {}
 
@@ -152,10 +154,13 @@ private suspend fun resolverNombreCobrador(
             val q = db.collection("usuarios").whereEqualTo(campo, uidParam).limit(1).get().await()
             if (!q.isEmpty) {
                 val nombre = q.documents.first().getString("nombre")?.trim()
-                if (!nombre.isNullOrBlank()) { setCachedName(context, nombre); return nombre }
+                if (!nombre.isNullOrBlank()) { setCachedName(context, uidParam, nombre); return nombre }
             }
         } catch (_: Exception) {}
     }
+
+    val cached = getCachedName(context, uidParam)
+    if (!cached.isNullOrBlank()) return cached.trim()
 
     return try {
         com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName?.trim()
@@ -360,10 +365,14 @@ fun RegistrarPagoScreen(
     var accionImprimirDirecto by remember { mutableStateOf<(suspend () -> Boolean)?>(null) }
     var accionSoloPdf by remember { mutableStateOf<(() -> Unit)?>(null) }
 
-    // "¿Necesita copia?" — el ORIGINAL se imprime solo (su propio trabajo de
-    // impresión); si el usuario confirma, la COPIA se genera e imprime aparte,
-    // como un recibo distinto, para que la impresora los separe/corte entre uno
-    // y otro (con los dos juntos en un mismo PDF salían pegados en el mismo papel).
+    // Flujo de impresión al registrar: 1) "¿Imprimir o solo PDF?" (gatillado por
+    // un toque real del usuario — si se dispara automático apenas se registra el
+    // pago, choca con el intent externo de RawBT y ninguno de los dos diálogos
+    // termina funcionando bien), 2) se abre RawBT/el visor para el ORIGINAL,
+    // 3) "¿Necesita copia?", 4) si dice que sí, se abre RawBT de nuevo para la COPIA.
+    var mostrarDialogoImprimirOriginal by remember { mutableStateOf(false) }
+    var accionImprimirOriginal by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var accionCompartirOriginal by remember { mutableStateOf<(() -> Unit)?>(null) }
     var mostrarDialogoCopia by remember { mutableStateOf(false) }
     var accionImprimirCopia by remember { mutableStateOf<(suspend () -> Unit)?>(null) }
 
@@ -1087,10 +1096,23 @@ fun RegistrarPagoScreen(
                                 accionSoloPdf = {
                                     try { ReciboHelper.imprimirPDF(context, pdfOriginal!!) } catch (_: Exception) {}
                                 }
-                                // Se imprime el ORIGINAL de una vez (sin diálogo — ya
-                                // no hay elección real desde que se desactivó la
-                                // impresión directa) y luego se pregunta por la copia.
-                                try { ReciboHelper.imprimirPDF(context, pdfOriginal!!) } catch (_: Exception) {}
+                                // No disparar el intent de RawBT automático acá: si se
+                                // abre solo, apenas termina de registrarse el pago,
+                                // choca con el diálogo de "¿Necesita copia?" (los dos
+                                // querían aparecer casi al mismo tiempo y terminaba sin
+                                // imprimir nada). En cambio, se guarda la acción y se
+                                // muestra un diálogo — recién cuando el usuario lo toca
+                                // se dispara RawBT, y de ahí en más todo queda
+                                // encadenado a toques reales del usuario.
+                                accionImprimirOriginal = {
+                                    try { ReciboHelper.imprimirPDF(context, pdfOriginal!!) } catch (_: Exception) {}
+                                    mostrarDialogoCopia = true
+                                }
+                                accionCompartirOriginal = {
+                                    try { ReciboHelper.compartirReciboPDF(context, pdfOriginal!!) } catch (_: Exception) {}
+                                    mostrarDialogoCopia = true
+                                }
+                                mostrarDialogoImprimirOriginal = true
 
                                 accionImprimirCopia = {
                                     val pdfCopia = ReciboHelper.generarReciboPDF(
@@ -1116,7 +1138,6 @@ fun RegistrarPagoScreen(
                                         try { ReciboHelper.imprimirPDF(context, pdfCopia) } catch (_: Exception) {}
                                     }
                                 }
-                                mostrarDialogoCopia = true
                             }
 
                             val abonoData = mapOf(
@@ -1272,6 +1293,27 @@ fun RegistrarPagoScreen(
                 accionSoloPdf?.invoke()
             },
             onDismiss = { mostrarDialogoImprimir = false }
+        )
+    }
+
+    if (mostrarDialogoImprimirOriginal) {
+        AlertDialog(
+            onDismissRequest = { mostrarDialogoImprimirOriginal = false },
+            icon = { Icon(Icons.Default.Print, contentDescription = null) },
+            title = { Text("Recibo generado") },
+            text = { Text("¿Imprimir el original ahora o solo abrir/compartir el PDF?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    mostrarDialogoImprimirOriginal = false
+                    accionImprimirOriginal?.invoke()
+                }) { Text("Imprimir") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    mostrarDialogoImprimirOriginal = false
+                    accionCompartirOriginal?.invoke()
+                }) { Text("Solo PDF") }
+            }
         )
     }
 
