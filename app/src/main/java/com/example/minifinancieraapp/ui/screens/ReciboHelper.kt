@@ -2260,10 +2260,13 @@ object ReciboHelper {
 
             canvas.drawColor(Color.WHITE)
 
+            // Letra un toque más chica que antes (además del interlineado ya
+            // apretado) para que cada línea tenga aire real y no se pegue con
+            // la siguiente — sin bajar de un tamaño que siga legible impreso.
             val paintHeader = Paint().apply {
                 color = Color.BLACK
                 textAlign = Paint.Align.CENTER
-                textSize = 14f
+                textSize = 13f
                 typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
                 isAntiAlias = true
             }
@@ -2271,7 +2274,7 @@ object ReciboHelper {
             val paintSmall = Paint().apply {
                 color = Color.BLACK
                 textAlign = Paint.Align.CENTER
-                textSize = 9f
+                textSize = 8f
                 typeface = Typeface.MONOSPACE
                 isAntiAlias = true
             }
@@ -2279,7 +2282,7 @@ object ReciboHelper {
             val paintLabel = Paint().apply {
                 color = Color.BLACK
                 textAlign = Paint.Align.LEFT
-                textSize = 8f
+                textSize = 7f
                 typeface = Typeface.MONOSPACE
                 isAntiAlias = true
             }
@@ -2287,7 +2290,7 @@ object ReciboHelper {
             val paintValue = Paint().apply {
                 color = Color.BLACK
                 textAlign = Paint.Align.RIGHT
-                textSize = 8f
+                textSize = 7f
                 typeface = Typeface.MONOSPACE
                 isAntiAlias = true
             }
@@ -2295,7 +2298,7 @@ object ReciboHelper {
             val paintAmount = Paint().apply {
                 color = Color.BLACK
                 textAlign = Paint.Align.CENTER
-                textSize = 16f
+                textSize = 14f
                 typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
                 isAntiAlias = true
             }
@@ -2346,7 +2349,7 @@ object ReciboHelper {
             canvas.drawText("[ $etiquetaCopia ]", pageWidth / 2f, y, Paint().apply {
                 color = Color.BLACK
                 textAlign = Paint.Align.CENTER
-                textSize = 8f
+                textSize = 7f
                 typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
                 isAntiAlias = true
             })
@@ -2483,16 +2486,16 @@ object ReciboHelper {
             // Saldo nuevo
             paintLabel.textAlign = Paint.Align.LEFT
             paintLabel.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-            paintLabel.textSize = 9f
+            paintLabel.textSize = 8f
             canvas.drawText("Saldo pendiente:", margin, y, paintLabel)
             paintLabel.typeface = Typeface.MONOSPACE
-            paintLabel.textSize = 8f
+            paintLabel.textSize = 7f
 
             paintAmount.textAlign = Paint.Align.RIGHT
-            paintAmount.textSize = 14f
+            paintAmount.textSize = 12f
             canvas.drawText(fmt(nuevoSaldo), pageWidth - margin, y, paintAmount)
-            paintAmount.textSize = 16f
-            y += 17f
+            paintAmount.textSize = 14f
+            y += 15f
 
             // Próximo pago
             if (proximoPago.isNotBlank() && !proximoPago.equals("saldado", ignoreCase = true)) {
@@ -2516,7 +2519,7 @@ object ReciboHelper {
                 canvas.drawText(it, pageWidth / 2f, y, paintSmall)
                 y += 11f
             } ?: run { y += 8f }
-            paintSmall.textSize = 9f
+            paintSmall.textSize = 8f
 
             // Línea
             canvas.drawLine(margin, y, pageWidth - margin, y, paintLine)
