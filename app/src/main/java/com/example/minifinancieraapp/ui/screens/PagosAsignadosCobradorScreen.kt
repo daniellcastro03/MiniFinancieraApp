@@ -1064,7 +1064,9 @@ private suspend fun reimprimirReciboCobrador(context: android.content.Context, p
             mora          = d.mora,
             saldoNuevoFijo = d.saldoNuevoFijo,
             montoAplicadoCuota = d.montoAplicadoCuota,
-            cuotasTotales = d.cuotasTotales
+            cuotasTotales = d.cuotasTotales,
+            fechaInicioPrestamo = d.fechaInicioPrestamo,
+            fechaCancelacionProyectada = d.fechaCancelacionProyectada
         )
         if (file != null) {
             // ✅ CORRECCIÓN: compartirReciboPDF muestra WhatsApp, Drive, Adobe, etc.

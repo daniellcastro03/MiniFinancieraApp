@@ -1064,6 +1064,17 @@ fun RegistrarPagoScreen(
                             val prestamoIdParaPDF = if (numeroPrestamoActual.isNotEmpty() && numeroPrestamoActual != "0")
                                 "Préstamo N° $numeroPrestamoActual" else "Préstamo"
 
+                            // Fecha de inicio del préstamo + fecha en que debería
+                            // cancelarse si se paga en el plazo pactado — siempre
+                            // calculadas en vivo, no dependen de campos que se
+                            // puedan corromper.
+                            val fechaFmtCorta = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                            val fechaInicioPrestamoDate = prestamoDoc.getTimestamp("fecha")?.toDate()
+                            val fechaInicioPrestamoStr = fechaInicioPrestamoDate?.let { fechaFmtCorta.format(it) } ?: ""
+                            val fechaCancelacionProyectadaStr = if (fechaInicioPrestamoDate != null && cuotasTotales > 0) {
+                                calcularFechaCuota(fechaInicioPrestamoDate, plazo, cuotasTotales)
+                            } else ""
+
                             // Antes se imprimían ORIGINAL+COPIA como 2 páginas de un
                             // mismo PDF/trabajo de impresión — salían pegadas en el
                             // mismo papel, sin separación. Ahora el ORIGINAL se
@@ -1087,7 +1098,9 @@ fun RegistrarPagoScreen(
                                 saldoNuevoFijo = nuevoSaldo,
                                 montoAplicadoCuota = montoPagoNormal.coerceAtLeast(0.0),
                                 cuotasTotales  = cuotasTotales,
-                                copias         = listOf("ORIGINAL")
+                                copias         = listOf("ORIGINAL"),
+                                fechaInicioPrestamo = fechaInicioPrestamoStr,
+                                fechaCancelacionProyectada = fechaCancelacionProyectadaStr
                             )
 
                             val pdfGenerado = pdfOriginal != null && pdfOriginal.exists()
@@ -1132,7 +1145,9 @@ fun RegistrarPagoScreen(
                                         saldoNuevoFijo = nuevoSaldo,
                                         montoAplicadoCuota = montoPagoNormal.coerceAtLeast(0.0),
                                         cuotasTotales  = cuotasTotales,
-                                        copias         = listOf("COPIA")
+                                        copias         = listOf("COPIA"),
+                                        fechaInicioPrestamo = fechaInicioPrestamoStr,
+                                        fechaCancelacionProyectada = fechaCancelacionProyectadaStr
                                     )
                                     if (pdfCopia != null) {
                                         try { ReciboHelper.imprimirPDF(context, pdfCopia) } catch (_: Exception) {}

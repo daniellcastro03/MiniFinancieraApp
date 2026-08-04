@@ -710,7 +710,9 @@ data class DatosReciboPago(
     val mora: Double,
     val saldoNuevoFijo: Double?,
     val montoAplicadoCuota: Double,
-    val cuotasTotales: Int
+    val cuotasTotales: Int,
+    val fechaInicioPrestamo: String,
+    val fechaCancelacionProyectada: String
 )
 
 /**
@@ -766,7 +768,7 @@ suspend fun obtenerDatosReciboPago(pago: PagoItem): DatosReciboPago {
 
     // 🔥 FIX: Convertir proximoPago de forma segura
     val proximoPagoRaw = prestamoDoc.get("proximoPago")
-    val proximoPago = when (proximoPagoRaw) {
+    val proximoPagoSinValidar = when (proximoPagoRaw) {
         null -> ""
         is String -> proximoPagoRaw
         is Number -> proximoPagoRaw.toString()
@@ -775,6 +777,18 @@ suspend fun obtenerDatosReciboPago(pago: PagoItem): DatosReciboPago {
             dateFormat.format(proximoPagoRaw.toDate())
         }
         else -> proximoPagoRaw.toString()
+    }
+    // Defensa extra: "proximoPago" quedó corrupto una vez con solo el número
+    // de cuota ("5") en vez de una fecha, por un bug al eliminar un pago (ya
+    // corregido). Si lo que hay guardado no tiene forma de fecha, mejor
+    // imprimir vacío que repetir ese error.
+    val proximoPago = proximoPagoSinValidar.trim().let { texto ->
+        when {
+            texto.isEmpty() -> texto
+            texto.equals("saldado", ignoreCase = true) -> texto
+            Regex("""^\d{1,2}/\d{1,2}/\d{2,4}""").containsMatchIn(texto) -> texto
+            else -> ""
+        }
     }
 
     // OJO: nunca poner un default fijo tipo "1" acá — mostraba una cuota
@@ -787,6 +801,18 @@ suspend fun obtenerDatosReciboPago(pago: PagoItem): DatosReciboPago {
     val mora = pago.mora
     val saldoNuevoFijo = pago.saldoRestante
     val cuotasTotales = prestamoDoc.getLong("cuotas")?.toInt() ?: pago.cuotasTotales
+
+    // Fecha de inicio del préstamo + fecha en que debería cancelarse si se
+    // paga cada cuota en la fecha pactada (inicio + cuotas×período) — ambas
+    // siempre calculadas en vivo desde datos estables del préstamo, no
+    // dependen del historial de pagos ni de campos que se puedan corromper.
+    val dateFormatCorto = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+    val fechaInicioDate = prestamoDoc.getTimestamp("fecha")?.toDate()
+    val fechaInicioPrestamo = fechaInicioDate?.let { dateFormatCorto.format(it) } ?: ""
+    val plazoPrestamo = prestamoDoc.getString("plazo") ?: ""
+    val fechaCancelacionProyectada = if (fechaInicioDate != null && cuotasTotales > 0) {
+        calcularFechaCuotaPendiente(fechaInicioDate, plazoPrestamo, cuotasTotales)
+    } else ""
 
     return DatosReciboPago(
         cliente = cliente,
@@ -803,7 +829,9 @@ suspend fun obtenerDatosReciboPago(pago: PagoItem): DatosReciboPago {
         mora = mora,
         saldoNuevoFijo = saldoNuevoFijo,
         montoAplicadoCuota = pago.monto,
-        cuotasTotales = cuotasTotales
+        cuotasTotales = cuotasTotales,
+        fechaInicioPrestamo = fechaInicioPrestamo,
+        fechaCancelacionProyectada = fechaCancelacionProyectada
     )
 }
 
@@ -854,7 +882,9 @@ private suspend fun reimprimirRecibo(context: Context, pago: PagoItem) {
             mora = d.mora,
             saldoNuevoFijo = d.saldoNuevoFijo,
             montoAplicadoCuota = d.montoAplicadoCuota,
-            cuotasTotales = d.cuotasTotales
+            cuotasTotales = d.cuotasTotales,
+            fechaInicioPrestamo = d.fechaInicioPrestamo,
+            fechaCancelacionProyectada = d.fechaCancelacionProyectada
         )
 
         if (archivo != null && archivo.exists()) {

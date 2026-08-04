@@ -2210,7 +2210,13 @@ object ReciboHelper {
         // Al registrar un pago se imprimen 2 páginas en el mismo PDF
         // ("ORIGINAL" + "COPIA"); al reimprimir desde Historial/Mis Pagos
         // solo se genera "COPIA" (default).
-        copias: List<String> = listOf("COPIA")
+        copias: List<String> = listOf("COPIA"),
+        // Fecha en que se desembolsó el préstamo y fecha en que debería
+        // quedar cancelado si se paga en el plazo pactado (fecha inicio +
+        // cuotas×período) — opcionales porque no todos los llamadores tienen
+        // a mano los datos del préstamo (solo del pago).
+        fechaInicioPrestamo: String? = null,
+        fechaCancelacionProyectada: String? = null
     ): File? {
         return try {
             Log.d("ReciboPDF", "cliente='$cliente', cobrador='${cobrador ?: "null"}'")
@@ -2360,6 +2366,19 @@ object ReciboHelper {
             prestamoLines.forEach { line ->
                 canvas.drawText(line, pageWidth / 2f, y, paintSmall)
                 y += 11f
+            }
+
+            if (!fechaInicioPrestamo.isNullOrBlank()) {
+                splitText("Inicio: $fechaInicioPrestamo", contentWidth, paintSmall).forEach { line ->
+                    canvas.drawText(line, pageWidth / 2f, y, paintSmall)
+                    y += 11f
+                }
+            }
+            if (!fechaCancelacionProyectada.isNullOrBlank()) {
+                splitText("Cancelación prog.: $fechaCancelacionProyectada", contentWidth, paintSmall).forEach { line ->
+                    canvas.drawText(line, pageWidth / 2f, y, paintSmall)
+                    y += 11f
+                }
             }
 
             canvas.drawText("Doc ${fecha.replace("/", "")}", pageWidth / 2f, y, paintSmall)
