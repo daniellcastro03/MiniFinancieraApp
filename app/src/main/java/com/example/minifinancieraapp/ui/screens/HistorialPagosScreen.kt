@@ -632,7 +632,18 @@ private suspend fun eliminarPagoCorregido(
                 moraPendienteSinEste > 0.01 -> "mora"
                 else -> "activo"
             }
-            val proximoPagoStr = if (nuevoSaldo > 0.01) proximaCuota.toString() else "saldado"
+            // ⚠️ Bug corregido: acá se guardaba el NÚMERO de cuota (ej. "5") como si
+            // fuera la fecha de "proximoPago" — en TODO el resto de la app ese campo
+            // es una fecha real ("dd/MM/yyyy"). Como quedaba un valor no-fecha, las
+            // pantallas que muestran "Próxima cuota" no podían parsearlo y caían a
+            // algún cálculo de respaldo (por eso se veía corrida un día tras borrar
+            // un pago). Ahora se calcula la fecha real igual que en el resto del
+            // sistema, a partir de la fecha de inicio del préstamo + la cuota.
+            val fechaInicioPrestamo = prestamoSnapshot.getTimestamp("fecha")?.toDate() ?: Date()
+            val plazoPrestamo = prestamoSnapshot.getString("plazo") ?: "semanal"
+            val proximoPagoStr = if (nuevoSaldo > 0.01)
+                calcularFechaCuotaPendiente(fechaInicioPrestamo, plazoPrestamo, proximaCuota)
+            else "saldado"
 
             Log.d("EliminarPago", """
                 📝 Actualizando préstamo:
