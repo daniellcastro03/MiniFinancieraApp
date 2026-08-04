@@ -200,7 +200,11 @@ suspend fun aceptarSolicitudYGenerarRecibo(
             "interesTotal" to interesCalculado,
             "usarInteresMensual" to usarInteresMensual,
             "interesTotalFijo" to if (!usarInteresMensual) interesManual else 0.0,
-            "mora" to mora,
+            // ✅ FIX: igual que en CrearPrestamoScreen — "mora" es saldo YA
+            // adeudado (lo cobra la cascada de pagos), no la tarifa "Mora
+            // diaria" de la solicitud. Un préstamo recién aprobado no puede
+            // deber mora todavía; arranca en 0 siempre.
+            "mora" to 0.0,
             "totalPagar" to totalAPagar,
             "cuota" to cuotaEstimada,
             "cuotas" to cuotas,

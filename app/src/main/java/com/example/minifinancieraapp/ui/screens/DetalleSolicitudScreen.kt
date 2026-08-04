@@ -245,7 +245,10 @@ suspend fun aceptarSolicitudYGenerarRecibo(
             "cuota" to cuota,
             "plazo" to solicitud.plazo,
 
-            "mora" to solicitud.mora,
+            // ✅ FIX: "mora" es saldo YA adeudado (lo cobra la cascada de
+            // pagos), no la tarifa "Mora diaria" de la solicitud. Un
+            // préstamo recién aprobado no puede deber mora todavía.
+            "mora" to 0.0,
             "garantia" to solicitud.garantia,
             "observaciones" to solicitud.observaciones,
             "firma" to (solicitud.firma ?: ""),

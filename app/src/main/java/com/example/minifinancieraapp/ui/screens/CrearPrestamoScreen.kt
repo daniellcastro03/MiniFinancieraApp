@@ -707,7 +707,16 @@ fun CrearPrestamoScreen(navController: NavController, clienteId: String) {
                                 "interesTotal"     to interesCalculado,
                                 "usarInteresMensual" to usarInteresMensual,
                                 "interesTotalFijo" to if (!usarInteresMensual) interesTotalDouble else 0.0,
-                                "mora"             to moraDouble,
+                                // ✅ FIX: "mora" es el saldo de mora YA ACUMULADO/adeudado
+                                // (lo que cobra el flujo de pagos y lo que descuenta la
+                                // cascada del primer abono) — NO la tarifa "Mora diaria
+                                // por retraso" que se llena en este formulario. Un préstamo
+                                // recién creado nunca puede tener mora adeudada todavía
+                                // (el cliente ni siquiera tuvo oportunidad de atrasarse), así
+                                // que siempre arranca en 0. Antes se guardaba moraDouble acá
+                                // y la primera cuota del préstamo nacía ya "corta" por ese
+                                // monto, corriendo la fecha de próximo pago para siempre.
+                                "mora"             to 0.0,
                                 "totalPagar"       to totalAPagar,
                                 "cuota"            to cuotaEstimada,
                                 "cuotas"           to cuotasInt,
