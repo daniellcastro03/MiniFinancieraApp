@@ -2326,18 +2326,21 @@ object ReciboHelper {
                 return lines.ifEmpty { listOf(text) }
             }
 
-            val lineSpacing = 12f
+            // Interlineado apretado a propósito (antes 12f) para compensar
+            // los 2" que se le quitaron a la página — el tamaño de letra NO
+            // se tocó (se mantiene legible), solo el espacio ENTRE líneas.
+            val lineSpacing = 9f
             var y = 20f
 
-            y += 10f
+            y += 5f
 
             // Encabezado
             canvas.drawText("CAPITAL", pageWidth / 2f, y, paintHeader)
-            y += 16f
+            y += 14f
             canvas.drawText("EXPRESS", pageWidth / 2f, y, paintHeader)
-            y += 14f
+            y += 13f
             canvas.drawText("FINANCIERA", pageWidth / 2f, y, paintSmall)
-            y += 14f
+            y += 11f
 
             // ORIGINAL / COPIA
             canvas.drawText("[ $etiquetaCopia ]", pageWidth / 2f, y, Paint().apply {
@@ -2347,20 +2350,20 @@ object ReciboHelper {
                 typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
                 isAntiAlias = true
             })
-            y += 14f
+            y += 10f
 
             // Línea
             canvas.drawLine(margin, y, pageWidth - margin, y, paintLine)
-            y += 14f
+            y += 10f
 
             // Lugar
             paintSmall.textAlign = Paint.Align.CENTER
             val lugarLines = splitText(lugar, contentWidth, paintSmall)
             lugarLines.forEach { line ->
                 canvas.drawText(line, pageWidth / 2f, y, paintSmall)
-                y += 11f
+                y += 10f
             }
-            y += 4f
+            y += 2f
 
             // Información del préstamo — algunos llamadores ya mandan
             // "Préstamo N° X" armado, otros solo el ID crudo: no anteponer
@@ -2371,39 +2374,39 @@ object ReciboHelper {
             val prestamoLines = splitText(prestamoTexto, contentWidth, paintSmall)
             prestamoLines.forEach { line ->
                 canvas.drawText(line, pageWidth / 2f, y, paintSmall)
-                y += 11f
+                y += 10f
             }
 
             if (!fechaInicioPrestamo.isNullOrBlank()) {
                 splitText("Inicio: $fechaInicioPrestamo", contentWidth, paintSmall).forEach { line ->
                     canvas.drawText(line, pageWidth / 2f, y, paintSmall)
-                    y += 11f
+                    y += 10f
                 }
             }
             if (!fechaCancelacionProyectada.isNullOrBlank()) {
                 splitText("Cancelación prog.: $fechaCancelacionProyectada", contentWidth, paintSmall).forEach { line ->
                     canvas.drawText(line, pageWidth / 2f, y, paintSmall)
-                    y += 11f
+                    y += 10f
                 }
             }
 
             canvas.drawText("Doc ${fecha.replace("/", "")}", pageWidth / 2f, y, paintSmall)
-            y += 14f
+            y += 11f
 
             // Cliente — siempre en mayúscula en el recibo, venga como venga
             val clienteLines = splitText("Sr(a) ${cliente.uppercase()}", contentWidth, paintSmall)
             paintSmall.textAlign = Paint.Align.CENTER
             clienteLines.forEach { line ->
                 canvas.drawText(line, pageWidth / 2f, y, paintSmall)
-                y += 11f
+                y += 10f
             }
-            y += 8f
+            y += 4f
 
             // Abono (cuota + mora, lo que efectivamente dio el cliente)
             canvas.drawText("Abono", pageWidth / 2f, y, paintSmall)
-            y += 14f
+            y += 11f
             canvas.drawText(fmt(pagoIngresado), pageWidth / 2f, y, paintAmount)
-            y += 20f
+            y += 17f
 
             // Cuotas completadas (centrado, sin truncar)
             // Nunca inventar "de N" si no se conoce la cuota real (cuota en
@@ -2415,13 +2418,13 @@ object ReciboHelper {
             val cuotasLines = splitText("$cuotasPagadas completas", contentWidth, paintSmall)
             cuotasLines.forEach { line ->
                 canvas.drawText(line, pageWidth / 2f, y, paintSmall)
-                y += 11f
+                y += 10f
             }
-            y += 8f
+            y += 4f
 
             // Línea
             canvas.drawLine(margin, y, pageWidth - margin, y, paintLine)
-            y += 14f
+            y += 10f
 
             // Detalles en formato compacto
             fun drawCompactLine(label: String, value: String) {
@@ -2461,7 +2464,7 @@ object ReciboHelper {
                 drawCompactLine("Aplicado a mora", fmt(mora))
 
                 if (mora > 0.0) {
-                    y += 4f
+                    y += 3f
                     paintLabel.textAlign = Paint.Align.LEFT
                     val explicacion = "Se tomaron ${fmt(montoAplicadoCuota)} para la cuota y " +
                         "${fmt(mora)} de mora."
@@ -2473,9 +2476,9 @@ object ReciboHelper {
                 }
             }
 
-            y += 8f
+            y += 5f
             canvas.drawLine(margin, y, pageWidth - margin, y, paintLine)
-            y += 14f
+            y += 11f
 
             // Saldo nuevo
             paintLabel.textAlign = Paint.Align.LEFT
@@ -2489,15 +2492,15 @@ object ReciboHelper {
             paintAmount.textSize = 14f
             canvas.drawText(fmt(nuevoSaldo), pageWidth - margin, y, paintAmount)
             paintAmount.textSize = 16f
-            y += 20f
+            y += 17f
 
             // Próximo pago
             if (proximoPago.isNotBlank() && !proximoPago.equals("saldado", ignoreCase = true)) {
                 paintSmall.textAlign = Paint.Align.CENTER
                 canvas.drawText("Próxima fecha de pago:", pageWidth / 2f, y, paintSmall)
-                y += 11f
+                y += 10f
                 canvas.drawText(proximoPago, pageWidth / 2f, y, paintSmall)
-                y += 14f
+                y += 11f
             }
 
             // Cobrado por (quién recibió el pago)
@@ -2506,18 +2509,18 @@ object ReciboHelper {
             val contactoLines = splitText("Cobrado por:", contentWidth, paintSmall)
             contactoLines.forEach { line ->
                 canvas.drawText(line, pageWidth / 2f, y, paintSmall)
-                y += 10f
+                y += 8f
             }
 
             cobrador?.let {
                 canvas.drawText(it, pageWidth / 2f, y, paintSmall)
-                y += 14f
-            } ?: run { y += 10f }
+                y += 11f
+            } ?: run { y += 8f }
             paintSmall.textSize = 9f
 
             // Línea
             canvas.drawLine(margin, y, pageWidth - margin, y, paintLine)
-            y += 14f
+            y += 11f
 
             // Fecha y hora
             val timestamp = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
@@ -2525,9 +2528,9 @@ object ReciboHelper {
             paintSmall.textAlign = Paint.Align.CENTER
             paintSmall.textSize = 7f
             canvas.drawText(timestamp, pageWidth / 2f, y, paintSmall)
-            y += 10f
+            y += 8f
             canvas.drawText(timeStamp, pageWidth / 2f, y, paintSmall)
-            y += 12f
+            y += 9f
 
             // Mensaje final
             paintSmall.textSize = 8f
@@ -2535,7 +2538,7 @@ object ReciboHelper {
             val mensajeLines = splitText("CONSERVE ESTE RECIBO", contentWidth, paintSmall)
             mensajeLines.forEach { line ->
                 canvas.drawText(line, pageWidth / 2f, y, paintSmall)
-                y += 10f
+                y += 8f
             }
 
             // Guardar PDF
