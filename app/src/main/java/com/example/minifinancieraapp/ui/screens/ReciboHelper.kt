@@ -2335,7 +2335,12 @@ object ReciboHelper {
             val lineSpacing = 9f
             var y = 20f
 
-            y += 5f
+            // Margen superior: con solo 5f "CAPITAL" quedaba pegado al borde
+            // de arriba y la impresora lo cortaba (se veía solo la mitad de
+            // abajo de las letras). Este margen no afecta el largo total del
+            // recibo de forma perceptible (son ~10pt de nada, ni una décima
+            // de pulgada), así que no toca el ajuste de 2" ya logrado.
+            y += 16f
 
             // Encabezado
             canvas.drawText("CAPITAL", pageWidth / 2f, y, paintHeader)
@@ -2411,14 +2416,17 @@ object ReciboHelper {
             canvas.drawText(fmt(pagoIngresado), pageWidth / 2f, y, paintAmount)
             y += 17f
 
-            // Cuotas completadas (centrado, sin truncar)
+            // Cuotas cubiertas por este pago (centrado, sin truncar)
             // Nunca inventar "de N" si no se conoce la cuota real (cuota en
             // blanco) — mostrar un número de cuota incorrecto es peor que no
-            // mostrar ninguno.
+            // mostrar ninguno. Tampoco agregar "completas" a ciegas: si la
+            // última cuota del rango quedó parcial, `cuota` ya lo dice
+            // ("... (última parcial)") — decir "completas" encima de eso
+            // sería directamente falso.
             val cuotaMostrar = if (cuota.isNotBlank() && cuotasTotales != null && cuotasTotales > 0) "$cuota de $cuotasTotales" else cuota
             val cuotasPagadas = cuota.split(" de ").firstOrNull() ?: cuota
             paintSmall.textAlign = Paint.Align.CENTER
-            val cuotasLines = splitText("$cuotasPagadas completas", contentWidth, paintSmall)
+            val cuotasLines = splitText(cuotasPagadas, contentWidth, paintSmall)
             cuotasLines.forEach { line ->
                 canvas.drawText(line, pageWidth / 2f, y, paintSmall)
                 y += 10f

@@ -1049,6 +1049,13 @@ fun RegistrarPagoScreen(
                                     else -> {
                                         val nums = cuotasNormales.map { it.numeroCuota }
                                         append("Cuotas #${nums.first()} a #${nums.last()}")
+                                        // La última del rango puede quedar incompleta (ej. si un
+                                        // mora viejo corrió el calce en 0.50 y nunca se completa
+                                        // "limpio") — antes se imprimía "completas" sin importar
+                                        // esto, lo cual era falso y hacía parecer un error la
+                                        // próxima fecha de pago (que en realidad es correcta:
+                                        // esa cuota sigue técnicamente abierta).
+                                        if (cuotasNormales.last().completada.not()) append(" (última parcial)")
                                     }
                                 }
                             }
