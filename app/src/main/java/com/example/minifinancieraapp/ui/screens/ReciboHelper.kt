@@ -2335,12 +2335,12 @@ object ReciboHelper {
             val lineSpacing = 9f
             var y = 20f
 
-            // Margen superior: con solo 5f "CAPITAL" quedaba pegado al borde
-            // de arriba y la impresora lo cortaba (se veía solo la mitad de
-            // abajo de las letras). Este margen no afecta el largo total del
-            // recibo de forma perceptible (son ~10pt de nada, ni una décima
-            // de pulgada), así que no toca el ajuste de 2" ya logrado.
-            y += 16f
+            // Margen superior: 16f todavía no alcanzaba, "CAPITAL" seguía
+            // saliendo cortado/recortado del todo en la impresora real. Se
+            // sube bastante más (32f) para que sobre margen de sobra — el
+            // usuario confirmó que prefiere que el recibo se alargue un
+            // poquito antes que arriesgarse a que se corte texto.
+            y += 32f
 
             // Encabezado
             canvas.drawText("CAPITAL", pageWidth / 2f, y, paintHeader)
@@ -2411,8 +2411,11 @@ object ReciboHelper {
             y += 4f
 
             // Abono (cuota + mora, lo que efectivamente dio el cliente)
+            // "Abono" quedaba pegado al monto grande de abajo (11f no
+            // alcanza para separar un texto chico de un número en negrita
+            // más grande) — se despega a 17f.
             canvas.drawText("Abono", pageWidth / 2f, y, paintSmall)
-            y += 11f
+            y += 17f
             canvas.drawText(fmt(pagoIngresado), pageWidth / 2f, y, paintAmount)
             y += 17f
 
